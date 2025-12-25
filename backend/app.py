@@ -475,7 +475,8 @@ if __name__ == '__main__':
     print("\n" + "="*50)
     print("🚀 Resume Analyzer Backend Starting...")
     print("="*50)
-    print(f"📍 Server: http://localhost:5001")
+    port = int(os.environ.get('PORT', 5002))
+    print(f"📍 Server: http://localhost:{port}")
     print(f"🔑 API Key: {'✅ Configured' if api_key else '❌ NOT FOUND'}")
     print(f"🤖 Gemini Client: {'✅ Initialized' if client else '❌ NOT INITIALIZED'}")
     print(f"📁 Upload folder: {os.path.abspath(UPLOAD_FOLDER)}")
@@ -486,4 +487,6 @@ if __name__ == '__main__':
         print("Please create a .env file with: GEMINI_API_KEY=your_key_here\n")
         print("Get your API key from: https://makersuite.google.com/app/apikey")
     
-    app.run(debug=True, port=5002)
+    # Use PORT environment variable (Render provides $PORT)
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
