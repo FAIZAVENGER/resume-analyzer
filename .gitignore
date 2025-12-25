@@ -1,0 +1,21 @@
+# Root .gitignore for resume-analyzer
+
+# Ignore backend environment file
+backend/.env
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+env/
+
+# Node
+node_modules/
+dist/
+build/
+
+# OS
+.DS_Store
+
+# Env files
+.env
