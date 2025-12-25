@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import axios from 'axios';
 import { 
   Upload, FileText, Briefcase, CheckCircle, XCircle, 
@@ -16,6 +16,9 @@ function App() {
   const [analysis, setAnalysis] = useState(null);
   const [error, setError] = useState('');
   const [dragActive, setDragActive] = useState(false);
+
+  // Use production backend URL
+  const API_BASE_URL = 'https://resume-analyzer-94mo.onrender.com';
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -71,13 +74,15 @@ function App() {
     formData.append('jobDescription', jobDescription);
 
     try {
-      const response = await axios.post('http://localhost:5002/analyze', formData, {
+      // CHANGED: Use production backend URL
+      const response = await axios.post(`${API_BASE_URL}/analyze`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       });
       setAnalysis(response.data);
     } catch (err) {
+      console.error('Analysis error:', err);
       setError(err.response?.data?.error || 'An error occurred during analysis');
     } finally {
       setLoading(false);
@@ -86,7 +91,8 @@ function App() {
 
   const handleDownload = () => {
     if (analysis?.excel_filename) {
-      window.open(`http://localhost:5002/download/${analysis.excel_filename}`, '_blank');
+      // CHANGED: Use production backend URL
+      window.open(`${API_BASE_URL}/download/${analysis.excel_filename}`, '_blank');
     }
   };
 
@@ -147,14 +153,14 @@ function App() {
                 rel="noopener noreferrer"
                 className="leadsoc-logo-link"
               >
-            <img 
-                src={logoImage} 
-                alt="LEADSOC - partnering your success" 
-                className="leadsoc-logo"
-              />
+                <img 
+                  src={logoImage} 
+                  alt="LEADSOC - partnering your success" 
+                  className="leadsoc-logo"
+                />
               </a>
-             </div>
-             </div>
+            </div>
+          </div>
           
           <div className="header-features">
             <div className="feature">
@@ -181,7 +187,6 @@ function App() {
         </div>
       </header>
 
-      {/* Main Content - REST OF THE CODE REMAINS EXACTLY THE SAME */}
       <main className="main-content">
         {!analysis ? (
           <div className="upload-section">
