@@ -26,107 +26,330 @@ else:
     print(f"✅ API Key loaded: {api_key[:10]}...")
     client = genai.Client(api_key=api_key)
 
-UPLOAD_FOLDER = 'uploads'
+# Get absolute path for uploads folder
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+print(f"📁 Upload folder: {UPLOAD_FOLDER}")
 
 @app.route('/')
 def home():
+    """Root route - API landing page"""
     return '''
     <!DOCTYPE html>
 <html>
 <head>
     <title>Resume Analyzer API</title>
     <style>
-        body { font-family: Arial, sans-serif; padding: 40px; text-align: center; }
-        .container { max-width: 800px; margin: 0 auto; }
-        h1 { color: #333; }
-        .status { color: green; font-weight: bold; }
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            text-align: center;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 5px solid #667eea;
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .status-label {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .status-value {
+            color: #27ae60;
+            font-weight: 600;
+        }
+        
+        .endpoints {
+            text-align: left;
+            margin: 30px 0;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            border: 2px solid #e9ecef;
+        }
+        
+        .endpoint {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            transition: transform 0.3s;
+        }
+        
+        .endpoint:hover {
+            transform: translateX(10px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .method {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 0.9rem;
+        }
+        
+        .path {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .description {
+            color: #7f8c8d;
+            margin-top: 5px;
+            font-size: 0.95rem;
+        }
+        
+        .api-status {
+            display: inline-block;
+            padding: 8px 20px;
+            background: #27ae60;
+            color: white;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        
+        .buttons {
+            margin-top: 30px;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 12px 30px;
+            margin: 0 10px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            color: white;
+            text-decoration: none;
+            border-radius: 30px;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(90deg, #11998e, #38ef7d);
+        }
+        
+        .footer {
+            margin-top: 40px;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+        
+        .error {
+            color: #e74c3c;
+            font-weight: 600;
+        }
+        
+        .success {
+            color: #27ae60;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>✅ Resume Analyzer API</h1>
-        <p class="status">Status: Running</p>
-        <p>API Endpoints:</p>
-        <ul>
-            <li>POST /analyze - Analyze a resume</li>
-            <li>GET /health - Health check</li>
-            <li>GET /download/{filename} - Download Excel report</li>
-        </ul>
+        <h1>🤖 Resume Analyzer API</h1>
+        <p class="subtitle">AI-powered resume analysis using Google Gemini</p>
+        
+        <div class="api-status">
+            ✅ API IS RUNNING
+        </div>
+        
+        <div class="status-card">
+            <div class="status-item">
+                <span class="status-label">Service Status:</span>
+                <span class="status-value">Online</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Gemini API:</span>
+                ''' + (f'<span class="success">✅ Configured ({api_key[:10]}...)</span>' if api_key else '<span class="error">❌ Not Configured</span>') + '''
+            </div>
+            <div class="status-item">
+                <span class="status-label">Client:</span>
+                ''' + ('<span class="success">✅ Initialized</span>' if client else '<span class="error">❌ Not Initialized</span>') + '''
+            </div>
+            <div class="status-item">
+                <span class="status-label">Upload Folder:</span>
+                <span class="status-value">''' + UPLOAD_FOLDER + '''</span>
+            </div>
+        </div>
+        
+        <div class="endpoints">
+            <h2>📡 API Endpoints</h2>
+            
+            <div class="endpoint">
+                <span class="method">POST</span>
+                <span class="path">/analyze</span>
+                <p class="description">Upload a resume (PDF/DOCX/TXT) with job description for AI analysis</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/health</span>
+                <p class="description">Check API health status and configuration</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/download/{filename}</span>
+                <p class="description">Download generated Excel analysis reports</p>
+            </div>
+        </div>
+        
+        <div class="buttons">
+            <a href="/health" class="btn">Check Health</a>
+            <a href="/" class="btn btn-secondary">Refresh</a>
+        </div>
+        
+        <div class="footer">
+            <p>Powered by Flask & Google Gemini AI | Deployed on Render</p>
+            <p>Upload folder: ''' + str(os.path.exists(UPLOAD_FOLDER)) + '''</p>
+        </div>
     </div>
 </body>
 </html>
     '''
 
 def extract_text_from_pdf(file_path):
+    """Extract text from PDF file"""
     try:
         reader = PdfReader(file_path)
         text = ""
         for page in reader.pages:
             text += page.extract_text()
-        return text if text.strip() else "Error: PDF appears to be empty"
+        if not text.strip():
+            return "Error: PDF appears to be empty or text could not be extracted"
+        return text
     except Exception as e:
         print(f"PDF Error: {traceback.format_exc()}")
         return f"Error reading PDF: {str(e)}"
 
 def extract_text_from_docx(file_path):
+    """Extract text from DOCX file"""
     try:
         doc = Document(file_path)
         text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
-        return text if text.strip() else "Error: Document appears to be empty"
+        if not text.strip():
+            return "Error: Document appears to be empty"
+        return text
     except Exception as e:
         print(f"DOCX Error: {traceback.format_exc()}")
         return f"Error reading DOCX: {str(e)}"
 
 def extract_text_from_txt(file_path):
+    """Extract text from TXT file"""
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
             text = file.read()
-        return text if text.strip() else "Error: Text file appears to be empty"
+        if not text.strip():
+            return "Error: Text file appears to be empty"
+        return text
     except Exception as e:
         print(f"TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
 def analyze_resume_with_gemini(resume_text, job_description):
+    """Use Gemini AI to analyze resume against job description"""
+    
     if client is None:
+        print("❌ Gemini client not initialized. Check API key.")
         return {
             "candidate_name": "API Error",
             "skills_matched": [],
             "skills_missing": [],
-            "experience_summary": "Gemini API not configured",
-            "education_summary": "Check API key",
+            "experience_summary": "Gemini API not configured properly. Check your API key.",
+            "education_summary": "Please ensure GEMINI_API_KEY is set in .env file",
             "overall_score": 0,
             "recommendation": "Configuration Error",
             "key_strengths": [],
             "areas_for_improvement": []
         }
     
-    prompt = f"""CRITICAL INSTRUCTIONS:
-1. Analyze ONLY the provided resume text
-2. Extract ALL information EXACTLY from the resume
+    prompt = f"""ANALYSIS INSTRUCTIONS:
+1. Read the resume carefully
+2. Extract ALL information ONLY from the provided resume text
 3. DO NOT use any external knowledge or assumptions
-4. If information is missing, say it's missing
+4. If information is missing from resume, acknowledge it's missing
 
-RESUME TO ANALYZE:
+RESUME TEXT TO ANALYZE:
 {resume_text[:8000]}
 
 JOB DESCRIPTION:
 {job_description[:4000]}
 
-EXTRACT THE CANDIDATE NAME: Look for name patterns at the beginning of the resume.
-If no clear name found, use "Candidate"
+IMPORTANT: Extract the candidate name from the resume. If no name is found, use "Unknown Candidate".
 
-Return ONLY this JSON format with data FROM THE RESUME:
+Return ONLY this JSON format with analysis based SOLELY on the provided resume:
 {{
-    "candidate_name": "Extract from resume or 'Candidate'",
-    "skills_matched": ["skill from resume", "another skill from resume"],
-    "skills_missing": ["skill from job not in resume"],
-    "experience_summary": "Summary based ONLY on resume experience section",
-    "education_summary": "Summary based ONLY on resume education section",
-    "overall_score": 75,
-    "recommendation": "Based on match percentage",
-    "key_strengths": ["strength evident in resume"],
-    "areas_for_improvement": ["gap in resume compared to job"]
+    "candidate_name": "Name extracted from resume or 'Unknown Candidate'",
+    "skills_matched": ["list actual skills from resume that match job"],
+    "skills_missing": ["list skills from job not found in resume"],
+    "experience_summary": "1-2 sentence summary of experience from resume",
+    "education_summary": "1-2 sentence summary of education from resume",
+    "overall_score": 0-100 based on match percentage,
+    "recommendation": "Highly Recommended/Recommended/Not Recommended",
+    "key_strengths": ["strengths evident from resume"],
+    "areas_for_improvement": ["areas to improve based on resume gaps"]
 }}"""
 
     try:
@@ -192,19 +415,25 @@ Return ONLY this JSON format with data FROM THE RESUME:
         }
 
 def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
-    """Create Excel report using the ACTUAL analysis data"""
+    """Create a beautiful Excel report with the analysis"""
     
     wb = Workbook()
     ws = wb.active
     ws.title = "Resume Analysis"
     
-    # Styles
+    # Define styles
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=12)
     subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-    border = Border(left=Side(style='thin'), right=Side(style='thin'), 
-                    top=Side(style='thin'), bottom=Side(style='thin'))
+    subheader_font = Font(bold=True, size=11)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
     
+    # Set column widths
     ws.column_dimensions['A'].width = 30
     ws.column_dimensions['B'].width = 60
     
@@ -213,182 +442,193 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     # Title
     ws.merge_cells(f'A{row}:B{row}')
     cell = ws[f'A{row}']
-    cell.value = "AI RESUME ANALYSIS REPORT"
+    cell.value = "RESUME ANALYSIS REPORT"
     cell.font = Font(bold=True, size=16, color="FFFFFF")
     cell.fill = PatternFill(start_color="203864", end_color="203864", fill_type="solid")
     cell.alignment = Alignment(horizontal='center', vertical='center')
     row += 2
     
-    # Candidate Info - USING ACTUAL DATA
+    # Candidate Information
     ws[f'A{row}'] = "Candidate Name"
-    ws[f'A{row}'].font = Font(bold=True)
+    ws[f'A{row}'].font = subheader_font
     ws[f'A{row}'].fill = subheader_fill
-    ws[f'B{row}'] = analysis_data.get('candidate_name', 'Not Specified')
+    ws[f'B{row}'] = analysis_data.get('candidate_name', 'N/A')
     row += 1
     
     ws[f'A{row}'] = "Analysis Date"
-    ws[f'A{row}'].font = Font(bold=True)
+    ws[f'A{row}'].font = subheader_font
     ws[f'A{row}'].fill = subheader_fill
     ws[f'B{row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    row += 1
+    row += 2
     
+    # Overall Score
     ws[f'A{row}'] = "Overall Match Score"
-    ws[f'A{row}'].font = Font(bold=True)
-    ws[f'A{row}'].fill = subheader_fill
-    score = analysis_data.get('overall_score', 0)
-    ws[f'B{row}'] = f"{score}/100"
-    ws[f'B{row}'].font = Font(bold=True, color="FF0000" if score < 60 else "00AA00" if score > 80 else "FF9900")
+    ws[f'A{row}'].font = Font(bold=True, size=12)
+    ws[f'A{row}'].fill = header_fill
+    ws[f'A{row}'].font = Font(bold=True, size=12, color="FFFFFF")
+    ws[f'B{row}'] = f"{analysis_data.get('overall_score', 0)}/100"
+    ws[f'B{row}'].font = Font(bold=True, size=12, color="C00000")
     row += 1
     
     ws[f'A{row}'] = "Recommendation"
-    ws[f'A{row}'].font = Font(bold=True)
+    ws[f'A{row}'].font = subheader_font
     ws[f'A{row}'].fill = subheader_fill
-    ws[f'B{row}'] = analysis_data.get('recommendation', 'Not Available')
+    ws[f'B{row}'] = analysis_data.get('recommendation', 'N/A')
     row += 2
     
-    # Skills Matched - USING ACTUAL DATA
+    # Skills Matched Section
     ws.merge_cells(f'A{row}:B{row}')
-    ws[f'A{row}'] = "✓ SKILLS MATCHED (Found in Resume)"
-    ws[f'A{row}'].font = header_font
-    ws[f'A{row}'].fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
-    ws[f'A{row}'].alignment = Alignment(horizontal='center')
+    cell = ws[f'A{row}']
+    cell.value = "SKILLS MATCHED ✓"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
     row += 1
     
-    skills = analysis_data.get('skills_matched', [])
-    if skills:
-        for i, skill in enumerate(skills, 1):
+    skills_matched = analysis_data.get('skills_matched', [])
+    if skills_matched:
+        for i, skill in enumerate(skills_matched, 1):
             ws[f'A{row}'] = f"{i}."
             ws[f'B{row}'] = skill
+            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
             row += 1
     else:
-        ws[f'A{row}'] = "No specific matched skills identified"
+        ws[f'A{row}'] = "No matched skills found"
         row += 1
     
     row += 1
     
-    # Skills Missing - USING ACTUAL DATA
+    # Skills Missing Section
     ws.merge_cells(f'A{row}:B{row}')
-    ws[f'A{row}'] = "✗ SKILLS MISSING (Job Requirements)"
-    ws[f'A{row}'].font = header_font
-    ws[f'A{row}'].fill = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
-    ws[f'A{row}'].alignment = Alignment(horizontal='center')
+    cell = ws[f'A{row}']
+    cell.value = "SKILLS MISSING ✗"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
     row += 1
     
-    missing = analysis_data.get('skills_missing', [])
-    if missing:
-        for i, skill in enumerate(missing, 1):
+    skills_missing = analysis_data.get('skills_missing', [])
+    if skills_missing:
+        for i, skill in enumerate(skills_missing, 1):
             ws[f'A{row}'] = f"{i}."
             ws[f'B{row}'] = skill
+            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
             row += 1
     else:
-        ws[f'A{row}'] = "All key skills are present in resume"
+        ws[f'A{row}'] = "All required skills are present!"
         row += 1
     
     row += 1
     
-    # Experience Summary - USING ACTUAL DATA
+    # Experience Summary
     ws.merge_cells(f'A{row}:B{row}')
-    ws[f'A{row}'] = "EXPERIENCE SUMMARY"
-    ws[f'A{row}'].font = header_font
-    ws[f'A{row}'].fill = header_fill
-    ws[f'A{row}'].alignment = Alignment(horizontal='center')
+    cell = ws[f'A{row}']
+    cell.value = "EXPERIENCE SUMMARY"
+    cell.font = header_font
+    cell.fill = header_fill
+    cell.alignment = Alignment(horizontal='center')
     row += 1
     
     ws.merge_cells(f'A{row}:B{row}')
-    ws[f'A{row}'] = analysis_data.get('experience_summary', 'No experience information found')
-    ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
+    cell = ws[f'A{row}']
+    cell.value = analysis_data.get('experience_summary', 'N/A')
+    cell.alignment = Alignment(wrap_text=True, vertical='top')
+    ws.row_dimensions[row].height = 60
+    row += 2
+    
+    # Education Summary
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "EDUCATION SUMMARY"
+    cell.font = header_font
+    cell.fill = header_fill
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = analysis_data.get('education_summary', 'N/A')
+    cell.alignment = Alignment(wrap_text=True, vertical='top')
     ws.row_dimensions[row].height = 40
     row += 2
     
-    # Education Summary - USING ACTUAL DATA
+    # Key Strengths
     ws.merge_cells(f'A{row}:B{row}')
-    ws[f'A{row}'] = "EDUCATION SUMMARY"
-    ws[f'A{row}'].font = header_font
-    ws[f'A{row}'].fill = header_fill
-    ws[f'A{row}'].alignment = Alignment(horizontal='center')
+    cell = ws[f'A{row}']
+    cell.value = "KEY STRENGTHS"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
     row += 1
     
-    ws.merge_cells(f'A{row}:B{row}')
-    ws[f'A{row}'] = analysis_data.get('education_summary', 'No education information found')
-    ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[row].height = 40
-    row += 2
-    
-    # Key Strengths - USING ACTUAL DATA
-    ws.merge_cells(f'A{row}:B{row}')
-    ws[f'A{row}'] = "KEY STRENGTHS"
-    ws[f'A{row}'].font = header_font
-    ws[f'A{row}'].fill = PatternFill(start_color="00B050", end_color="00B050", fill_type="solid")
-    ws[f'A{row}'].alignment = Alignment(horizontal='center')
-    row += 1
-    
-    strengths = analysis_data.get('key_strengths', [])
-    if strengths:
-        for strength in strengths:
-            ws[f'A{row}'] = "•"
-            ws[f'B{row}'] = strength
-            row += 1
-    else:
-        ws[f'A{row}'] = "Key strengths analysis not available"
+    for strength in analysis_data.get('key_strengths', []):
+        ws[f'A{row}'] = "•"
+        ws[f'B{row}'] = strength
+        ws[f'B{row}'].alignment = Alignment(wrap_text=True)
         row += 1
     
     row += 1
     
-    # Areas for Improvement - USING ACTUAL DATA
+    # Areas for Improvement
     ws.merge_cells(f'A{row}:B{row}')
-    ws[f'A{row}'] = "AREAS FOR IMPROVEMENT"
-    ws[f'A{row}'].font = header_font
-    ws[f'A{row}'].fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
-    ws[f'A{row}'].alignment = Alignment(horizontal='center')
+    cell = ws[f'A{row}']
+    cell.value = "AREAS FOR IMPROVEMENT"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
     row += 1
     
-    improvements = analysis_data.get('areas_for_improvement', [])
-    if improvements:
-        for area in improvements:
-            ws[f'A{row}'] = "•"
-            ws[f'B{row}'] = area
-            row += 1
-    else:
-        ws[f'A{row}'] = "No specific improvement areas identified"
+    for area in analysis_data.get('areas_for_improvement', []):
+        ws[f'A{row}'] = "•"
+        ws[f'B{row}'] = area
+        ws[f'B{row}'].alignment = Alignment(wrap_text=True)
         row += 1
     
-    # Apply borders
-    for r in ws.iter_rows(min_row=1, max_row=row, min_col=1, max_col=2):
-        for cell in r:
+    # Apply borders to all cells
+    for row_cells in ws.iter_rows(min_row=1, max_row=row, min_col=1, max_col=2):
+        for cell in row_cells:
             cell.border = border
     
-    # Save file
+    # Save the file using ABSOLUTE path
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     wb.save(filepath)
-    print(f"📄 Excel report saved: {filepath}")
+    print(f"📄 Excel report saved to: {filepath}")
     return filepath
 
 @app.route('/analyze', methods=['POST'])
 def analyze_resume():
+    """Main endpoint to analyze resume"""
+    
     try:
         print("\n" + "="*50)
         print("📥 New analysis request received")
         
         if 'resume' not in request.files:
+            print("❌ No resume file in request")
             return jsonify({'error': 'No resume file provided'}), 400
+        
         if 'jobDescription' not in request.form:
+            print("❌ No job description in request")
             return jsonify({'error': 'No job description provided'}), 400
         
         resume_file = request.files['resume']
         job_description = request.form['jobDescription']
         
+        print(f"📄 Resume file: {resume_file.filename}")
+        print(f"📋 Job description length: {len(job_description)} characters")
+        
         if resume_file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        # Save file
+        # Save the uploaded file
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}{file_ext}")
         resume_file.save(file_path)
-        print(f"💾 File saved: {resume_file.filename}")
+        print(f"💾 File saved to: {file_path}")
         
-        # Extract text
-        print(f"📖 Extracting text from {file_ext}...")
+        # Extract text based on file type
+        print(f"📖 Extracting text from {file_ext} file...")
         if file_ext == '.pdf':
             resume_text = extract_text_from_pdf(file_path)
         elif file_ext in ['.docx', '.doc']:
@@ -396,59 +636,103 @@ def analyze_resume():
         elif file_ext == '.txt':
             resume_text = extract_text_from_txt(file_path)
         else:
-            return jsonify({'error': 'Unsupported file format. Use PDF, DOCX, or TXT'}), 400
+            print(f"❌ Unsupported file format: {file_ext}")
+            return jsonify({'error': 'Unsupported file format. Please upload PDF, DOCX, or TXT'}), 400
         
         if resume_text.startswith('Error'):
+            print(f"❌ Text extraction error: {resume_text}")
             return jsonify({'error': resume_text}), 500
         
-        print(f"✅ Extracted {len(resume_text)} characters")
+        print(f"✅ Extracted {len(resume_text)} characters from resume")
         
-        # Check API
-        if not api_key or client is None:
-            return jsonify({'error': 'AI service not configured'}), 500
+        # Check if API key is configured
+        if not api_key:
+            print("❌ API key not configured")
+            return jsonify({'error': 'API key not configured. Please add GEMINI_API_KEY to .env file'}), 500
         
-        # Analyze with AI
-        print("🤖 Analyzing with Gemini AI...")
+        if client is None:
+            print("❌ Gemini client not initialized")
+            return jsonify({'error': 'Gemini AI client not properly initialized'}), 500
+        
+        # Analyze with Gemini AI
+        print("🤖 Starting AI analysis...")
         analysis = analyze_resume_with_gemini(resume_text, job_description)
         
-        # DEBUG: Show what AI returned
+        print(f"✅ Analysis completed. Score: {analysis.get('overall_score', 0)}")
         print(f"🔍 AI Analysis Result:")
         print(f"  Name: {analysis.get('candidate_name')}")
         print(f"  Score: {analysis.get('overall_score')}")
         print(f"  Matched Skills: {len(analysis.get('skills_matched', []))}")
         print(f"  Missing Skills: {len(analysis.get('skills_missing', []))}")
         
-        # Create unique Excel filename
+        # Create Excel report
+        print("📊 Creating Excel report...")
         excel_filename = f"analysis_{timestamp}.xlsx"
         excel_path = create_excel_report(analysis, excel_filename)
+        print(f"✅ Excel report created: {excel_path}")
         
+        # Return analysis with download link
         analysis['excel_filename'] = os.path.basename(excel_path)
-        analysis['timestamp'] = timestamp
         
-        print("✅ Analysis completed successfully")
+        print("✅ Request completed successfully")
         print("="*50 + "\n")
         
         return jsonify(analysis)
         
     except Exception as e:
-        print(f"❌ Error in /analyze: {traceback.format_exc()}")
+        print(f"❌ Unexpected error: {traceback.format_exc()}")
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_report(filename):
-    file_path = os.path.join(UPLOAD_FOLDER, filename)
-    if os.path.exists(file_path):
-        return send_file(file_path, as_attachment=True, download_name=filename)
-    return jsonify({'error': 'File not found'}), 404
+    """Download the Excel report"""
+    try:
+        print(f"📥 Download request for: {filename}")
+        print(f"📁 Upload folder path: {UPLOAD_FOLDER}")
+        
+        # Sanitize filename
+        import re
+        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
+        
+        file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
+        
+        print(f"🔍 Looking for file at: {file_path}")
+        print(f"📁 Upload folder exists: {os.path.exists(UPLOAD_FOLDER)}")
+        
+        if not os.path.exists(UPLOAD_FOLDER):
+            print(f"❌ Upload folder doesn't exist: {UPLOAD_FOLDER}")
+            return jsonify({'error': 'Upload folder not found'}), 500
+            
+        if not os.path.exists(file_path):
+            print(f"❌ File not found: {file_path}")
+            # List available files
+            available_files = os.listdir(UPLOAD_FOLDER)
+            print(f"📂 Available files in {UPLOAD_FOLDER}: {available_files}")
+            return jsonify({'error': f'File not found. Available files: {available_files}'}), 404
+        
+        print(f"✅ File found! Size: {os.path.getsize(file_path)} bytes")
+        
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=safe_filename,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        
+    except Exception as e:
+        print(f"❌ Download error: {traceback.format_exc()}")
+        return jsonify({'error': f'Download failed: {str(e)}'}), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
+    """Health check endpoint"""
     return jsonify({
         'status': 'Backend is running!', 
         'timestamp': datetime.now().isoformat(),
         'api_key_configured': bool(api_key),
         'client_initialized': client is not None,
-        'service': 'Resume Analyzer API'
+        'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
+        'upload_folder_path': UPLOAD_FOLDER
     })
 
 if __name__ == '__main__':
@@ -459,6 +743,14 @@ if __name__ == '__main__':
     print(f"📍 Server: http://localhost:{port}")
     print(f"🔑 API Key: {'✅ Configured' if api_key else '❌ NOT FOUND'}")
     print(f"🤖 Gemini Client: {'✅ Initialized' if client else '❌ NOT INITIALIZED'}")
+    print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print("="*50 + "\n")
     
-    app.run(host='0.0.0.0', port=port, debug=False)
+    if not api_key:
+        print("⚠️  WARNING: GEMINI_API_KEY not found!")
+        print("Please create a .env file with: GEMINI_API_KEY=your_key_here\n")
+        print("Get your API key from: https://makersuite.google.com/app/apikey")
+    
+    # Use PORT environment variable (Render provides $PORT)
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
