@@ -31,6 +31,244 @@ else:
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+@app.route('/')
+def home():
+    """Root route - API landing page"""
+    return '''
+    <!DOCTYPE html>
+<html>
+<head>
+    <title>Resume Analyzer API</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            text-align: center;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 5px solid #667eea;
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .status-label {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .status-value {
+            color: #27ae60;
+            font-weight: 600;
+        }
+        
+        .endpoints {
+            text-align: left;
+            margin: 30px 0;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            border: 2px solid #e9ecef;
+        }
+        
+        .endpoint {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            transition: transform 0.3s;
+        }
+        
+        .endpoint:hover {
+            transform: translateX(10px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .method {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 0.9rem;
+        }
+        
+        .path {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .description {
+            color: #7f8c8d;
+            margin-top: 5px;
+            font-size: 0.95rem;
+        }
+        
+        .api-status {
+            display: inline-block;
+            padding: 8px 20px;
+            background: #27ae60;
+            color: white;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        
+        .buttons {
+            margin-top: 30px;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 12px 30px;
+            margin: 0 10px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            color: white;
+            text-decoration: none;
+            border-radius: 30px;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(90deg, #11998e, #38ef7d);
+        }
+        
+        .footer {
+            margin-top: 40px;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+        
+        .error {
+            color: #e74c3c;
+            font-weight: 600;
+        }
+        
+        .success {
+            color: #27ae60;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Resume Analyzer API</h1>
+        <p class="subtitle">AI-powered resume analysis using Google Gemini</p>
+        
+        <div class="api-status">
+            ✅ API IS RUNNING
+        </div>
+        
+        <div class="status-card">
+            <div class="status-item">
+                <span class="status-label">Service Status:</span>
+                <span class="status-value">Online</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Gemini API:</span>
+                ''' + (f'<span class="success">✅ Configured ({api_key[:10]}...)</span>' if api_key else '<span class="error">❌ Not Configured</span>') + '''
+            </div>
+            <div class="status-item">
+                <span class="status-label">Client:</span>
+                ''' + ('<span class="success">✅ Initialized</span>' if client else '<span class="error">❌ Not Initialized</span>') + '''
+            </div>
+            <div class="status-item">
+                <span class="status-label">Current Time:</span>
+                <span class="status-value">''' + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '''</span>
+            </div>
+        </div>
+        
+        <div class="endpoints">
+            <h2>📡 API Endpoints</h2>
+            
+            <div class="endpoint">
+                <span class="method">POST</span>
+                <span class="path">/analyze</span>
+                <p class="description">Upload a resume (PDF/DOCX/TXT) with job description for AI analysis</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/health</span>
+                <p class="description">Check API health status and configuration</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/download/{filename}</span>
+                <p class="description">Download generated Excel analysis reports</p>
+            </div>
+        </div>
+        
+        <div class="buttons">
+            <a href="/health" class="btn">Check Health</a>
+            <a href="https://resume-analyzer-sib6.onrender.com/health" class="btn btn-secondary">API Health</a>
+        </div>
+        
+        <div class="footer">
+            <p>Powered by Flask & Google Gemini AI | Deployed on Render</p>
+            <p>📧 Upload folder ready: ''' + str(os.path.exists(UPLOAD_FOLDER)) + '''</p>
+        </div>
+    </div>
+</body>
+</html>
+    '''
+
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file"""
     try:
@@ -468,7 +706,9 @@ def health_check():
         'status': 'Backend is running!', 
         'timestamp': datetime.now().isoformat(),
         'api_key_configured': bool(api_key),
-        'client_initialized': client is not None
+        'client_initialized': client is not None,
+        'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
+        'upload_folder_path': os.path.abspath(UPLOAD_FOLDER)
     })
 
 if __name__ == '__main__':
