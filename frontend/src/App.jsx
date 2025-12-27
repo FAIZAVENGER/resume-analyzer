@@ -35,7 +35,7 @@ function App() {
     totalKeys: 0
   });
 
-  // Use your Render backend URL
+  // Use your new Render backend URL
   const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
   
   const keepAliveInterval = useRef(null);
@@ -60,7 +60,7 @@ function App() {
       // First, ping the backend to wake it up
       setLoadingMessage('Initializing service...');
       const pingResponse = await axios.get(`${API_BASE_URL}/ping`, {
-        timeout: 30000 // Increased timeout for cold start
+        timeout: 15000
       }).catch(() => {
         console.log('Initial ping failed - backend might be sleeping');
         return null;
@@ -83,12 +83,12 @@ function App() {
       // Check quota status
       await checkQuotaStatus();
       
-      // Set up keep-alive every 5 minutes
+      // Set up keep-alive every 4 minutes
       keepAliveInterval.current = setInterval(() => {
         axios.get(`${API_BASE_URL}/ping`, { timeout: 5000 })
           .then(() => console.log('Keep-alive ping successful'))
           .catch(() => console.log('Keep-alive ping failed'));
-      }, 5 * 60 * 1000);
+      }, 4 * 60 * 1000);
       
     } catch (err) {
       console.log('Service initialization error:', err.message);
@@ -97,7 +97,7 @@ function App() {
     }
   };
 
-  const checkAIAvailability = async (retries = 3) => {
+  const checkAIAvailability = async (retries = 2) => {
     for (let i = 0; i < retries; i++) {
       try {
         setAiStatus('checking');
@@ -107,21 +107,24 @@ function App() {
           timeout: 15000
         });
         
-        if (response.data.status === 'enhanced_only') {
-          setAiStatus('unavailable');
-          setLoadingMessage('Using enhanced analysis (no AI available)');
+        if (response.data.enhanced_fallback_available) {
           setServiceStatus(prev => ({
             ...prev,
             enhancedFallback: true
           }));
-          return false;
         }
         
-        if (response.data.status === 'ai_available') {
+        if (response.data.available) {
           setAiStatus('available');
           setLoadingMessage('');
           setRetryCount(0);
           return true;
+        } else {
+          if (response.data.status === 'quota_exceeded') {
+            setAiStatus('unavailable');
+            setLoadingMessage('AI quota exceeded. Using enhanced analysis...');
+            return false;
+          }
         }
         
         if (i < retries - 1) {
@@ -132,7 +135,7 @@ function App() {
         console.log(`AI check attempt ${i + 1} failed:`, err.message);
         
         if (err.code === 'ECONNABORTED') {
-          setLoadingMessage('Backend is waking up... This may take up to 60 seconds');
+          setLoadingMessage('Backend is waking up... This may take 30-60 seconds');
         }
         
         if (i < retries - 1) {
@@ -143,7 +146,6 @@ function App() {
     
     setAiStatus('unavailable');
     setRetryCount(prev => prev + 1);
-    setLoadingMessage('Using enhanced analysis');
     return false;
   };
 
@@ -235,10 +237,10 @@ function App() {
       }, 500);
 
       // Update loading message based on service status
-      if (aiStatus === 'available') {
+      if (aiStatus === 'available' && serviceStatus.validKeys > 0) {
         setLoadingMessage('Using AI analysis...');
       } else {
-        setLoadingMessage('Using enhanced text analysis...');
+        setLoadingMessage('Using enhanced analysis...');
       }
       setProgress(20);
 
@@ -250,7 +252,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 120000, // 120 seconds for cold starts
+        timeout: 90000, // 90 seconds
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -286,19 +288,15 @@ function App() {
     } catch (err) {
       if (progressInterval) clearInterval(progressInterval);
       
-      console.error('Analysis error:', err);
-      
       if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
         setError('Request timeout. The backend might be waking up. Please try again in 30 seconds.');
       } else if (err.response?.status === 429) {
-        setError('Daily AI limit reached. Enhanced text analysis is available.');
+        setError('Daily AI limit reached. Enhanced analysis is still available.');
       } else if (err.response?.data?.error?.includes('quota')) {
-        setError('AI service quota exceeded. Enhanced text analysis will extract information from your resume.');
+        setError('AI service quota exceeded. Enhanced analysis will extract information from your resume.');
         setAiStatus('unavailable');
-      } else if (err.response?.data?.error) {
-        setError(`Analysis error: ${err.response.data.error}`);
       } else {
-        setError('An error occurred during analysis. Please try again.');
+        setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
       }
       
       setProgress(0);
@@ -832,7 +830,7 @@ function App() {
                     <div className="button-text">
                       <span>Analyze Resume</span>
                       <span className="button-subtext">
-                        {aiStatus === 'available' ? 'AI-powered insights' : 'Enhanced text analysis'}
+                        {aiStatus === 'available' ? 'AI-powered insights' : 'Enhanced analysis'}
                       </span>
                     </div>
                   </div>
