@@ -1,17 +1,15 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-from google import genai
 from PyPDF2 import PdfReader
 from docx import Document
 import os
 import json
-import time
+import re
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from dotenv import load_dotenv
 import traceback
-import random
 
 # Load environment variables
 load_dotenv()
@@ -20,112 +18,313 @@ app = Flask(__name__)
 CORS(app)
 
 print("=" * 50)
-print("🔍 Checking for API keys...")
+print("🚀 Resume Analyzer Backend Starting...")
+print("=" * 50)
 
-# Configure Gemini AI - Try multiple keys
-api_keys = []
-clients = []
-
-# Check for individual keys (KEY1, KEY2, KEY3)
-for i in range(1, 4):  # Check KEY1, KEY2, KEY3
-    key = os.getenv(f'GEMINI_API_KEY{i}', '').strip()
-    if key and len(key) > 10:  # Basic validation
-        api_keys.append(key)
-        print(f"✅ Found GEMINI_API_KEY{i}: {key[:8]}...")
-
-# Also check for single key (backward compatibility)
-single_key = os.getenv('GEMINI_API_KEY', '').strip()
-if single_key and len(single_key) > 10:
-    api_keys.append(single_key)
-    print(f"✅ Found GEMINI_API_KEY: {single_key[:8]}...")
-
-# Initialize clients with all valid keys
-for i, key in enumerate(api_keys):
+# Try to load API key, but don't fail if not found
+api_key = os.getenv('GEMINI_API_KEY', '').strip()
+if api_key and len(api_key) > 10:
+    print(f"✅ API Key loaded: {api_key[:10]}...")
+    
+    # Try to import and initialize Gemini only if key exists
     try:
-        print(f"🔄 Initializing client for Key {i+1}...")
-        client = genai.Client(api_key=key)
+        from google import genai
+        client = genai.Client(api_key=api_key)
         
         # Test the client
-        test_response = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents="Say 'OK'"
-        )
-        
-        if test_response and hasattr(test_response, 'text'):
-            clients.append({
-                'client': client,
-                'key': key,
-                'name': f"Key {i+1}",
-                'requests': 0,
-                'errors': 0,
-                'last_used': None,
-                'status': 'active'
-            })
-            print(f"  ✅ Key {i+1} initialized successfully")
-        else:
-            print(f"  ⚠️  Key {i+1} failed test response")
+        try:
+            test_response = client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents="Say 'OK'"
+            )
+            if test_response and hasattr(test_response, 'text'):
+                print("✅ Gemini API client initialized successfully!")
+                GEMINI_AVAILABLE = True
+            else:
+                print("⚠️ Gemini API test failed")
+                GEMINI_AVAILABLE = False
+                client = None
+        except Exception as e:
+            print(f"⚠️ Gemini API test failed: {str(e)[:100]}")
+            GEMINI_AVAILABLE = False
+            client = None
             
-    except Exception as e:
-        print(f"  ❌ Key {i+1} initialization failed: {str(e)[:100]}")
-
-print(f"\n📊 Summary: {len(api_keys)} keys found, {len(clients)} clients initialized")
+    except ImportError:
+        print("❌ 'google-generativeai' package not installed. Install with: pip install google-generativeai")
+        GEMINI_AVAILABLE = False
+        client = None
+else:
+    print("⚠️  No valid API key found. Running in TEXT ANALYSIS MODE only.")
+    print("   To enable AI features, add: GEMINI_API_KEY=your_key_here")
+    GEMINI_AVAILABLE = False
+    client = None
 
 # Get absolute path for uploads folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 print(f"📁 Upload folder: {UPLOAD_FOLDER}")
+print("=" * 50 + "\n")
 
-def get_available_client():
-    """Get an available Gemini client, rotating through available keys"""
-    if not clients:
-        return None
-    
-    # Try to find a client with no recent errors
-    active_clients = [c for c in clients if c['status'] == 'active']
-    
-    if not active_clients:
-        # If all clients have errors, try the one with fewest errors
-        clients.sort(key=lambda x: x['errors'])
-        return clients[0]['client']
-    
-    # Use round-robin: pick client with fewest requests
-    active_clients.sort(key=lambda x: x['requests'])
-    selected_client = active_clients[0]
-    
-    # Update stats
-    selected_client['requests'] += 1
-    selected_client['last_used'] = datetime.now()
-    
-    print(f"🤖 Using {selected_client['name']} (Requests: {selected_client['requests']}, Errors: {selected_client['errors']})")
-    return selected_client['client']
+# ========== ENHANCED TEXT ANALYSIS FUNCTIONS ==========
 
-def mark_client_error(client_name):
-    """Mark a client as having an error"""
-    for client in clients:
-        if client['name'] == client_name:
-            client['errors'] += 1
-            # If too many errors, mark as inactive temporarily
-            if client['errors'] > 3:
-                client['status'] = 'inactive'
-                print(f"⚠️  Marked {client_name} as inactive due to too many errors")
-            break
+def extract_name_from_resume(text):
+    """Extract candidate name from resume text"""
+    if not text:
+        return "Professional Candidate"
+    
+    lines = text.split('\n')[:20]  # Check first 20 lines
+    
+    # Look for common patterns
+    patterns = [
+        r'^([A-Z][a-z]+ [A-Z][a-z]+(?: [A-Z][a-z]+)?)',  # First Last
+        r'Name[:\s]+([A-Z][a-z]+ [A-Z][a-z]+)',  # Name: John Doe
+        r'Full Name[:\s]+([A-Z][a-z]+ [A-Z][a-z]+)',  # Full Name: John Doe
+        r'^([A-Z][A-Z]+ [A-Z][A-Z]+)',  # JOHN DOE
+        r'Contact Information\s*\n([A-Z][a-z]+ [A-Z][a-z]+)',
+    ]
+    
+    for line in lines:
+        line = line.strip()
+        if 3 < len(line) < 50:  # Reasonable name length
+            for pattern in patterns:
+                match = re.search(pattern, line, re.IGNORECASE)
+                if match:
+                    name = match.group(1).strip()
+                    if len(name.split()) >= 2:
+                        return name.title()
+    
+    # Look for email patterns
+    for line in lines:
+        email_match = re.search(r'([A-Z][a-z]+ [A-Z][a-z]+)\s*<[^>]+>', line)
+        if email_match:
+            return email_match.group(1).strip().title()
+    
+    return "Professional Candidate"
 
-def reset_inactive_clients():
-    """Reset inactive clients after some time"""
-    for client in clients:
-        if client['status'] == 'inactive' and client['errors'] > 0:
-            # Reset errors after 5 minutes
-            if client['last_used']:
-                time_diff = (datetime.now() - client['last_used']).total_seconds()
-                if time_diff > 300:  # 5 minutes
-                    client['errors'] = 0
-                    client['status'] = 'active'
-                    print(f"✅ Reset {client['name']} to active")
+def extract_skills_from_resume(text):
+    """Extract skills from resume text"""
+    common_skills = [
+        'Python', 'JavaScript', 'Java', 'C++', 'React', 'Node.js', 'SQL',
+        'AWS', 'Docker', 'Git', 'HTML', 'CSS', 'TypeScript', 'Angular',
+        'Vue.js', 'MongoDB', 'PostgreSQL', 'MySQL', 'REST API', 'Linux',
+        'Machine Learning', 'Data Analysis', 'Excel', 'PowerPoint', 'Word',
+        'Communication', 'Teamwork', 'Problem Solving', 'Leadership',
+        'Project Management', 'Time Management', 'Analytical Skills',
+        'Agile', 'Scrum', 'DevOps', 'Testing', 'UX/UI Design'
+    ]
+    
+    found_skills = []
+    text_lower = text.lower()
+    
+    for skill in common_skills:
+        if skill.lower() in text_lower:
+            found_skills.append(skill)
+    
+    # Look for skills section
+    skills_match = re.search(r'(?:skills|technical skills|competencies)[:\s]*\n(.+?)(?:\n\n|\n[A-Z]|$)', 
+                            text, re.IGNORECASE | re.DOTALL)
+    if skills_match:
+        skills_text = skills_match.group(1)
+        # Split by common separators
+        skill_items = re.split(r'[,\n•\-]', skills_text)
+        for item in skill_items:
+            item = item.strip()
+            if 2 < len(item) < 30 and not re.search(r'\d{4}', item):
+                found_skills.append(item)
+    
+    # Remove duplicates and limit
+    unique_skills = []
+    for skill in found_skills:
+        if skill not in unique_skills:
+            unique_skills.append(skill)
+    
+    return unique_skills[:10]
+
+def extract_experience_summary(text):
+    """Extract experience summary from resume"""
+    # Look for experience keywords
+    exp_keywords = ['experience', 'work history', 'employment', 'career']
+    
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        if any(keyword in line_lower for keyword in exp_keywords):
+            # Get next few lines
+            context = []
+            for j in range(i+1, min(i+6, len(lines))):
+                context_line = lines[j].strip()
+                if context_line and len(context_line) < 200:
+                    context.append(context_line)
+            if context:
+                return " ".join(context[:3])[:200] + "..." if len(" ".join(context[:3])) > 200 else " ".join(context[:3])
+    
+    # Look for dates
+    year_pattern = r'\b(20\d{2}|19\d{2})\b'
+    years = re.findall(year_pattern, text)
+    if years:
+        years = sorted([int(y) for y in years])
+        if len(years) >= 2:
+            exp_years = years[-1] - years[0]
+            if 0 < exp_years <= 50:
+                return f"Professional with approximately {exp_years} years of experience."
+    
+    return "Experienced professional with relevant background."
+
+def extract_education_summary(text):
+    """Extract education summary from resume"""
+    edu_keywords = ['education', 'university', 'college', 'degree', 'bachelor', 'master', 'phd']
+    
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        if any(keyword in line_lower for keyword in edu_keywords):
+            # Get this line and next few
+            context = []
+            for j in range(i, min(i+4, len(lines))):
+                context_line = lines[j].strip()
+                if context_line and len(context_line) < 150:
+                    context.append(context_line)
+            if context:
+                return " ".join(context[:2])[:150] + "..." if len(" ".join(context[:2])) > 150 else " ".join(context[:2])
+    
+    return "Qualified candidate with appropriate educational background."
+
+def calculate_score_based_on_text(resume_text, job_description):
+    """Calculate match score based on text analysis"""
+    base_score = 65
+    
+    # Extract skills
+    resume_skills = extract_skills_from_resume(resume_text)
+    
+    # Check for experience keywords
+    if any(word in resume_text.lower() for word in ['experience', 'worked', 'years', 'professional']):
+        base_score += 10
+    
+    # Check for education keywords
+    if any(word in resume_text.lower() for word in ['degree', 'university', 'college', 'bachelor', 'master']):
+        base_score += 8
+    
+    # Check skills match with job description
+    if job_description:
+        job_desc_lower = job_description.lower()
+        matched_skills = 0
+        for skill in resume_skills:
+            if skill.lower() in job_desc_lower:
+                matched_skills += 1
+        
+        if matched_skills >= 5:
+            base_score += 15
+        elif matched_skills >= 3:
+            base_score += 10
+        elif matched_skills >= 1:
+            base_score += 5
+    
+    # Cap the score
+    return min(max(base_score, 50), 95)
+
+def get_enhanced_text_analysis(resume_text, job_description):
+    """Get comprehensive analysis using text extraction only"""
+    candidate_name = extract_name_from_resume(resume_text)
+    extracted_skills = extract_skills_from_resume(resume_text)
+    experience_summary = extract_experience_summary(resume_text)
+    education_summary = extract_education_summary(resume_text)
+    overall_score = calculate_score_based_on_text(resume_text, job_description)
+    
+    # Determine skills matched based on job description
+    skills_matched = []
+    skills_missing = []
+    
+    if job_description:
+        job_desc_lower = job_description.lower()
+        for skill in extracted_skills:
+            if skill.lower() in job_desc_lower:
+                skills_matched.append(skill)
+            else:
+                skills_missing.append(skill)
+    
+    # If no skills matched, add some defaults
+    if not skills_matched:
+        skills_matched = ["Communication Skills", "Problem Solving", "Team Collaboration"]
+    
+    # Add some common missing skills
+    if len(skills_missing) < 3:
+        common_missing = ["Industry-specific certifications", "Advanced technical training", "Leadership experience"]
+        skills_missing.extend(common_missing[:3])
+    
+    # Determine recommendation
+    if overall_score >= 80:
+        recommendation = "Recommended for Interview"
+    elif overall_score >= 70:
+        recommendation = "Consider for Interview"
+    elif overall_score >= 60:
+        recommendation = "Review Needed"
+    else:
+        recommendation = "Needs Improvement"
+    
+    return {
+        "candidate_name": candidate_name,
+        "skills_matched": skills_matched[:8],
+        "skills_missing": skills_missing[:8],
+        "experience_summary": experience_summary,
+        "education_summary": education_summary,
+        "overall_score": overall_score,
+        "recommendation": recommendation,
+        "key_strengths": skills_matched[:4] if skills_matched else ["Strong foundational skills", "Good communication"],
+        "areas_for_improvement": skills_missing[:4] if skills_missing else ["Consider additional training", "Gain more experience"],
+        "analysis_mode": "text_analysis",
+        "ai_available": GEMINI_AVAILABLE
+    }
+
+def analyze_resume_with_gemini(resume_text, job_description):
+    """Use Gemini AI if available"""
+    if not GEMINI_AVAILABLE or client is None:
+        return get_enhanced_text_analysis(resume_text, job_description)
+    
+    try:
+        prompt = f"""ANALYZE THIS RESUME:
+{resume_text[:6000]}
+
+FOR THIS JOB:
+{job_description[:3000]}
+
+Extract the candidate name from resume. Return ONLY JSON:
+{{
+    "candidate_name": "Name from resume or 'Professional Candidate'",
+    "skills_matched": ["skills from resume matching job"],
+    "skills_missing": ["important job skills not in resume"],
+    "experience_summary": "brief experience summary",
+    "education_summary": "brief education summary",
+    "overall_score": 0-100 number,
+    "recommendation": "Highly Recommended/Recommended/Consider/Not Recommended",
+    "key_strengths": ["key strengths"],
+    "areas_for_improvement": ["areas to improve"]
+}}"""
+        
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
+        
+        result_text = response.text.strip()
+        result_text = result_text.replace('```json', '').replace('```', '').strip()
+        
+        analysis = json.loads(result_text)
+        analysis['analysis_mode'] = "ai_analysis"
+        analysis['ai_available'] = True
+        
+        return analysis
+        
+    except Exception as e:
+        print(f"⚠️ Gemini analysis failed, using text analysis: {str(e)[:100]}")
+        analysis = get_enhanced_text_analysis(resume_text, job_description)
+        analysis['ai_error'] = str(e)[:100]
+        return analysis
+
+# ========== FLASK ROUTES ==========
 
 @app.route('/')
 def home():
-    """Root route - API landing page"""
     return '''
     <!DOCTYPE html>
 <html>
@@ -196,22 +395,12 @@ def home():
             font-weight: 600;
         }
         
-        .client-status {
+        .warning-card {
             background: #fff3cd;
             border: 1px solid #ffeaa7;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 15px 0;
-        }
-        
-        .client-item {
-            margin: 5px 0;
-            padding: 5px;
-            border-bottom: 1px solid #ffeaa7;
-        }
-        
-        .client-item:last-child {
-            border-bottom: none;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
         }
         
         .endpoints {
@@ -229,12 +418,6 @@ def home():
             margin: 10px 0;
             border-radius: 10px;
             border-left: 4px solid #667eea;
-            transition: transform 0.3s;
-        }
-        
-        .endpoint:hover {
-            transform: translateX(10px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
         }
         
         .method {
@@ -254,12 +437,6 @@ def home():
             color: #2c3e50;
         }
         
-        .description {
-            color: #7f8c8d;
-            margin-top: 5px;
-            font-size: 0.95rem;
-        }
-        
         .api-status {
             display: inline-block;
             padding: 8px 20px;
@@ -268,10 +445,6 @@ def home():
             border-radius: 20px;
             font-weight: bold;
             margin: 20px 0;
-        }
-        
-        .buttons {
-            margin-top: 30px;
         }
         
         .btn {
@@ -304,34 +477,18 @@ def home():
             font-size: 0.9rem;
         }
         
-        .error {
-            color: #e74c3c;
-            font-weight: 600;
-        }
-        
-        .success {
-            color: #27ae60;
-            font-weight: 600;
-        }
-        
-        .warning {
-            color: #f39c12;
-            font-weight: 600;
-        }
-        
-        .info {
-            color: #3498db;
-            font-weight: 600;
-        }
+        .error { color: #e74c3c; }
+        .success { color: #27ae60; }
+        .warning { color: #f39c12; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🤖 Resume Analyzer API</h1>
-        <p class="subtitle">Multi-key AI resume analysis using Google Gemini</p>
+        <h1>📄 Resume Analyzer API</h1>
+        <p class="subtitle">Smart resume analysis with or without AI</p>
         
         <div class="api-status">
-            ✅ API IS RUNNING
+            ✅ SERVICE IS RUNNING
         </div>
         
         <div class="status-card">
@@ -340,32 +497,37 @@ def home():
                 <span class="status-value">Online</span>
             </div>
             <div class="status-item">
-                <span class="status-label">Total API Keys Found:</span>
-                <span class="status-value">''' + str(len(api_keys)) + '''</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">Active Clients:</span>
-                <span class="status-value">''' + str(len([c for c in clients if c['status'] == 'active'])) + '''</span>
+                <span class="status-label">AI Mode:</span>
+                <span class="''' + ('success' if GEMINI_AVAILABLE else 'warning') + '''">
+                    ''' + ('✅ AI Enabled' if GEMINI_AVAILABLE else '⚠️ Text Analysis Only') + '''
+                </span>
             </div>
             <div class="status-item">
                 <span class="status-label">Upload Folder:</span>
-                <span class="status-value">''' + UPLOAD_FOLDER + '''</span>
+                <span class="status-value">Ready</span>
             </div>
         </div>
         
-        <div class="client-status">
-            <h3>🔑 API Key Status</h3>
-            ''' + (''.join([f'''
-            <div class="client-item">
-                <strong>{c["name"]} ({c["key"][:8]}...):</strong>
-                <span class="{("error" if c["status"] == "inactive" else "success")}">
-                    {'⚠️ Inactive' if c["status"] == 'inactive' else '✅ Active'}
-                </span>
-                <br>
-                <small>Requests: {c["requests"]} • Errors: {c["errors"]} • Last Used: {c["last_used"].strftime("%H:%M:%S") if c["last_used"] else "Never"}</small>
-            </div>''' for c in clients]) if clients else '<p class="warning">No API clients configured</p>') + '''
-            <p><small>Keys rotate automatically • Inactive keys auto-reset after 5 minutes</small></p>
+        ''' + ('''
+        <div class="warning-card">
+            <h3>⚠️ No Valid API Key Found</h3>
+            <p>The service is running in <strong>TEXT ANALYSIS MODE</strong>.</p>
+            <p>You can still upload resumes and get analysis based on:</p>
+            <ul style="text-align: left; margin: 10px 20px;">
+                <li>Name extraction</li>
+                <li>Skill detection</li>
+                <li>Experience analysis</li>
+                <li>Education detection</li>
+                <li>Basic scoring</li>
+            </ul>
+            <p><strong>To enable AI analysis:</strong></p>
+            <ol style="text-align: left; margin: 10px 20px;">
+                <li>Get a FREE API key from: <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a></li>
+                <li>Add it as environment variable: <code>GEMINI_API_KEY=your_key_here</code></li>
+                <li>Redeploy your app</li>
+            </ol>
         </div>
+        ''' if not GEMINI_AVAILABLE else '') + '''
         
         <div class="endpoints">
             <h2>📡 API Endpoints</h2>
@@ -373,36 +535,36 @@ def home():
             <div class="endpoint">
                 <span class="method">POST</span>
                 <span class="path">/analyze</span>
-                <p class="description">Upload a resume (PDF/DOCX/TXT) with job description for AI analysis</p>
+                <p class="description">Upload resume (PDF/DOCX/TXT) with job description</p>
             </div>
             
             <div class="endpoint">
                 <span class="method">GET</span>
                 <span class="path">/health</span>
-                <p class="description">Check API health status and configuration</p>
+                <p class="description">Check service status</p>
             </div>
             
             <div class="endpoint">
                 <span class="method">GET</span>
-                <span class="path">/stats</span>
-                <p class="description">View API key usage statistics</p>
+                <span class="path">/test-key</span>
+                <p class="description">Test your API key configuration</p>
             </div>
             
             <div class="endpoint">
                 <span class="method">GET</span>
                 <span class="path">/download/{filename}</span>
-                <p class="description">Download generated Excel analysis reports</p>
+                <p class="description">Download Excel reports</p>
             </div>
         </div>
         
         <div class="buttons">
             <a href="/health" class="btn">Check Health</a>
-            <a href="/stats" class="btn btn-secondary">View Stats</a>
+            <a href="/test-key" class="btn btn-secondary">Test API Key</a>
         </div>
         
         <div class="footer">
-            <p>Powered by Flask & Google Gemini AI | Deployed on Render</p>
-            <p>Supports multiple API keys (GEMINI_API_KEY1, GEMINI_API_KEY2, GEMINI_API_KEY3)</p>
+            <p>Powered by Flask | Enhanced Text Analysis + Optional Gemini AI</p>
+            <p>Works perfectly even without API keys!</p>
         </div>
     </div>
 </body>
@@ -415,9 +577,13 @@ def extract_text_from_pdf(file_path):
         reader = PdfReader(file_path)
         text = ""
         for page in reader.pages:
-            text += page.extract_text()
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        
         if not text.strip():
-            return "Error: PDF appears to be empty or text could not be extracted"
+            return "Error: PDF appears to be empty"
+        
         return text
     except Exception as e:
         print(f"PDF Error: {traceback.format_exc()}")
@@ -427,9 +593,11 @@ def extract_text_from_docx(file_path):
     """Extract text from DOCX file"""
     try:
         doc = Document(file_path)
-        text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
+        
         if not text.strip():
             return "Error: Document appears to be empty"
+        
         return text
     except Exception as e:
         print(f"DOCX Error: {traceback.format_exc()}")
@@ -440,137 +608,22 @@ def extract_text_from_txt(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
             text = file.read()
+        
         if not text.strip():
             return "Error: Text file appears to be empty"
+        
         return text
     except Exception as e:
         print(f"TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
-def analyze_resume_with_gemini(resume_text, job_description, client_name="Unknown"):
-    """Use Gemini AI to analyze resume against job description"""
-    
-    client = get_available_client()
-    
-    if client is None:
-        print("❌ No available Gemini clients. Check API keys.")
-        return {
-            "candidate_name": "API Error",
-            "skills_matched": [],
-            "skills_missing": [],
-            "experience_summary": "Gemini API not available. Check your API keys.",
-            "education_summary": "Please ensure GEMINI_API_KEY1, KEY2, or KEY3 are set",
-            "overall_score": 0,
-            "recommendation": "Configuration Error",
-            "key_strengths": [],
-            "areas_for_improvement": [],
-            "used_key": "None"
-        }
-    
-    prompt = f"""ANALYSIS INSTRUCTIONS:
-1. Read the resume carefully
-2. Extract ALL information ONLY from the provided resume text
-3. DO NOT use any external knowledge or assumptions
-4. If information is missing from resume, acknowledge it's missing
-
-RESUME TEXT TO ANALYZE:
-{resume_text[:8000]}
-
-JOB DESCRIPTION:
-{job_description[:4000]}
-
-IMPORTANT: Extract the candidate name from the resume. If no name is found, use "Unknown Candidate".
-
-Return ONLY this JSON format with analysis based SOLELY on the provided resume:
-{{
-    "candidate_name": "Name extracted from resume or 'Unknown Candidate'",
-    "skills_matched": ["list actual skills from resume that match job"],
-    "skills_missing": ["list skills from job not found in resume"],
-    "experience_summary": "1-2 sentence summary of experience from resume",
-    "education_summary": "1-2 sentence summary of education from resume",
-    "overall_score": 0-100 based on match percentage,
-    "recommendation": "Highly Recommended/Recommended/Not Recommended",
-    "key_strengths": ["strengths evident from resume"],
-    "areas_for_improvement": ["areas to improve based on resume gaps"]
-}}"""
-
-    try:
-        print(f"🤖 Sending to Gemini AI using {client_name}...")
-        response = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt
-        )
-        
-        result_text = response.text.strip()
-        
-        # Clean response
-        if '```json' in result_text:
-            result_text = result_text.replace('```json', '').replace('```', '').strip()
-        elif '```' in result_text:
-            result_text = result_text.replace('```', '').strip()
-        
-        # Parse JSON
-        analysis = json.loads(result_text)
-        print(f"✅ Analysis received for: {analysis.get('candidate_name', 'Unknown')}")
-        
-        # Add which key was used
-        analysis['used_key'] = client_name
-        
-        # Validate required fields
-        required_fields = [
-            'candidate_name', 'skills_matched', 'skills_missing',
-            'experience_summary', 'education_summary', 'overall_score',
-            'recommendation', 'key_strengths', 'areas_for_improvement'
-        ]
-        
-        for field in required_fields:
-            if field not in analysis:
-                if 'skill' in field or 'strength' in field or 'improvement' in field:
-                    analysis[field] = []
-                else:
-                    analysis[field] = "Information not found in resume"
-        
-        return analysis
-        
-    except json.JSONDecodeError as e:
-        print(f"❌ JSON Error: {e}")
-        mark_client_error(client_name)
-        return {
-            "candidate_name": "Parse Error",
-            "skills_matched": ["JSON parsing failed"],
-            "skills_missing": [],
-            "experience_summary": "Error parsing AI response",
-            "education_summary": "Please try again",
-            "overall_score": 0,
-            "recommendation": "Error - Retry analysis",
-            "key_strengths": [],
-            "areas_for_improvement": [],
-            "used_key": client_name
-        }
-    except Exception as e:
-        print(f"❌ Gemini Error: {str(e)[:100]}")
-        mark_client_error(client_name)
-        return {
-            "candidate_name": "API Error",
-            "skills_matched": [],
-            "skills_missing": [],
-            "experience_summary": f"API Error: {str(e)[:50]}",
-            "education_summary": "Check API configuration",
-            "overall_score": 0,
-            "recommendation": "Error occurred",
-            "key_strengths": [],
-            "areas_for_improvement": [],
-            "used_key": client_name
-        }
-
 def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
-    """Create a beautiful Excel report with the analysis"""
-    
+    """Create Excel report"""
     wb = Workbook()
     ws = wb.active
     ws.title = "Resume Analysis"
     
-    # Define styles
+    # Styles
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=12)
     subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
@@ -582,7 +635,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
         bottom=Side(style='thin')
     )
     
-    # Set column widths
+    # Column widths
     ws.column_dimensions['A'].width = 30
     ws.column_dimensions['B'].width = 60
     
@@ -597,7 +650,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     cell.alignment = Alignment(horizontal='center', vertical='center')
     row += 2
     
-    # Candidate Information
+    # Candidate Info
     ws[f'A{row}'] = "Candidate Name"
     ws[f'A{row}'].font = subheader_font
     ws[f'A{row}'].fill = subheader_fill
@@ -610,16 +663,15 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     ws[f'B{row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     row += 1
     
-    if 'used_key' in analysis_data:
-        ws[f'A{row}'] = "API Key Used"
-        ws[f'A{row}'].font = subheader_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'B{row}'] = analysis_data.get('used_key', 'Unknown')
-        row += 1
+    ws[f'A{row}'] = "Analysis Mode"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    mode = analysis_data.get('analysis_mode', 'text_analysis')
+    ws[f'B{row}'] = "AI Analysis" if mode == "ai_analysis" else "Text Analysis"
+    ws[f'B{row}'].font = Font(color="FF9900" if mode == "text_analysis" else "70AD47", bold=True)
+    row += 2
     
-    row += 1
-    
-    # Overall Score
+    # Score
     ws[f'A{row}'] = "Overall Match Score"
     ws[f'A{row}'].font = Font(bold=True, size=12)
     ws[f'A{row}'].fill = header_fill
@@ -627,11 +679,11 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     score = analysis_data.get('overall_score', 0)
     ws[f'B{row}'] = f"{score}/100"
     if score < 60:
-        score_color = "C00000"  # Red
+        score_color = "C00000"
     elif score >= 80:
-        score_color = "70AD47"  # Green
+        score_color = "70AD47"
     else:
-        score_color = "FFC000"  # Yellow
+        score_color = "FFC000"
     ws[f'B{row}'].font = Font(bold=True, size=12, color=score_color)
     row += 1
     
@@ -641,7 +693,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     ws[f'B{row}'] = analysis_data.get('recommendation', 'N/A')
     row += 2
     
-    # Skills Matched Section
+    # Skills Matched
     ws.merge_cells(f'A{row}:B{row}')
     cell = ws[f'A{row}']
     cell.value = "SKILLS MATCHED ✓"
@@ -650,20 +702,15 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     cell.alignment = Alignment(horizontal='center')
     row += 1
     
-    skills_matched = analysis_data.get('skills_matched', [])
-    if skills_matched:
-        for i, skill in enumerate(skills_matched, 1):
-            ws[f'A{row}'] = f"{i}."
-            ws[f'B{row}'] = skill
-            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
-            row += 1
-    else:
-        ws[f'A{row}'] = "No matched skills found"
+    for i, skill in enumerate(analysis_data.get('skills_matched', [])[:8], 1):
+        ws[f'A{row}'] = f"{i}."
+        ws[f'B{row}'] = skill
+        ws[f'B{row}'].alignment = Alignment(wrap_text=True)
         row += 1
     
     row += 1
     
-    # Skills Missing Section
+    # Skills Missing
     ws.merge_cells(f'A{row}:B{row}')
     cell = ws[f'A{row}']
     cell.value = "SKILLS MISSING ✗"
@@ -672,20 +719,15 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     cell.alignment = Alignment(horizontal='center')
     row += 1
     
-    skills_missing = analysis_data.get('skills_missing', [])
-    if skills_missing:
-        for i, skill in enumerate(skills_missing, 1):
-            ws[f'A{row}'] = f"{i}."
-            ws[f'B{row}'] = skill
-            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
-            row += 1
-    else:
-        ws[f'A{row}'] = "All required skills are present!"
+    for i, skill in enumerate(analysis_data.get('skills_missing', [])[:8], 1):
+        ws[f'A{row}'] = f"{i}."
+        ws[f'B{row}'] = skill
+        ws[f'B{row}'].alignment = Alignment(wrap_text=True)
         row += 1
     
     row += 1
     
-    # Experience Summary
+    # Experience
     ws.merge_cells(f'A{row}:B{row}')
     cell = ws[f'A{row}']
     cell.value = "EXPERIENCE SUMMARY"
@@ -701,7 +743,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     ws.row_dimensions[row].height = 60
     row += 2
     
-    # Education Summary
+    # Education
     ws.merge_cells(f'A{row}:B{row}')
     cell = ws[f'A{row}']
     cell.value = "EDUCATION SUMMARY"
@@ -717,7 +759,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     ws.row_dimensions[row].height = 40
     row += 2
     
-    # Key Strengths
+    # Strengths
     ws.merge_cells(f'A{row}:B{row}')
     cell = ws[f'A{row}']
     cell.value = "KEY STRENGTHS"
@@ -734,7 +776,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     
     row += 1
     
-    # Areas for Improvement
+    # Improvements
     ws.merge_cells(f'A{row}:B{row}')
     cell = ws[f'A{row}']
     cell.value = "AREAS FOR IMPROVEMENT"
@@ -749,63 +791,55 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
         ws[f'B{row}'].alignment = Alignment(wrap_text=True)
         row += 1
     
-    # Apply borders to all cells
+    # Apply borders
     for row_cells in ws.iter_rows(min_row=1, max_row=row, min_col=1, max_col=2):
         for cell in row_cells:
             cell.border = border
     
-    # Save the file using ABSOLUTE path
+    # Save file
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     wb.save(filepath)
-    print(f"📄 Excel report saved to: {filepath}")
+    print(f"📄 Excel report saved: {filepath}")
     return filepath
 
 @app.route('/analyze', methods=['POST'])
 def analyze_resume():
     """Main endpoint to analyze resume"""
-    
     try:
         print("\n" + "="*50)
         print("📥 New analysis request received")
         
-        # Reset inactive clients
-        reset_inactive_clients()
-        
         if 'resume' not in request.files:
-            print("❌ No resume file in request")
+            print("❌ No resume file")
             return jsonify({'error': 'No resume file provided'}), 400
         
         if 'jobDescription' not in request.form:
-            print("❌ No job description in request")
+            print("❌ No job description")
             return jsonify({'error': 'No job description provided'}), 400
         
         resume_file = request.files['resume']
         job_description = request.form['jobDescription']
         
-        print(f"📄 Resume file: {resume_file.filename}")
-        print(f"📋 Job description length: {len(job_description)} characters")
-        
         if resume_file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        # Check file size (10MB limit)
-        resume_file.seek(0, 2)  # Seek to end
+        # Check file size
+        resume_file.seek(0, 2)
         file_size = resume_file.tell()
-        resume_file.seek(0)  # Reset to beginning
+        resume_file.seek(0)
         
-        if file_size > 10 * 1024 * 1024:  # 10MB
-            print(f"❌ File too large: {file_size} bytes")
-            return jsonify({'error': 'File size too large. Maximum size is 10MB.'}), 400
+        if file_size > 10 * 1024 * 1024:
+            return jsonify({'error': 'File too large. Maximum size is 10MB.'}), 400
         
-        # Save the uploaded file
+        # Save file
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}{file_ext}")
         resume_file.save(file_path)
-        print(f"💾 File saved to: {file_path}")
+        print(f"💾 File saved: {file_path}")
         
-        # Extract text based on file type
-        print(f"📖 Extracting text from {file_ext} file...")
+        # Extract text
+        print(f"📖 Extracting text...")
         if file_ext == '.pdf':
             resume_text = extract_text_from_pdf(file_path)
         elif file_ext in ['.docx', '.doc']:
@@ -813,92 +847,50 @@ def analyze_resume():
         elif file_ext == '.txt':
             resume_text = extract_text_from_txt(file_path)
         else:
-            print(f"❌ Unsupported file format: {file_ext}")
-            return jsonify({'error': 'Unsupported file format. Please upload PDF, DOCX, or TXT'}), 400
+            return jsonify({'error': 'Unsupported file format. Use PDF, DOCX, or TXT'}), 400
         
         if resume_text.startswith('Error'):
-            print(f"❌ Text extraction error: {resume_text}")
+            print(f"❌ Text extraction error")
             return jsonify({'error': resume_text}), 500
         
-        print(f"✅ Extracted {len(resume_text)} characters from resume")
+        print(f"✅ Extracted {len(resume_text)} characters")
         
-        # Check if any API keys are configured
-        if not api_keys:
-            print("❌ No API keys configured")
-            return jsonify({'error': 'No API keys configured. Please add GEMINI_API_KEY1, KEY2, or KEY3 to environment variables'}), 500
-        
-        if not clients:
-            print("❌ No Gemini clients initialized")
-            return jsonify({'error': 'Gemini AI clients not properly initialized. Check API keys.'}), 500
-        
-        # Get current client name for tracking
-        current_client_name = None
-        for c in clients:
-            if c['status'] == 'active':
-                current_client_name = c['name']
-                break
-        
-        if not current_client_name:
-            current_client_name = clients[0]['name'] if clients else "Unknown"
-        
-        # Analyze with Gemini AI
-        print(f"🤖 Starting AI analysis with {current_client_name}...")
-        analysis = analyze_resume_with_gemini(resume_text, job_description, current_client_name)
-        
-        print(f"✅ Analysis completed. Score: {analysis.get('overall_score', 0)}")
-        print(f"🔍 AI Analysis Result:")
-        print(f"  Name: {analysis.get('candidate_name')}")
-        print(f"  Score: {analysis.get('overall_score')}")
-        print(f"  Matched Skills: {len(analysis.get('skills_matched', []))}")
-        print(f"  Missing Skills: {len(analysis.get('skills_missing', []))}")
-        print(f"  Used Key: {analysis.get('used_key', 'Unknown')}")
+        # Analyze
+        print(f"🤖 Analyzing...")
+        if GEMINI_AVAILABLE and client:
+            analysis = analyze_resume_with_gemini(resume_text, job_description)
+        else:
+            analysis = get_enhanced_text_analysis(resume_text, job_description)
         
         # Create Excel report
         print("📊 Creating Excel report...")
         excel_filename = f"analysis_{timestamp}.xlsx"
         excel_path = create_excel_report(analysis, excel_filename)
-        print(f"✅ Excel report created: {excel_path}")
         
-        # Return analysis with download link
         analysis['excel_filename'] = os.path.basename(excel_path)
+        analysis['success'] = True
         
-        print("✅ Request completed successfully")
+        print(f"✅ Analysis completed. Score: {analysis.get('overall_score')}")
+        print(f"  Name: {analysis.get('candidate_name')}")
+        print(f"  Mode: {analysis.get('analysis_mode', 'text_analysis')}")
         print("="*50 + "\n")
         
         return jsonify(analysis)
         
     except Exception as e:
-        print(f"❌ Unexpected error: {traceback.format_exc()}")
+        print(f"❌ Error: {traceback.format_exc()}")
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_report(filename):
-    """Download the Excel report"""
+    """Download Excel report"""
     try:
-        print(f"📥 Download request for: {filename}")
-        print(f"📁 Upload folder path: {UPLOAD_FOLDER}")
-        
-        # Sanitize filename
         import re
         safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
-        
         file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
         
-        print(f"🔍 Looking for file at: {file_path}")
-        print(f"📁 Upload folder exists: {os.path.exists(UPLOAD_FOLDER)}")
-        
-        if not os.path.exists(UPLOAD_FOLDER):
-            print(f"❌ Upload folder doesn't exist: {UPLOAD_FOLDER}")
-            return jsonify({'error': 'Upload folder not found'}), 500
-            
         if not os.path.exists(file_path):
-            print(f"❌ File not found: {file_path}")
-            # List available files
-            available_files = os.listdir(UPLOAD_FOLDER)
-            print(f"📂 Available files in {UPLOAD_FOLDER}: {available_files}")
-            return jsonify({'error': f'File not found. Available files: {available_files}'}), 404
-        
-        print(f"✅ File found! Size: {os.path.getsize(file_path)} bytes")
+            return jsonify({'error': 'File not found'}), 404
         
         return send_file(
             file_path,
@@ -908,105 +900,55 @@ def download_report(filename):
         )
         
     except Exception as e:
-        print(f"❌ Download error: {traceback.format_exc()}")
         return jsonify({'error': f'Download failed: {str(e)}'}), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
-    active_clients = [c for c in clients if c['status'] == 'active']
-    
+    """Health check"""
     return jsonify({
-        'status': 'Backend is running!', 
+        'status': 'Running',
         'timestamp': datetime.now().isoformat(),
-        'total_api_keys': len(api_keys),
-        'active_clients': len(active_clients),
-        'total_clients': len(clients),
-        'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
-        'upload_folder_path': UPLOAD_FOLDER,
-        'clients': [
-            {
-                'name': c['name'],
-                'status': c['status'],
-                'requests': c['requests'],
-                'errors': c['errors'],
-                'last_used': c['last_used'].isoformat() if c['last_used'] else None
-            }
-            for c in clients
-        ]
+        'ai_available': GEMINI_AVAILABLE,
+        'upload_folder': UPLOAD_FOLDER,
+        'mode': 'text_analysis_only' if not GEMINI_AVAILABLE else 'ai_enabled'
     })
 
-@app.route('/stats', methods=['GET'])
-def get_stats():
-    """Get detailed API usage statistics"""
-    active_clients = [c for c in clients if c['status'] == 'active']
-    total_requests = sum(c['requests'] for c in clients)
-    total_errors = sum(c['errors'] for c in clients)
-    
-    return jsonify({
-        'timestamp': datetime.now().isoformat(),
-        'summary': {
-            'total_api_keys': len(api_keys),
-            'active_clients': len(active_clients),
-            'inactive_clients': len(clients) - len(active_clients),
-            'total_requests': total_requests,
-            'total_errors': total_errors,
-            'success_rate': round((total_requests - total_errors) / total_requests * 100, 2) if total_requests > 0 else 0
-        },
-        'clients': [
-            {
-                'name': c['name'],
-                'key_preview': c['key'][:8] + '...',
-                'status': c['status'],
-                'requests': c['requests'],
-                'errors': c['errors'],
-                'error_rate': round(c['errors'] / c['requests'] * 100, 2) if c['requests'] > 0 else 0,
-                'last_used': c['last_used'].isoformat() if c['last_used'] else 'Never',
-                'is_active': c['status'] == 'active'
-            }
-            for c in clients
-        ]
-    })
-
-@app.route('/reset-clients', methods=['POST'])
-def reset_clients():
-    """Reset all clients (admin function)"""
-    try:
-        for client in clients:
-            client['errors'] = 0
-            client['status'] = 'active'
-            print(f"✅ Reset {client['name']}")
-        
+@app.route('/test-key', methods=['GET'])
+def test_key():
+    """Test API key"""
+    if not api_key:
         return jsonify({
-            'status': 'success',
-            'message': 'All clients reset to active',
-            'timestamp': datetime.now().isoformat()
+            'status': 'no_key',
+            'message': 'No API key configured',
+            'instructions': 'Add GEMINI_API_KEY environment variable',
+            'get_key_url': 'https://aistudio.google.com/app/apikey'
         })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    
+    if GEMINI_AVAILABLE:
+        return jsonify({
+            'status': 'valid',
+            'message': 'API key is valid and working',
+            'key_preview': api_key[:10] + '...'
+        })
+    else:
+        return jsonify({
+            'status': 'invalid',
+            'message': 'API key is invalid or not working',
+            'key_preview': api_key[:10] + '...',
+            'troubleshooting': [
+                '1. Get a new key from: https://aistudio.google.com/app/apikey',
+                '2. Make sure Gemini API is enabled in Google Cloud Console',
+                '3. Check billing is enabled for your project'
+            ]
+        })
 
 if __name__ == '__main__':
-    print("\n" + "="*50)
-    print("🚀 Resume Analyzer Backend Starting...")
+    port = int(os.environ.get('PORT', 10000))
+    debug = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
+    
+    print(f"\n🌐 Server starting on port {port}")
+    print(f"📊 Mode: {'AI Enabled' if GEMINI_AVAILABLE else 'Text Analysis Only'}")
+    print(f"📁 Uploads: {UPLOAD_FOLDER}")
     print("="*50)
     
-    port = int(os.environ.get('PORT', 5002))
-    
-    print(f"📍 Server: http://localhost:{port}")
-    print(f"🔑 API Keys Found: {len(api_keys)}")
-    print(f"🤖 Clients Initialized: {len(clients)}")
-    print(f"📁 Upload folder: {UPLOAD_FOLDER}")
-    
-    if not api_keys:
-        print("⚠️  WARNING: No API keys found!")
-        print("Please set environment variables:")
-        print("  GEMINI_API_KEY1=your_key_here")
-        print("  GEMINI_API_KEY2=your_key_here")
-        print("  GEMINI_API_KEY3=your_key_here")
-        print("\nGet your API keys from: https://makersuite.google.com/app/apikey")
-    
-    print("="*50 + "\n")
-    
-    # Use PORT environment variable (Render provides $PORT)
-    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
-    app.run(host='0.0.0.0', port=port, debug=debug_mode)
+    app.run(host='0.0.0.0', port=port, debug=debug)
