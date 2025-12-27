@@ -192,7 +192,7 @@ function App() {
       
       const isAIAvailable = await checkAIAvailability(3);
       if (!isAIAvailable) {
-        setError('AI service is currently busy. Please try the "Warm Up AI" button first.');
+        setError('AI service is currently busy. Please try again in a moment.');
         setLoading(false);
         setProgress(0);
         return;
@@ -427,56 +427,7 @@ function App() {
               <p>Upload your resume and job description to get AI-powered insights</p>
             </div>
 
-            {/* Service Status Card */}
-            <div className="service-status-card glass">
-              <div className="service-status-header">
-                <div className="status-icon">
-                  {aiStatus === 'available' ? <Check size={20} /> : 
-                   aiStatus === 'checking' ? <Loader size={20} className="spinner" /> : 
-                   <AlertTriangle size={20} />}
-                </div>
-                <div className="status-info">
-                  <h3>Service Status</h3>
-                  <p>
-                    {aiStatus === 'available' ? '✅ All systems operational' :
-                     aiStatus === 'checking' ? '🔄 Checking services...' :
-                     '⚠️ AI service needs attention'}
-                  </p>
-                </div>
-              </div>
-              
-              {aiStatus === 'unavailable' && (
-                <div className="service-status-actions">
-                  <p className="status-message">
-                    Free AI services can take 30-60 seconds to wake up after inactivity.
-                  </p>
-                  <button 
-                    className="warm-up-button"
-                    onClick={handleWarmUpAI}
-                    disabled={isWarmingUp}
-                  >
-                    {isWarmingUp ? (
-                      <>
-                        <Loader size={16} className="spinner" />
-                        Warming Up...
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={16} />
-                        Warm Up AI Service
-                      </>
-                    )}
-                  </button>
-                  <button 
-                    className="refresh-status-button"
-                    onClick={() => checkAIAvailability()}
-                  >
-                    <RefreshCw size={14} />
-                    Refresh Status
-                  </button>
-                </div>
-              )}
-            </div>
+            {/* REMOVED: Service Status Card */}
             
             <div className="upload-grid">
               <div className="upload-card glass">
