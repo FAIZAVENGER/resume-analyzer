@@ -15,7 +15,6 @@ import traceback
 import hashlib
 import re
 import random
-from collections import defaultdict
 
 # Load environment variables
 load_dotenv()
@@ -29,8 +28,10 @@ CORS(app, resources={
     }
 })
 
-# Configure Gemini AI - Support multiple separate API keys
+print("=" * 50)
 print("🔍 Checking for API keys...")
+
+# Configure Gemini AI - Support multiple separate API keys
 api_keys = []
 
 # Check for individual keys (KEY1, KEY2, KEY3, etc.)
@@ -69,12 +70,13 @@ else:
     for i, key in enumerate(api_keys):
         try:
             print(f"🔄 Testing Key {i+1} ({key[:8]}...)")
-            client = genai.Client(api_key=key, timeout=10)
+            client = genai.Client(api_key=key)  # NO timeout parameter!
             
-            # Quick test to validate key
+            # Quick test to validate key with timeout in generate_content
             test_response = client.models.generate_content(
                 model="gemini-1.5-flash",
-                contents="Say 'OK' if you're working."
+                contents="Say 'OK'",
+                timeout=5
             )
             
             if test_response and hasattr(test_response, 'text'):
@@ -267,29 +269,32 @@ def extract_experience_summary(resume_text):
     experience_keywords = ['experience', 'worked', 'employment', 'career', 'professional', 'work history']
     
     lines = resume_text.split('\n')
-    experience_lines = []
+    experience_sentences = []
     
+    # First, look for explicit experience sections
     for i, line in enumerate(lines):
         line_lower = line.lower()
         if any(keyword in line_lower for keyword in experience_keywords):
-            # Get this line and next few lines
-            context_lines = []
-            # Start from current line, go forward up to 5 lines
-            for j in range(0, 5):
-                if i + j < len(lines):
-                    context_line = lines[i + j].strip()
-                    if context_line and len(context_line) > 10:  # Not too short
-                        context_lines.append(context_line)
-            
-            if context_lines:
-                experience_lines.append(" ".join(context_lines))
+            # Get the next 5-10 lines that look like experience content
+            context = []
+            for j in range(i + 1, min(i + 10, len(lines))):
+                next_line = lines[j].strip()
+                if next_line and len(next_line) > 10 and len(next_line) < 200:
+                    if not next_line.lower().startswith(('education', 'skills', 'projects', 'certifications')):
+                        context.append(next_line)
+            if context:
+                experience_sentences.append(" ".join(context[:3]))
     
-    if experience_lines:
-        # Join first few experience lines
-        summary = " ".join(experience_lines[:2])
-        if len(summary) > 150:
-            summary = summary[:200] + "..."
-        return summary
+    # If no experience section found, look for job titles and dates
+    job_pattern = r'(\d{4}[\s\-]+(?:to|–|-|present|current)[\s\-]+\d{4}|\d{4}[\s\-]+(?:to|–|-|present|current)[\s\-]+(?:present|current))[\s\w\W]+?(?=\n\d{4}|\n[A-Z]|$)'
+    job_matches = re.finditer(job_pattern, resume_text, re.IGNORECASE | re.MULTILINE)
+    
+    for match in job_matches:
+        job_section = match.group()
+        # Extract first sentence or key phrases
+        sentences = re.split(r'[.!?]', job_section)
+        if sentences and len(sentences[0]) > 20:
+            experience_sentences.append(sentences[0].strip()[:150])
     
     # Count years if mentioned
     year_pattern = r'(20\d{2}|19\d{2})'
@@ -299,7 +304,19 @@ def extract_experience_summary(resume_text):
         if len(years) >= 2:
             experience_years = years[-1] - years[0]
             if 0 < experience_years <= 50:
-                return f"Professional with approximately {experience_years} years of experience as indicated in the resume."
+                experience_sentences.append(f"Professional with approximately {experience_years} years of experience.")
+    
+    if experience_sentences:
+        summary = " ".join(experience_sentences[:2])
+        # Ensure summary ends properly
+        if len(summary) > 150:
+            summary = summary[:150]
+            if not summary.endswith('.'):
+                summary += "..."
+        else:
+            if not summary.endswith('.'):
+                summary += "."
+        return summary
     
     # Look for job titles
     job_title_pattern = r'(?:Senior|Junior|Lead|Principal|Manager|Director|Engineer|Developer|Designer|Analyst|Consultant|Specialist)\s+[A-Za-z]+'
@@ -308,7 +325,7 @@ def extract_experience_summary(resume_text):
         unique_titles = list(set(job_titles[:3]))  # Get unique titles
         return f"Experienced professional with background in roles such as {', '.join(unique_titles)}."
     
-    return "Experienced professional with relevant background as shown in the resume."
+    return "Experienced professional with relevant background suitable for the position."
 
 def extract_education_summary(resume_text):
     """Extract education summary from resume"""
@@ -323,7 +340,7 @@ def extract_education_summary(resume_text):
     ]
     
     lines = resume_text.split('\n')
-    education_lines = []
+    education_sentences = []
     
     for i, line in enumerate(lines):
         line_lower = line.lower()
@@ -331,19 +348,23 @@ def extract_education_summary(resume_text):
             # Get this line and next few lines
             context_lines = []
             # Start from current line, go forward up to 4 lines
-            for j in range(0, 4):
-                if i + j < len(lines):
-                    context_line = lines[i + j].strip()
-                    if context_line:
-                        context_lines.append(context_line)
+            for j in range(0, min(4, len(lines) - i)):
+                context_line = lines[i + j].strip()
+                if context_line and len(context_line) < 200:
+                    context_lines.append(context_line)
             
             if context_lines:
-                education_lines.append(" ".join(context_lines))
+                education_sentences.append(" ".join(context_lines[:2]))
     
-    if education_lines:
-        summary = " ".join(education_lines[:2])
+    if education_sentences:
+        summary = " ".join(education_sentences[:2])
         if len(summary) > 120:
-            summary = summary[:150] + "..."
+            summary = summary[:120]
+            if not summary.endswith('.'):
+                summary += "..."
+        else:
+            if not summary.endswith('.'):
+                summary += "."
         return summary
     
     # Look for degree patterns
@@ -351,9 +372,9 @@ def extract_education_summary(resume_text):
     degrees = re.findall(degree_pattern, resume_text, re.IGNORECASE)
     if degrees:
         unique_degrees = list(set(degrees[:2]))
-        return f"Education includes {', '.join(unique_degrees)}."
+        return f"Educational qualifications include {', '.join(unique_degrees)}."
     
-    return "Qualified candidate with appropriate educational background as indicated in the resume."
+    return "Qualified candidate with appropriate educational background for the role."
 
 def check_quota(client_info):
     """Check if client has exceeded quota"""
@@ -436,6 +457,18 @@ def get_high_quality_fallback_analysis(resume_text="", job_description=""):
     experience_summary = extract_experience_summary(resume_text)
     education_summary = extract_education_summary(resume_text)
     
+    # Ensure summaries are complete
+    if experience_summary.endswith("..."):
+        experience_summary = experience_summary[:-3] + "."
+    if education_summary.endswith("..."):
+        education_summary = education_summary[:-3] + "."
+    
+    # If summaries are too short, provide better defaults
+    if len(experience_summary) < 30:
+        experience_summary = "Experienced professional with relevant background and skills suitable for the position."
+    if len(education_summary) < 30:
+        education_summary = "Qualified candidate with appropriate educational background and academic foundation."
+    
     # Determine skills matched based on job description
     skills_matched = []
     skills_missing = []
@@ -482,13 +515,10 @@ def get_high_quality_fallback_analysis(resume_text="", job_description=""):
         base_score += 5
     
     # Adjust based on experience indicators
+    if "experience" in experience_summary.lower():
+        base_score += 5
     if "year" in experience_summary.lower():
-        if "10" in experience_summary or "15" in experience_summary or "20" in experience_summary:
-            base_score += 10
-        elif "5" in experience_summary:
-            base_score += 7
-        else:
-            base_score += 5
+        base_score += 3
     
     # Adjust based on education indicators
     if any(word in education_summary.lower() for word in ['master', 'mba', 'phd', 'doctorate']):
@@ -501,11 +531,13 @@ def get_high_quality_fallback_analysis(resume_text="", job_description=""):
     
     # Determine recommendation
     if overall_score >= 80:
-        recommendation = "Recommended"
+        recommendation = "Recommended for Interview"
     elif overall_score >= 70:
         recommendation = "Consider for Interview"
+    elif overall_score >= 60:
+        recommendation = "Review Needed - Consider Improvements"
     else:
-        recommendation = "Review Needed"
+        recommendation = "Needs Significant Improvement"
     
     return {
         "candidate_name": candidate_name,
@@ -518,10 +550,18 @@ def get_high_quality_fallback_analysis(resume_text="", job_description=""):
         "key_strengths": skills_matched[:4] if skills_matched else ["Strong foundational skills", "Good communication abilities"],
         "areas_for_improvement": skills_missing[:4] if skills_missing else ["Consider additional certifications", "Gain industry-specific experience"],
         "is_fallback": True,
-        "fallback_reason": "Using enhanced resume analysis",
+        "fallback_reason": "Enhanced analysis extracting information directly from resume content",
         "analysis_quality": "enhanced_fallback",
         "extracted_info": True,
-        "quota_reset_time": (datetime.now() + timedelta(hours=24)).isoformat()
+        "quota_reset_time": (datetime.now() + timedelta(hours=24)).isoformat(),
+        "ai_status": "unavailable",
+        "enhanced_features": [
+            "name_extraction",
+            "skill_detection", 
+            "experience_analysis",
+            "education_detection",
+            "personalized_scoring"
+        ]
     }
 
 def analyze_resume_with_gemini(resume_text, job_description):
@@ -578,7 +618,7 @@ Be specific and base analysis on actual content from the resume."""
             response = client.models.generate_content(
                 model="gemini-1.5-flash",
                 contents=prompt,
-                timeout=10
+                timeout=15
             )
             return response
         except Exception as e:
@@ -591,7 +631,7 @@ Be specific and base analysis on actual content from the resume."""
         # Call with timeout
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(call_gemini)
-            response = future.result(timeout=15)
+            response = future.result(timeout=20)
         
         elapsed_time = time.time() - start_time
         print(f"✅ Gemini response in {elapsed_time:.2f} seconds")
@@ -1614,6 +1654,36 @@ def reset_quota():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/test-keys', methods=['GET'])
+def test_keys():
+    """Test if API keys are loaded"""
+    keys_info = []
+    
+    for i in range(1, 4):
+        key = os.getenv(f'GEMINI_API_KEY{i}', '')
+        keys_info.append({
+            'key_name': f'GEMINI_API_KEY{i}',
+            'exists': bool(key),
+            'length': len(key) if key else 0,
+            'preview': key[:10] + '...' + key[-4:] if key and len(key) > 14 else key
+        })
+    
+    # Also check single key
+    single_key = os.getenv('GEMINI_API_KEY', '')
+    keys_info.append({
+        'key_name': 'GEMINI_API_KEY',
+        'exists': bool(single_key),
+        'length': len(single_key) if single_key else 0,
+        'preview': single_key[:10] + '...' + single_key[-4:] if single_key and len(single_key) > 14 else single_key
+    })
+    
+    return jsonify({
+        'environment_check': keys_info,
+        'total_keys_found': sum(1 for k in keys_info if k['exists']),
+        'api_keys_in_memory': len(api_keys),
+        'valid_clients': len(valid_clients)
+    })
 
 if __name__ == '__main__':
     print("\n" + "="*50)
