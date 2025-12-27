@@ -411,7 +411,7 @@ Ensure summaries are detailed, professional, and comprehensive."""
     def call_gemini():
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3-pro-preview",  # UPDATED MODEL NAME
                 contents=prompt
             )
             return response
@@ -838,7 +838,7 @@ def quick_check():
         def gemini_check():
             try:
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3-pro-preview",  # UPDATED MODEL NAME
                     contents="Respond with just 'ready'"
                 )
                 return response
@@ -918,6 +918,23 @@ def health_check():
         'uptime': 'active',
         'version': '1.0.0'
     })
+
+@app.route('/list-models', methods=['GET'])
+def list_models():
+    """List all available models"""
+    try:
+        if not client:
+            return jsonify({'error': 'Client not initialized'})
+        
+        models = client.models.list()
+        model_names = [model.name for model in models]
+        
+        return jsonify({
+            'available_models': model_names,
+            'count': len(model_names)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 if __name__ == '__main__':
     print("\n" + "="*50)
