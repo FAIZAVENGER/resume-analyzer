@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 import traceback
 import hashlib
 import re
-import random
 
 # Load environment variables
 load_dotenv()
@@ -70,13 +69,12 @@ else:
     for i, key in enumerate(api_keys):
         try:
             print(f"🔄 Testing Key {i+1} ({key[:8]}...)")
-            client = genai.Client(api_key=key)  # NO timeout parameter!
+            client = genai.Client(api_key=key)
             
-            # Quick test to validate key with timeout in generate_content
+            # Quick test to validate key - NO timeout parameter
             test_response = client.models.generate_content(
                 model="gemini-1.5-flash",
-                contents="Say 'OK'",
-                timeout=5
+                contents="Say 'OK'"
             )
             
             if test_response and hasattr(test_response, 'text'):
@@ -617,8 +615,7 @@ Be specific and base analysis on actual content from the resume."""
         try:
             response = client.models.generate_content(
                 model="gemini-1.5-flash",
-                contents=prompt,
-                timeout=15
+                contents=prompt
             )
             return response
         except Exception as e:
@@ -628,10 +625,15 @@ Be specific and base analysis on actual content from the resume."""
         print(f"🤖 Attempting AI analysis with {client_info['name']}")
         start_time = time.time()
         
-        # Call with timeout
+        # Call with manual timeout using ThreadPoolExecutor
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(call_gemini)
-            response = future.result(timeout=20)
+            try:
+                response = future.result(timeout=30)  # 30 second timeout
+            except concurrent.futures.TimeoutError:
+                print("❌ Gemini API timeout after 30 seconds")
+                update_client_stats(client_info, success=False)
+                return get_high_quality_fallback_analysis(resume_text, job_description)
         
         elapsed_time = time.time() - start_time
         print(f"✅ Gemini response in {elapsed_time:.2f} seconds")
