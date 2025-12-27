@@ -1992,7 +1992,301 @@ html, body {
 .analyze-button.success {
   animation: successPulse 1s ease-in-out;
 }
+/* Service Status Card */
+.service-status-card {
+  border-radius: 20px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.8));
+}
 
+.service-status-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.status-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.status-icon svg {
+  color: var(--primary);
+}
+
+.status-info h3 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.status-info p {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.service-status-actions {
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.status-message {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+  line-height: 1.5;
+}
+
+.warm-up-button {
+  background: linear-gradient(135deg, #00ff9d, #4cc9f0);
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-right: 1rem;
+  transition: all 0.3s;
+}
+
+.warm-up-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(0, 255, 157, 0.3);
+}
+
+.warm-up-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.refresh-status-button {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  padding: 0.75rem 1.5rem;
+  border-radius: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.3s;
+}
+
+.refresh-status-button:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+}
+
+/* AI Status Indicator in Header */
+.ai-status-indicator {
+  position: relative;
+}
+
+.pulse-spinner {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 20px;
+  height: 20px;
+  background: var(--primary);
+  border-radius: 50%;
+  padding: 2px;
+  color: white;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Error Message with Action */
+.error-action-button {
+  background: rgba(99, 102, 241, 0.2);
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+  transition: all 0.3s;
+}
+
+.error-action-button:hover {
+  background: rgba(99, 102, 241, 0.3);
+}
+
+/* Loading Section Enhancements */
+.loading-note {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  border-left: 3px solid #6366f1;
+}
+
+/* Button States */
+.button-disabled-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  justify-content: center;
+  width: 100%;
+  color: #ff6b6b;
+}
+
+.button-disabled-content svg {
+  color: #ff6b6b;
+}
+
+/* File Upload Improvements */
+.file-preview-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.file-size {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  align-self: flex-start;
+}
+
+/* Progress Bar Animation */
+.progress-bar {
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Enhanced tips section */
+.tips-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.05), rgba(76, 201, 240, 0.05));
+  border-radius: 16px;
+  border: 1px solid rgba(99, 102, 241, 0.1);
+}
+
+.tip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.tip svg {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+/* Footer stats update */
+.footer-stats .stat {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  font-size: 0.8rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .service-status-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  
+  .warm-up-button,
+  .refresh-status-button {
+    width: 100%;
+    justify-content: center;
+    margin-right: 0;
+  }
+  
+  .error-action-button {
+    margin-top: 0.75rem;
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .header-features .feature:last-child {
+    grid-column: span 2;
+  }
+}
+
+/* Additional animations */
+@keyframes slideInFromRight {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.results-section {
+  animation: slideInFromRight 0.5s ease-out;
+}
+
+/* Success flash animation */
+@keyframes successFlash {
+  0%, 100% { background: linear-gradient(135deg, var(--primary), var(--primary-glow)); }
+  50% { background: linear-gradient(135deg, #00ff9d, #4cc9f0); }
+}
+
+.analyze-button.success {
+  animation: successFlash 1s ease-in-out;
+}
 /* Keep existing styles and add these at the end */
 /* Force full width on larger screens */
 @media (min-width: 1200px) {
