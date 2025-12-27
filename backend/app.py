@@ -58,6 +58,16 @@ if comma_keys_str:
 # Initialize clients
 clients = []
 valid_clients = []
+test_results = []
+
+# Available Gemini models to try
+GEMINI_MODELS = [
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
+    "gemini-1.5-pro",
+    "gemini-1.0-pro",
+    "gemini-pro"
+]
 
 if not api_keys:
     print("⚠️  WARNING: No Gemini API keys found!")
@@ -65,23 +75,67 @@ if not api_keys:
 else:
     print(f"✅ Total API keys loaded: {len(api_keys)}")
     
-    # Test each key
+    # Test each key with different model options
     for i, key in enumerate(api_keys):
-        try:
-            print(f"🔄 Testing Key {i+1} ({key[:8]}...)")
-            client = genai.Client(api_key=key)
-            
-            # Quick test to validate key - NO timeout parameter
-            test_response = client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents="Say 'OK'"
-            )
-            
-            if test_response and hasattr(test_response, 'text'):
+        key_valid = False
+        working_model = None
+        error_message = ""
+        
+        print(f"\n🔄 Testing Key {i+1} ({key[:8]}...)")
+        
+        # Try different models
+        for model in GEMINI_MODELS:
+            try:
+                print(f"  Trying model: {model}")
+                client = genai.Client(api_key=key)
+                
+                # Quick test with simple prompt
+                test_response = client.models.generate_content(
+                    model=model,
+                    contents="Say 'OK'",
+                    generation_config={
+                        "max_output_tokens": 10,
+                        "temperature": 0
+                    }
+                )
+                
+                if test_response and hasattr(test_response, 'text'):
+                    text = test_response.text.strip()
+                    if 'OK' in text or 'ok' in text.lower():
+                        key_valid = True
+                        working_model = model
+                        print(f"  ✅ Success with model: {model}")
+                        break
+                    else:
+                        print(f"  ⚠️  Model {model} returned unexpected: {text[:50]}")
+                else:
+                    print(f"  ⚠️  Model {model} returned no text")
+                    
+            except Exception as e:
+                error_msg = str(e)
+                if '404' in error_msg or 'model' in error_msg.lower():
+                    # Model not found, try next one
+                    continue
+                elif '403' in error_msg or 'permission' in error_msg.lower() or 'quota' in error_msg.lower():
+                    # Key might be valid but no permission or quota
+                    print(f"  ⚠️  Model {model}: Permission/Quota issue")
+                    key_valid = True  # Mark as valid but with limitations
+                    working_model = model
+                    error_message = error_msg
+                    break
+                else:
+                    # Other error
+                    error_message = error_msg
+                    print(f"  ❌ Model {model} failed: {error_msg[:80]}")
+        
+        if key_valid:
+            try:
+                client = genai.Client(api_key=key)
                 clients.append({
                     'client': client,
                     'key': key,
                     'name': f"Key {i+1}",
+                    'model': working_model,
                     'quota_exceeded': False,
                     'last_reset': datetime.now(),
                     'requests_today': 0,
@@ -90,38 +144,55 @@ else:
                     'minute_requests': [],
                     'errors': 0,
                     'total_requests': 0,
-                    'valid': True
+                    'valid': True,
+                    'tested_at': datetime.now().isoformat()
                 })
                 valid_clients.append(key)
-                print(f"  ✅ Key {i+1} is VALID")
-            else:
-                print(f"  ❌ Key {i+1} returned unexpected response")
-                
-        except Exception as e:
-            error_msg = str(e)
-            print(f"  ❌ Key {i+1} failed: {error_msg[:100]}")
-            
-            # Check error type
-            if '404' in error_msg or '401' in error_msg or '403' in error_msg or 'invalid' in error_msg.lower():
-                print(f"  ⚠️  Key {i+1} appears to be INVALID or deactivated")
-            elif 'quota' in error_msg.lower() or '429' in error_msg:
-                print(f"  ⚠️  Key {i+1} has quota exceeded")
-                clients.append({
-                    'client': None,
-                    'key': key,
-                    'name': f"Key {i+1} (Quota Exceeded)",
-                    'quota_exceeded': True,
-                    'last_reset': datetime.now(),
-                    'requests_today': 60,  # Mark as exceeded
-                    'requests_minute': 0,
-                    'last_request_time': datetime.now(),
-                    'minute_requests': [],
-                    'errors': 0,
-                    'total_requests': 0,
-                    'valid': False
+                print(f"  ✅ Key {i+1} is VALID with model: {working_model}")
+                test_results.append({
+                    'key': f"Key {i+1} ({key[:8]}...)",
+                    'status': 'VALID',
+                    'model': working_model,
+                    'error': None
                 })
-            else:
-                print(f"  ⚠️  Key {i+1} has other issues: {error_msg[:50]}")
+            except Exception as e:
+                print(f"  ❌ Key {i+1} client creation failed: {str(e)[:80]}")
+                test_results.append({
+                    'key': f"Key {i+1} ({key[:8]}...)",
+                    'status': 'INVALID',
+                    'model': None,
+                    'error': str(e)[:100]
+                })
+        else:
+            # Test if key format is valid (starts with AIzaSy)
+            if key.startswith('AIzaSy'):
+                print(f"  ℹ️  Key format looks correct but not working with any model")
+                print(f"  💡 Check: 1) Enable Gemini API in Google Cloud Console")
+                print(f"           2) Ensure API key has proper permissions")
+                print(f"           3) Check billing is enabled for the project")
+            
+            clients.append({
+                'client': None,
+                'key': key,
+                'name': f"Key {i+1} (Invalid)",
+                'model': None,
+                'quota_exceeded': True,
+                'last_reset': datetime.now(),
+                'requests_today': 60,  # Mark as exceeded
+                'requests_minute': 0,
+                'last_request_time': datetime.now(),
+                'minute_requests': [],
+                'errors': 0,
+                'total_requests': 0,
+                'valid': False,
+                'tested_at': datetime.now().isoformat()
+            })
+            test_results.append({
+                'key': f"Key {i+1} ({key[:8]}...)",
+                'status': 'INVALID',
+                'model': None,
+                'error': error_message if error_message else "Key not working with any available model"
+            })
 
 print(f"\n📊 Summary: {len(clients)} keys registered, {len(valid_clients)} valid keys")
 
@@ -566,7 +637,7 @@ def analyze_resume_with_gemini(resume_text, job_description):
     """Use Gemini AI to analyze resume against job description"""
     
     client_info = get_available_client()
-    if not client_info or not client_info.get('valid', True):
+    if not client_info or not client_info.get('valid', True) or not client_info.get('client'):
         print("⚠️  No valid Gemini clients - using enhanced fallback")
         return get_high_quality_fallback_analysis(resume_text, job_description)
     
@@ -577,9 +648,7 @@ def analyze_resume_with_gemini(resume_text, job_description):
         return get_high_quality_fallback_analysis(resume_text, job_description)
     
     client = client_info['client']
-    if not client:
-        print(f"⚠️  Client not initialized for {client_info['name']}")
-        return get_high_quality_fallback_analysis(resume_text, job_description)
+    model = client_info.get('model', 'gemini-1.5-flash')
     
     # TRUNCATE text
     resume_text = resume_text[:6000]
@@ -614,15 +683,19 @@ Be specific and base analysis on actual content from the resume."""
     def call_gemini():
         try:
             response = client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=prompt
+                model=model,
+                contents=prompt,
+                generation_config={
+                    "max_output_tokens": 2000,
+                    "temperature": 0.2
+                }
             )
             return response
         except Exception as e:
             raise e
     
     try:
-        print(f"🤖 Attempting AI analysis with {client_info['name']}")
+        print(f"🤖 Attempting AI analysis with {client_info['name']} (model: {model})")
         start_time = time.time()
         
         # Call with manual timeout using ThreadPoolExecutor
@@ -664,14 +737,16 @@ Be specific and base analysis on actual content from the resume."""
         analysis['fallback_reason'] = None
         analysis['analysis_quality'] = "ai"
         analysis['used_key'] = client_info['name']
+        analysis['model_used'] = model
         
         print(f"✅ AI Analysis completed for: {analysis.get('candidate_name', 'Unknown')}")
-        print(f"   Score: {analysis.get('overall_score')}, Key: {client_info['name']}")
+        print(f"   Score: {analysis.get('overall_score')}, Key: {client_info['name']}, Model: {model}")
         
         return analysis
         
     except json.JSONDecodeError as e:
         print(f"❌ JSON Parse Error: {e}")
+        print(f"Raw response: {result_text[:200]}")
         update_client_stats(client_info, success=False)
         print("🔄 Using enhanced fallback due to JSON error")
         return get_high_quality_fallback_analysis(resume_text, job_description)
@@ -684,7 +759,7 @@ Be specific and base analysis on actual content from the resume."""
         update_client_stats(client_info, success=False)
         
         # Mark as invalid if authentication error
-        if '404' in error_msg or '401' in error_msg or '403' in error_msg or 'invalid' in error_msg:
+        if '404' in error_msg or '401' in error_msg or '403' in error_msg or 'invalid' in error_msg or 'permission' in error_msg:
             print(f"⚠️  Marking {client_info['name']} as invalid")
             client_info['valid'] = False
         
@@ -830,6 +905,12 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
         ws[f'A{row}'].fill = subheader_fill
         ws[f'B{row}'] = analysis_data.get('used_key')
         row += 1
+        if analysis_data.get('model_used'):
+            ws[f'A{row}'] = "AI Model"
+            ws[f'A{row}'].font = subheader_font
+            ws[f'A{row}'].fill = subheader_fill
+            ws[f'B{row}'] = analysis_data.get('model_used')
+            row += 1
     
     row += 1
     
@@ -1449,7 +1530,8 @@ def quick_check():
                     'Experience analysis',
                     'Education detection'
                 ],
-                'suggestion': 'Configure valid GEMINI_API_KEY1, GEMINI_API_KEY2, etc. in environment variables'
+                'suggestion': 'Configure valid GEMINI_API_KEY1, GEMINI_API_KEY2, etc. in environment variables',
+                'key_test_results': test_results if 'test_results' in globals() else []
             })
         
         # Check if any client has available quota
@@ -1461,6 +1543,7 @@ def quick_check():
                     available_clients.append({
                         'name': client_info['name'],
                         'key': client_info['key'][:8] + '...',
+                        'model': client_info.get('model', 'unknown'),
                         'requests_today': client_info['requests_today'],
                         'quota_remaining': QUOTA_DAILY - client_info['requests_today'],
                         'total_requests': client_info['total_requests']
@@ -1475,7 +1558,9 @@ def quick_check():
                 'status': 'ready',
                 'total_keys': len(clients),
                 'valid_keys': len(valid_clients),
-                'strategy': 'Load balancing between multiple keys'
+                'strategy': 'Load balancing between multiple keys',
+                'tested_models': GEMINI_MODELS,
+                'key_test_results': test_results if 'test_results' in globals() else []
             })
         else:
             # All keys have quota exceeded or are invalid
@@ -1493,7 +1578,8 @@ def quick_check():
                 'status': 'quota_exceeded',
                 'suggestion': 'Enhanced fallback analysis will extract information directly from resumes',
                 'total_keys': len(clients),
-                'valid_keys': len(valid_clients)
+                'valid_keys': len(valid_clients),
+                'key_test_results': test_results if 'test_results' in globals() else []
             })
                 
     except Exception as e:
@@ -1503,7 +1589,8 @@ def quick_check():
             'reason': error_msg[:100],
             'enhanced_fallback_available': True,
             'status': 'error',
-            'suggestion': 'Enhanced fallback analysis is available and will extract information from resumes'
+            'suggestion': 'Enhanced fallback analysis is available and will extract information from resumes',
+            'key_test_results': test_results if 'test_results' in globals() else []
         })
 
 @app.route('/ping', methods=['GET'])
@@ -1521,7 +1608,8 @@ def ping():
             'hits': cache_hits,
             'misses': cache_misses,
             'size': len(analysis_cache)
-        }
+        },
+        'tested_models': GEMINI_MODELS
     })
 
 @app.route('/health', methods=['GET'])
@@ -1559,7 +1647,9 @@ def health_check():
             'daily_limit': QUOTA_DAILY,
             'per_minute_limit': QUOTA_PER_MINUTE,
             'strategy': 'Auto-rotation between valid keys'
-        }
+        },
+        'gemini_models_tested': GEMINI_MODELS,
+        'key_test_results': test_results if 'test_results' in globals() else []
     })
 
 @app.route('/stats', methods=['GET'])
@@ -1577,6 +1667,7 @@ def get_stats():
         clients_stats.append({
             'name': client_info['name'],
             'key_preview': client_info['key'][:8] + '...',
+            'model': client_info.get('model', 'N/A'),
             'is_valid': client_info.get('valid', True),
             'requests_today': client_info['requests_today'],
             'quota_remaining': QUOTA_DAILY - client_info['requests_today'],
@@ -1586,7 +1677,8 @@ def get_stats():
             'last_reset': client_info['last_reset'].isoformat(),
             'hours_to_reset': round(hours_to_reset, 2),
             'requests_minute': client_info['requests_minute'],
-            'status': 'valid' if client_info.get('valid', True) else 'invalid'
+            'status': 'valid' if client_info.get('valid', True) else 'invalid',
+            'tested_at': client_info.get('tested_at', 'N/A')
         })
     
     # Calculate overall stats
@@ -1627,6 +1719,10 @@ def get_stats():
             'daily_limit_per_key': QUOTA_DAILY,
             'per_minute_limit': QUOTA_PER_MINUTE,
             'total_daily_quota': total_quota
+        },
+        'gemini_config': {
+            'models_tested': GEMINI_MODELS,
+            'key_test_results': test_results if 'test_results' in globals() else []
         },
         'clients': clients_stats,
         'service_status': {
@@ -1684,7 +1780,58 @@ def test_keys():
         'environment_check': keys_info,
         'total_keys_found': sum(1 for k in keys_info if k['exists']),
         'api_keys_in_memory': len(api_keys),
-        'valid_clients': len(valid_clients)
+        'valid_clients': len(valid_clients),
+        'key_test_results': test_results if 'test_results' in globals() else [],
+        'gemini_models_available': GEMINI_MODELS
+    })
+
+@app.route('/debug-keys', methods=['GET'])
+def debug_keys():
+    """Debug endpoint to check key status"""
+    debug_info = []
+    
+    for i, client_info in enumerate(clients):
+        debug_info.append({
+            'index': i,
+            'name': client_info['name'],
+            'key_preview': client_info['key'][:10] + '...',
+            'valid': client_info.get('valid', False),
+            'model': client_info.get('model', 'N/A'),
+            'quota_exceeded': client_info['quota_exceeded'],
+            'requests_today': client_info['requests_today'],
+            'total_requests': client_info['total_requests'],
+            'errors': client_info['errors'],
+            'tested_at': client_info.get('tested_at', 'N/A'),
+            'status': 'Active' if client_info.get('valid') and not client_info['quota_exceeded'] else 
+                     'Quota Exceeded' if client_info['quota_exceeded'] else 
+                     'Invalid/Not Working'
+        })
+    
+    return jsonify({
+        'debug_info': debug_info,
+        'summary': {
+            'total_clients': len(clients),
+            'valid_clients': len(valid_clients),
+            'active_clients': len([c for c in clients if c.get('valid') and not c['quota_exceeded']]),
+            'test_results': test_results if 'test_results' in globals() else []
+        },
+        'troubleshooting': {
+            'issue': 'API keys are being rejected',
+            'possible_causes': [
+                'Keys are expired or invalid',
+                'Gemini API not enabled in Google Cloud Console',
+                'Billing not enabled for the project',
+                'Insufficient permissions for the API key',
+                'Using wrong model name (tried multiple models)'
+            ],
+            'solutions': [
+                'Regenerate API keys in Google AI Studio',
+                'Enable Gemini API in Google Cloud Console',
+                'Ensure billing is enabled for the project',
+                'Check API key permissions',
+                'Visit: https://makersuite.google.com/app/apikey'
+            ]
+        }
     })
 
 if __name__ == '__main__':
@@ -1704,19 +1851,26 @@ if __name__ == '__main__':
         for i, client_info in enumerate(clients):
             if client_info.get('valid', True):
                 status = "✅ Available" if not client_info['quota_exceeded'] else "⚠️ Quota Exceeded"
-                print(f"  {client_info['name']}: {client_info['key'][:8]}... {status}")
+                model = client_info.get('model', 'unknown')
+                print(f"  {client_info['name']}: {client_info['key'][:8]}... [{model}] {status}")
         
         print(f"\n✨ AI Features Enabled:")
         print(f"  • Auto-rotation between {len(valid_clients)} valid keys")
+        print(f"  • Multiple model support: {', '.join(GEMINI_MODELS)}")
         print(f"  • Load balancing (uses key with fewest requests)")
         print(f"  • Auto-switch when quota is exceeded")
         print(f"  • Total daily AI quota: {QUOTA_DAILY * len(valid_clients)} requests")
     else:
         print("⚠️  WARNING: No valid API keys found!")
         print("   The service will run in ENHANCED FALLBACK mode.")
-        print("   To enable AI analysis, add valid keys as:")
-        print("   GEMINI_API_KEY1=your_valid_key_1")
-        print("   GEMINI_API_KEY2=your_valid_key_2")
+        print("\n   To enable AI analysis, follow these steps:")
+        print("   1. Go to: https://makersuite.google.com/app/apikey")
+        print("   2. Create a new API key")
+        print("   3. Enable Gemini API in Google Cloud Console")
+        print("   4. Add your keys as environment variables:")
+        print("      GEMINI_API_KEY1=your_first_key_here")
+        print("      GEMINI_API_KEY2=your_second_key_here")
+        print("      GEMINI_API_KEY3=your_third_key_here")
     
     print(f"\n🛡️ Enhanced Fallback Features:")
     print(f"  • Name extraction from resumes")
@@ -1731,3 +1885,4 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
+    
