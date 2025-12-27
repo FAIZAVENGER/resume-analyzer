@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { 
   Upload, FileText, Briefcase, CheckCircle, XCircle, 
   Download, Loader, TrendingUp, Award, BookOpen, 
   Target, AlertCircle, Sparkles, Star, Zap, User,
-  ChevronRight, Shield, BarChart3, Globe, Clock
+  ChevronRight, Shield, BarChart3, Globe, Clock,
+  AlertTriangle, BatteryCharging, Brain, Rocket
 } from 'lucide-react';
 import './App.css';
-import logoImage from './leadsoc.png'; // Import the logo
+import logoImage from './leadsoc.png';
 
 function App() {
   const [resumeFile, setResumeFile] = useState(null);
@@ -16,9 +17,32 @@ function App() {
   const [analysis, setAnalysis] = useState(null);
   const [error, setError] = useState('');
   const [dragActive, setDragActive] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState('');
+  const [aiStatus, setAiStatus] = useState('idle');
 
   // Use production backend URL
   const API_BASE_URL = 'https://resume-analyzer-94mo.onrender.com';
+
+  // Check AI status on mount
+  useEffect(() => {
+    checkAIAvailability();
+  }, []);
+
+  const checkAIAvailability = async () => {
+    try {
+      setAiStatus('checking');
+      const response = await axios.get(`${API_BASE_URL}/quick-check`, {
+        timeout: 5000
+      });
+      setAiStatus(response.data.available ? 'available' : 'unavailable');
+      return response.data.available;
+    } catch (err) {
+      console.log('AI check failed:', err.message);
+      setAiStatus('unavailable');
+      return false;
+    }
+  };
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -50,6 +74,10 @@ function App() {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      if (file.size > 10 * 1024 * 1024) { // 10MB limit
+        setError('File size too large. Maximum size is 10MB.');
+        return;
+      }
       setResumeFile(file);
       setError('');
     }
@@ -68,22 +96,87 @@ function App() {
     setLoading(true);
     setError('');
     setAnalysis(null);
+    setProgress(0);
+    setLoadingMessage('Starting analysis...');
 
     const formData = new FormData();
     formData.append('resume', resumeFile);
     formData.append('jobDescription', jobDescription);
 
     try {
-      // CHANGED: Use production backend URL
+      // Check AI availability first
+      setLoadingMessage('Checking AI service availability...');
+      setProgress(10);
+      
+      const isAIAvailable = await checkAIAvailability();
+      if (!isAIAvailable) {
+        setError('AI service is currently busy. Please try again in a few moments.');
+        setLoading(false);
+        setProgress(0);
+        return;
+      }
+
+      // Start progress simulation
+      const progressInterval = setInterval(() => {
+        setProgress(prev => {
+          if (prev >= 85) return 85; // Cap at 85% until response
+          return prev + Math.random() * 5;
+        });
+      }, 1000);
+
+      // Upload file
+      setLoadingMessage('Uploading and processing resume...');
+      setProgress(30);
+
       const response = await axios.post(`${API_BASE_URL}/analyze`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        timeout: 90000, // 90 seconds timeout
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setProgress(30 + percentCompleted * 0.4); // 30-70% for upload
+            setLoadingMessage(percentCompleted < 50 ? 'Uploading file...' : 'Processing document...');
+          }
+        }
       });
+
+      clearInterval(progressInterval);
+      setProgress(95);
+      setLoadingMessage('Finalizing analysis...');
+
+      // Simulate final processing
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       setAnalysis(response.data);
+      setProgress(100);
+      setLoadingMessage('Analysis complete!');
+
+      // Reset progress after 1 second
+      setTimeout(() => {
+        setProgress(0);
+        setLoadingMessage('');
+      }, 1000);
+
     } catch (err) {
-      console.error('Analysis error:', err);
-      setError(err.response?.data?.error || 'An error occurred during analysis');
+      if (progressInterval) clearInterval(progressInterval);
+      
+      // Handle specific errors
+      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        setError('Request timeout. The AI is taking too long. Please try again in a moment.');
+      } else if (err.response?.status === 429) {
+        setError('Daily AI limit reached. Please try again tomorrow or contact admin.');
+      } else if (err.response?.data?.error?.includes('quota')) {
+        setError('AI service quota exceeded. Please try again in a few hours.');
+      } else if (err.response?.data?.error?.includes('size')) {
+        setError('File too large. Please upload a smaller file (max 10MB).');
+      } else {
+        setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
+      }
+      
+      setProgress(0);
+      setLoadingMessage('');
     } finally {
       setLoading(false);
     }
@@ -91,7 +184,6 @@ function App() {
 
   const handleDownload = () => {
     if (analysis?.excel_filename) {
-      // CHANGED: Use production backend URL
       window.open(`${API_BASE_URL}/download/${analysis.excel_filename}`, '_blank');
     }
   };
@@ -117,6 +209,17 @@ function App() {
     if (score >= 60) return '📋';
     return '💡';
   };
+
+  const getAiStatusMessage = () => {
+    switch(aiStatus) {
+      case 'checking': return { text: 'Checking AI service...', color: '#ffd166', icon: <BatteryCharging size={16} /> };
+      case 'available': return { text: 'AI Service Ready', color: '#00ff9d', icon: <Brain size={16} /> };
+      case 'unavailable': return { text: 'AI Service Busy', color: '#ff6b6b', icon: <AlertTriangle size={16} /> };
+      default: return { text: 'AI Status Unknown', color: '#94a3b8', icon: <Shield size={16} /> };
+    }
+  };
+
+  const aiStatusInfo = getAiStatusMessage();
 
   return (
     <div className="app">
@@ -175,6 +278,14 @@ function App() {
               <Globe size={16} />
               <span>Multi-format Support</span>
             </div>
+            <div className="feature" style={{ 
+              backgroundColor: `${aiStatusInfo.color}15`,
+              borderColor: `${aiStatusInfo.color}30`,
+              color: aiStatusInfo.color
+            }}>
+              {aiStatusInfo.icon}
+              <span>{aiStatusInfo.text}</span>
+            </div>
           </div>
         </div>
         
@@ -194,6 +305,19 @@ function App() {
               <h2>Start Your Analysis</h2>
               <p>Upload your resume and job description to get AI-powered insights</p>
             </div>
+
+            {/* Wake-up message for first time users */}
+            {aiStatus === 'unavailable' && (
+              <div className="wakeup-message">
+                <div className="wakeup-content">
+                  <Rocket size={20} />
+                  <div>
+                    <h4>AI Service Warming Up</h4>
+                    <p>The AI service is starting up. This may take 30-60 seconds on first use. Please wait or try again in a moment.</p>
+                  </div>
+                </div>
+              </div>
+            )}
             
             <div className="upload-grid">
               <div className="upload-card glass">
@@ -204,7 +328,7 @@ function App() {
                   </div>
                   <div>
                     <h2>Upload Resume</h2>
-                    <p className="card-subtitle">Supported: PDF, DOC, DOCX, TXT</p>
+                    <p className="card-subtitle">Supported: PDF, DOC, DOCX, TXT (Max 10MB)</p>
                   </div>
                 </div>
                 
@@ -311,17 +435,53 @@ function App() {
               </div>
             )}
 
+            {/* Loading Progress Bar */}
+            {loading && (
+              <div className="loading-section glass">
+                <div className="loading-container">
+                  <div className="loading-header">
+                    <Loader className="spinner" />
+                    <h3>AI Analysis in Progress</h3>
+                  </div>
+                  
+                  <div className="progress-container">
+                    <div className="progress-bar" style={{ width: `${progress}%` }}></div>
+                  </div>
+                  
+                  <div className="loading-text">
+                    <span className="loading-message">{loadingMessage}</span>
+                    <span className="loading-subtext">
+                      {progress < 30 ? 'Initializing...' : 
+                       progress < 60 ? 'Processing document...' : 
+                       progress < 85 ? 'Analyzing with AI...' : 
+                       'Finalizing results...'}
+                    </span>
+                  </div>
+                  
+                  <div className="progress-stats">
+                    <span>{Math.round(progress)}%</span>
+                    <span>•</span>
+                    <span>Estimated time: {progress > 80 ? '10s' : progress > 50 ? '30s' : '45s'}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <button
               className="analyze-button"
               onClick={handleAnalyze}
-              disabled={loading || !resumeFile || !jobDescription.trim()}
+              disabled={loading || !resumeFile || !jobDescription.trim() || aiStatus === 'checking'}
             >
               {loading ? (
-                <>
+                <div className="button-loading-content">
                   <Loader className="spinner" />
-                  <span>Analyzing Resume...</span>
-                  <span className="button-subtext">AI is processing your documents</span>
-                </>
+                  <span>Analyzing...</span>
+                </div>
+              ) : aiStatus === 'checking' ? (
+                <div className="button-loading-content">
+                  <BatteryCharging className="spinner" />
+                  <span>Checking AI Service...</span>
+                </div>
               ) : (
                 <>
                   <div className="button-content">
@@ -335,6 +495,18 @@ function App() {
                 </>
               )}
             </button>
+
+            {/* Tips Section */}
+            <div className="tips-section">
+              <div className="tip">
+                <Sparkles size={16} />
+                <span>Keep job description concise (500-2000 chars for best results)</span>
+              </div>
+              <div className="tip">
+                <Shield size={16} />
+                <span>Your data is processed securely and not stored permanently</span>
+              </div>
+            </div>
           </div>
         ) : (
           <div className="results-section">
@@ -605,6 +777,8 @@ function App() {
                   setResumeFile(null);
                   setJobDescription('');
                   setError('');
+                  setProgress(0);
+                  setLoadingMessage('');
                 }}>
                   <Sparkles size={20} />
                   <span>Analyze Another Resume</span>
