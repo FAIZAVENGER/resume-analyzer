@@ -5,12 +5,12 @@ from docx import Document
 import os
 import json
 import re
+import requests
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from dotenv import load_dotenv
 import traceback
-import requests
 
 # Load environment variables
 load_dotenv()
@@ -22,66 +22,61 @@ print("=" * 50)
 print("🚀 Resume Analyzer Backend Starting...")
 print("=" * 50)
 
-# Try to load API key
-api_key = os.getenv('GEMINI_API_KEY', '').strip()
+# Load API Keys
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '').strip()
 AI_ENABLED = False
-OPENAI_AVAILABLE = False
 
-if api_key and len(api_key) > 10:
-    print(f"✅ API Key found: {api_key[:10]}...")
+if OPENAI_API_KEY and len(OPENAI_API_KEY) > 10:
+    print(f"✅ OpenAI API Key found: {OPENAI_API_KEY[:10]}...")
     
-    # Try different models
-    models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro", "gemini-1.0-pro", "gemini-pro"]
-    
-    for model in models_to_try:
-        try:
-            print(f"🔄 Testing with model: {model}")
-            # Test via direct API call
-            headers = {'Content-Type': 'application/json'}
-            data = {
-                "contents": [{
-                    "parts": [{"text": "Say 'OK'"}]
-                }]
-            }
+    # Test OpenAI API
+    try:
+        headers = {
+            'Authorization': f'Bearer {OPENAI_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Simple test request
+        test_data = {
+            "model": "gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": "Say 'OK'"}],
+            "max_tokens": 5
+        }
+        
+        response = requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers=headers,
+            json=test_data,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            AI_ENABLED = True
+            print("✅ OpenAI API is working!")
+        else:
+            print(f"❌ OpenAI test failed: HTTP {response.status_code}")
+            print(f"Response: {response.text[:100]}")
             
-            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            response = requests.post(endpoint, headers=headers, json=data, timeout=5)
-            
-            if response.status_code == 200:
-                print(f"✅ Model {model} works!")
-                AI_ENABLED = True
-                ACTIVE_MODEL = model
-                break
-            else:
-                print(f"❌ Model {model} failed: HTTP {response.status_code}")
-                
-        except Exception as e:
-            print(f"❌ Model {model} error: {str(e)[:80]}")
-            continue
-    
-    if not AI_ENABLED:
-        print("⚠️  No Gemini models worked with this API key")
-        print("   The service will run in ENHANCED TEXT ANALYSIS mode")
+    except Exception as e:
+        print(f"❌ OpenAI connection error: {str(e)[:100]}")
 else:
-    print("⚠️  No API key found. Running in TEXT ANALYSIS MODE")
-
-# Check for OpenAI backup
-openai_key = os.getenv('OPENAI_API_KEY', '').strip()
-if openai_key and len(openai_key) > 10:
-    OPENAI_AVAILABLE = True
-    print(f"✅ OpenAI backup available: {openai_key[:10]}...")
+    print("⚠️  No OpenAI API key found")
 
 # Get upload folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 print(f"📁 Upload folder: {UPLOAD_FOLDER}")
+
+print("\n📊 Service Summary:")
+print(f"   OpenAI AI: {'✅ Enabled' if AI_ENABLED else '⚠️ Disabled'}")
+print(f"   Text Analysis: ✅ Always Available")
 print("=" * 50 + "\n")
 
 # ========== ENHANCED TEXT ANALYSIS ==========
 
 def extract_name_from_resume(text):
-    """Extract candidate name from resume text"""
+    """Extract candidate name from resume"""
     if not text:
         return "Professional Candidate"
     
@@ -91,7 +86,7 @@ def extract_name_from_resume(text):
         r'^([A-Z][a-z]+ [A-Z][a-z]+(?: [A-Z][a-z]+)?)',
         r'Name[:\s]+([A-Z][a-z]+ [A-Z][a-z]+)',
         r'Full Name[:\s]+([A-Z][a-z]+ [A-Z][a-z]+)',
-        r'^([A-Z][A-Z]+ [A-Z][A-Z]+)',
+        r'Contact Information\s*\n([A-Z][a-z]+ [A-Z][a-z]+)',
     ]
     
     for line in lines:
@@ -104,7 +99,7 @@ def extract_name_from_resume(text):
                     if len(name.split()) >= 2:
                         return name.title()
     
-    # Look for email signature
+    # Check for email signature
     for line in lines:
         email_match = re.search(r'([A-Z][a-z]+ [A-Z][a-z]+)\s*<[^>]+>', line)
         if email_match:
@@ -113,7 +108,7 @@ def extract_name_from_resume(text):
     return "Professional Candidate"
 
 def extract_skills_from_resume(text):
-    """Extract skills from resume text"""
+    """Extract skills from resume"""
     common_skills = [
         'Python', 'JavaScript', 'Java', 'C++', 'React', 'Node.js', 'SQL',
         'AWS', 'Docker', 'Git', 'HTML', 'CSS', 'TypeScript', 'Angular',
@@ -155,7 +150,7 @@ def extract_experience_summary(text):
     lines = text.split('\n')
     for i, line in enumerate(lines):
         line_lower = line.lower()
-        if any(word in line_lower for word in ['experience', 'work history', 'employment']):
+        if any(word in line_lower for word in ['experience', 'work history', 'employment', 'professional']):
             context = []
             for j in range(i+1, min(i+6, len(lines))):
                 context_line = lines[j].strip()
@@ -167,7 +162,7 @@ def extract_experience_summary(text):
                     summary = summary[:200] + "..."
                 return summary
     
-    # Look for years of experience
+    # Look for years
     year_pattern = r'\b(20\d{2}|19\d{2})\b'
     years = re.findall(year_pattern, text)
     if years:
@@ -184,7 +179,7 @@ def extract_education_summary(text):
     lines = text.split('\n')
     for i, line in enumerate(lines):
         line_lower = line.lower()
-        if any(word in line_lower for word in ['education', 'university', 'college', 'degree']):
+        if any(word in line_lower for word in ['education', 'university', 'college', 'degree', 'bachelor', 'master']):
             context = []
             for j in range(i, min(i+4, len(lines))):
                 context_line = lines[j].strip()
@@ -199,22 +194,23 @@ def extract_education_summary(text):
     return "Qualified candidate with appropriate educational background."
 
 def calculate_match_score(resume_text, job_description):
-    """Calculate match score"""
+    """Calculate match score between resume and job"""
     base_score = 65
     
-    # Check for experience
+    # Experience bonus
     if any(word in resume_text.lower() for word in ['experience', 'worked', 'years', 'professional']):
         base_score += 10
     
-    # Check for education
-    if any(word in resume_text.lower() for word in ['degree', 'university', 'college', 'bachelor', 'master']):
+    # Education bonus
+    if any(word in resume_text.lower() for word in ['degree', 'university', 'college', 'bachelor', 'master', 'phd']):
         base_score += 8
     
-    # Check skills match
+    # Skills match
     if job_description:
         skills = extract_skills_from_resume(resume_text)
         job_desc_lower = job_description.lower()
         matched = 0
+        
         for skill in skills:
             if skill.lower() in job_desc_lower:
                 matched += 1
@@ -226,17 +222,18 @@ def calculate_match_score(resume_text, job_description):
         elif matched >= 1:
             base_score += 5
     
+    # Ensure score is within reasonable range
     return min(max(base_score, 50), 95)
 
-def get_enhanced_text_analysis(resume_text, job_description):
-    """Get comprehensive text analysis"""
+def get_text_analysis(resume_text, job_description):
+    """Get analysis using text extraction"""
     candidate_name = extract_name_from_resume(resume_text)
     extracted_skills = extract_skills_from_resume(resume_text)
     experience_summary = extract_experience_summary(resume_text)
     education_summary = extract_education_summary(resume_text)
     overall_score = calculate_match_score(resume_text, job_description)
     
-    # Determine skills matched
+    # Match skills with job
     skills_matched = []
     skills_missing = []
     
@@ -253,8 +250,7 @@ def get_enhanced_text_analysis(resume_text, job_description):
         skills_matched = ["Communication Skills", "Problem Solving", "Team Collaboration"]
     
     if len(skills_missing) < 3:
-        common_missing = ["Industry-specific certifications", "Advanced technical training", "Leadership experience"]
-        skills_missing.extend(common_missing[:3])
+        skills_missing.extend(["Industry certifications", "Advanced training", "Leadership experience"])
     
     # Determine recommendation
     if overall_score >= 80:
@@ -275,93 +271,51 @@ def get_enhanced_text_analysis(resume_text, job_description):
         "overall_score": overall_score,
         "recommendation": recommendation,
         "key_strengths": skills_matched[:4] if skills_matched else ["Strong foundational skills", "Good communication"],
-        "areas_for_improvement": skills_missing[:4] if skills_missing else ["Consider additional training", "Gain more experience"],
+        "areas_for_improvement": skills_missing[:4] if skills_missing else ["Additional training", "More experience"],
         "analysis_mode": "text_analysis",
-        "ai_available": AI_ENABLED
+        "ai_enabled": AI_ENABLED
     }
 
-def analyze_with_gemini(resume_text, job_description):
-    """Analyze using Gemini API if available"""
-    if not AI_ENABLED or not api_key:
-        return get_enhanced_text_analysis(resume_text, job_description)
-    
-    try:
-        # Use direct API call
-        headers = {'Content-Type': 'application/json'}
-        data = {
-            "contents": [{
-                "parts": [{"text": f"""Analyze this resume against job description:
-
-RESUME:
-{resume_text[:6000]}
-
-JOB DESCRIPTION:
-{job_description[:3000]}
-
-Extract candidate name from resume. Return ONLY JSON:
-{{
-    "candidate_name": "Name from resume or 'Professional Candidate'",
-    "skills_matched": ["skills matching job"],
-    "skills_missing": ["missing skills"],
-    "experience_summary": "brief experience",
-    "education_summary": "brief education",
-    "overall_score": 0-100,
-    "recommendation": "Highly Recommended/Recommended/Consider/Not Recommended",
-    "key_strengths": ["strengths"],
-    "areas_for_improvement": ["improvements"]
-}}"""}]
-            }]
-        }
-        
-        # Try the working model
-        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro:generateContent?key={api_key}"
-        response = requests.post(endpoint, headers=headers, json=data, timeout=30)
-        
-        if response.status_code == 200:
-            result = response.json()
-            text = result['candidates'][0]['content']['parts'][0]['text']
-            
-            # Clean and parse
-            text = text.replace('```json', '').replace('```', '').strip()
-            analysis = json.loads(text)
-            analysis['analysis_mode'] = "ai_analysis"
-            analysis['ai_available'] = True
-            
-            return analysis
-        else:
-            print(f"❌ Gemini API failed: HTTP {response.status_code}")
-            return get_enhanced_text_analysis(resume_text, job_description)
-            
-    except Exception as e:
-        print(f"❌ Gemini error: {str(e)[:100]}")
-        return get_enhanced_text_analysis(resume_text, job_description)
-
 def analyze_with_openai(resume_text, job_description):
-    """Try OpenAI as backup"""
-    if not OPENAI_AVAILABLE:
-        return None
+    """Analyze using OpenAI GPT"""
+    if not AI_ENABLED:
+        return get_text_analysis(resume_text, job_description)
     
     try:
         headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {openai_key}'
+            'Authorization': f'Bearer {OPENAI_API_KEY}',
+            'Content-Type': 'application/json'
         }
         
-        data = {
-            "model": "gpt-3.5-turbo",
-            "messages": [
-                {"role": "system", "content": "You are a resume analyzer. Return valid JSON only."},
-                {"role": "user", "content": f"""Analyze resume against job:
+        prompt = f"""Analyze this resume against the job description:
 
 RESUME:
 {resume_text[:4000]}
 
-JOB:
+JOB DESCRIPTION:
 {job_description[:2000]}
 
-Return JSON with: candidate_name, skills_matched, skills_missing, experience_summary, education_summary, overall_score (0-100), recommendation, key_strengths, areas_for_improvement"""}
+Extract information and provide analysis. Return ONLY valid JSON with these exact fields:
+{{
+    "candidate_name": "Extract name from resume or use 'Professional Candidate'",
+    "skills_matched": ["list skills from resume that match job requirements"],
+    "skills_missing": ["list important job skills not found in resume"],
+    "experience_summary": "Brief summary of work experience",
+    "education_summary": "Brief summary of education",
+    "overall_score": "Number between 0-100",
+    "recommendation": "Highly Recommended/Recommended/Consider/Needs Improvement",
+    "key_strengths": ["list 3-4 key strengths"],
+    "areas_for_improvement": ["list 3-4 areas to improve"]
+}}"""
+        
+        data = {
+            "model": "gpt-3.5-turbo",
+            "messages": [
+                {"role": "system", "content": "You are a professional resume analyzer. Always return valid JSON."},
+                {"role": "user", "content": prompt}
             ],
-            "temperature": 0.2
+            "temperature": 0.2,
+            "max_tokens": 1500
         }
         
         response = requests.post(
@@ -374,265 +328,38 @@ Return JSON with: candidate_name, skills_matched, skills_missing, experience_sum
         if response.status_code == 200:
             result = response.json()
             content = result['choices'][0]['message']['content']
+            
+            # Clean response
             content = content.replace('```json', '').replace('```', '').strip()
             
+            # Parse JSON
             analysis = json.loads(content)
-            analysis['analysis_mode'] = "openai_analysis"
-            analysis['ai_available'] = True
             
+            # Ensure score is numeric
+            try:
+                analysis['overall_score'] = int(analysis['overall_score'])
+                if analysis['overall_score'] > 100:
+                    analysis['overall_score'] = 100
+                elif analysis['overall_score'] < 0:
+                    analysis['overall_score'] = 0
+            except:
+                analysis['overall_score'] = 75
+            
+            analysis['analysis_mode'] = "ai_analysis"
+            analysis['ai_enabled'] = True
+            
+            print(f"✅ OpenAI analysis successful")
             return analysis
+            
+        else:
+            print(f"❌ OpenAI API error: {response.status_code}")
+            return get_text_analysis(resume_text, job_description)
             
     except Exception as e:
         print(f"❌ OpenAI error: {str(e)[:100]}")
-    
-    return None
+        return get_text_analysis(resume_text, job_description)
 
-# ========== FLASK ROUTES ==========
-
-@app.route('/')
-def home():
-    return '''
-    <!DOCTYPE html>
-<html>
-<head>
-    <title>Resume Analyzer</title>
-    <style>
-        body {
-            font-family: 'Arial', sans-serif;
-            margin: 0;
-            padding: 40px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .container {
-            max-width: 800px;
-            width: 100%;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            padding: 40px;
-            text-align: center;
-        }
-        
-        h1 {
-            color: #2c3e50;
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        
-        .subtitle {
-            color: #7f8c8d;
-            font-size: 1.1rem;
-            margin-bottom: 30px;
-        }
-        
-        .status-card {
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            border-radius: 15px;
-            padding: 20px;
-            margin: 20px 0;
-            border-left: 5px solid #667eea;
-        }
-        
-        .status-item {
-            display: flex;
-            justify-content: space-between;
-            margin: 10px 0;
-            padding: 8px 0;
-            border-bottom: 1px solid #e0e0e0;
-        }
-        
-        .status-label {
-            font-weight: 600;
-            color: #2c3e50;
-        }
-        
-        .status-value {
-            color: #27ae60;
-            font-weight: 600;
-        }
-        
-        .warning-card {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            border-radius: 10px;
-            padding: 20px;
-            margin: 20px 0;
-        }
-        
-        .endpoints {
-            text-align: left;
-            margin: 30px 0;
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 15px;
-            border: 2px solid #e9ecef;
-        }
-        
-        .endpoint {
-            background: white;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 10px;
-            border-left: 4px solid #667eea;
-        }
-        
-        .method {
-            display: inline-block;
-            background: #667eea;
-            color: white;
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-weight: bold;
-            margin-right: 10px;
-            font-size: 0.9rem;
-        }
-        
-        .api-status {
-            display: inline-block;
-            padding: 8px 20px;
-            background: #27ae60;
-            color: white;
-            border-radius: 20px;
-            font-weight: bold;
-            margin: 20px 0;
-        }
-        
-        .btn {
-            display: inline-block;
-            padding: 12px 30px;
-            margin: 0 10px;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            color: white;
-            text-decoration: none;
-            border-radius: 30px;
-            font-weight: bold;
-            transition: all 0.3s;
-            border: none;
-            cursor: pointer;
-            font-size: 1rem;
-        }
-        
-        .btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
-        }
-        
-        .btn-secondary {
-            background: linear-gradient(90deg, #11998e, #38ef7d);
-        }
-        
-        .footer {
-            margin-top: 40px;
-            color: #7f8c8d;
-            font-size: 0.9rem;
-        }
-        
-        .error { color: #e74c3c; }
-        .success { color: #27ae60; }
-        .warning { color: #f39c12; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>📄 Resume Analyzer</h1>
-        <p class="subtitle">Smart resume analysis with enhanced text processing</p>
-        
-        <div class="api-status">
-            ✅ SERVICE IS LIVE
-        </div>
-        
-        <div class="status-card">
-            <div class="status-item">
-                <span class="status-label">Service Status:</span>
-                <span class="status-value">Online</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">Analysis Mode:</span>
-                <span class="''' + ('success' if AI_ENABLED else 'warning') + '''">
-                    ''' + ('✅ AI Enabled' if AI_ENABLED else '📝 Text Analysis') + '''
-                </span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">OpenAI Backup:</span>
-                <span class="''' + ('success' if OPENAI_AVAILABLE else 'warning') + '''">
-                    ''' + ('✅ Available' if OPENAI_AVAILABLE else '⚠️ Not configured') + '''
-                </span>
-            </div>
-        </div>
-        
-        ''' + ('''
-        <div class="warning-card">
-            <h3>📝 Running in Text Analysis Mode</h3>
-            <p>The service is fully functional with <strong>enhanced text analysis</strong>:</p>
-            <ul style="text-align: left; margin: 10px 20px;">
-                <li>✅ Name extraction from resumes</li>
-                <li>✅ Skill detection and matching</li>
-                <li>✅ Experience analysis</li>
-                <li>✅ Education detection</li>
-                <li>✅ Intelligent scoring</li>
-                <li>✅ Excel report generation</li>
-            </ul>
-            <p><strong>To enable AI features:</strong></p>
-            <ol style="text-align: left; margin: 10px 20px;">
-                <li>Visit: <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a></li>
-                <li>Click "Create API Key"</li>
-                <li>Add key as: <code>GEMINI_API_KEY</code></li>
-                <li>Or add OpenAI key: <code>OPENAI_API_KEY</code></li>
-            </ol>
-        </div>
-        ''' if not AI_ENABLED else '') + '''
-        
-        <div class="endpoints">
-            <h2>📡 API Endpoints</h2>
-            
-            <div class="endpoint">
-                <span class="method">POST</span>
-                <span class="path">/analyze</span>
-                <p>Upload resume (PDF/DOCX/TXT) with job description</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/health</span>
-                <p>Check service status</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/test</span>
-                <p>Test analysis with sample data</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/download/{filename}</span>
-                <p>Download Excel reports</p>
-            </div>
-        </div>
-        
-        <div style="margin-top: 30px;">
-            <a href="/health" class="btn">Check Health</a>
-            <a href="/test" class="btn btn-secondary">Test Analysis</a>
-        </div>
-        
-        <div class="footer">
-            <p>Powered by Flask | Enhanced Text Analysis + Optional AI</p>
-            <p>Works perfectly even without API keys!</p>
-        </div>
-    </div>
-</body>
-</html>
-    '''
+# ========== FILE EXTRACTION ==========
 
 def extract_text_from_pdf(file_path):
     """Extract text from PDF"""
@@ -647,7 +374,8 @@ def extract_text_from_pdf(file_path):
         if not text.strip():
             return "Error: PDF appears to be empty"
         
-        return text
+        return text[:10000]  # Limit size
+        
     except Exception as e:
         return f"Error reading PDF: {str(e)}"
 
@@ -660,7 +388,8 @@ def extract_text_from_docx(file_path):
         if not text.strip():
             return "Error: Document appears to be empty"
         
-        return text
+        return text[:10000]  # Limit size
+        
     except Exception as e:
         return f"Error reading DOCX: {str(e)}"
 
@@ -673,12 +402,15 @@ def extract_text_from_txt(file_path):
         if not text.strip():
             return "Error: Text file appears to be empty"
         
-        return text
+        return text[:10000]  # Limit size
+        
     except Exception as e:
         return f"Error reading TXT: {str(e)}"
 
+# ========== EXCEL REPORT ==========
+
 def create_excel_report(analysis_data, filename):
-    """Create Excel report"""
+    """Create beautiful Excel report"""
     wb = Workbook()
     ws = wb.active
     ws.title = "Resume Analysis"
@@ -726,8 +458,10 @@ def create_excel_report(analysis_data, filename):
     ws[f'A{row}'].font = subheader_font
     ws[f'A{row}'].fill = subheader_fill
     mode = analysis_data.get('analysis_mode', 'text_analysis')
-    ws[f'B{row}'] = "AI Analysis" if mode == "ai_analysis" else "Text Analysis"
-    ws[f'B{row}'].font = Font(color="70AD47" if mode == "ai_analysis" else "FF9900", bold=True)
+    mode_text = "AI Analysis (OpenAI)" if mode == "ai_analysis" else "Text Analysis"
+    mode_color = "70AD47" if mode == "ai_analysis" else "FF9900"
+    ws[f'B{row}'] = mode_text
+    ws[f'B{row}'].font = Font(color=mode_color, bold=True)
     row += 2
     
     # Score
@@ -737,12 +471,14 @@ def create_excel_report(analysis_data, filename):
     ws[f'A{row}'].font = Font(bold=True, size=12, color="FFFFFF")
     score = analysis_data.get('overall_score', 0)
     ws[f'B{row}'] = f"{score}/100"
+    
     if score < 60:
-        score_color = "C00000"
+        score_color = "C00000"  # Red
     elif score >= 80:
-        score_color = "70AD47"
+        score_color = "70AD47"  # Green
     else:
-        score_color = "FFC000"
+        score_color = "FFC000"  # Yellow
+    
     ws[f'B{row}'].font = Font(bold=True, size=12, color=score_color)
     row += 1
     
@@ -858,8 +594,252 @@ def create_excel_report(analysis_data, filename):
     # Save file
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     wb.save(filepath)
-    print(f"📄 Excel report saved: {filepath}")
     return filepath
+
+# ========== FLASK ROUTES ==========
+
+@app.route('/')
+def home():
+    return '''
+    <!DOCTYPE html>
+<html>
+<head>
+    <title>Resume Analyzer</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            text-align: center;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 5px solid #667eea;
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .status-label {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .status-value {
+            font-weight: 600;
+        }
+        
+        .success { color: #27ae60; }
+        .warning { color: #f39c12; }
+        .info { color: #3498db; }
+        
+        .features {
+            text-align: left;
+            margin: 30px 0;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+        }
+        
+        .feature-item {
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .feature-item:last-child {
+            border-bottom: none;
+        }
+        
+        .endpoints {
+            text-align: left;
+            margin: 30px 0;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+        }
+        
+        .endpoint {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .method {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 0.9rem;
+        }
+        
+        .api-status {
+            display: inline-block;
+            padding: 8px 20px;
+            background: #27ae60;
+            color: white;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 12px 30px;
+            margin: 0 10px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            color: white;
+            text-decoration: none;
+            border-radius: 30px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+        
+        .footer {
+            margin-top: 40px;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📄 Resume Analyzer</h1>
+        <p class="subtitle">Professional Resume Analysis with OpenAI</p>
+        
+        <div class="api-status">
+            ✅ SERVICE IS LIVE
+        </div>
+        
+        <div class="status-card">
+            <div class="status-item">
+                <span class="status-label">Service Status:</span>
+                <span class="status-value success">Online</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">OpenAI AI:</span>
+                <span class="status-value ''' + ('success' if AI_ENABLED else 'warning') + '''">
+                    ''' + ('✅ Enabled' if AI_ENABLED else '⚠️ Add OpenAI Key') + '''
+                </span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Text Analysis:</span>
+                <span class="status-value success">✅ Always Available</span>
+            </div>
+        </div>
+        
+        <div class="features">
+            <h3>✨ Features:</h3>
+            <div class="feature-item">✅ Resume Upload (PDF, DOCX, TXT)</div>
+            <div class="feature-item">✅ AI-Powered Analysis ''' + ('(Enabled)' if AI_ENABLED else '(Add OPENAI_API_KEY)') + '''</div>
+            <div class="feature-item">✅ Enhanced Text Analysis</div>
+            <div class="feature-item">✅ Skill Matching & Scoring</div>
+            <div class="feature-item">✅ Professional Excel Reports</div>
+            <div class="feature-item">✅ Candidate Name Extraction</div>
+        </div>
+        
+        ''' + ('''
+        <div style="background: #e8f5e8; border: 2px solid #4CAF50; border-radius: 10px; padding: 20px; margin: 20px 0;">
+            <h3 style="color: #2e7d32; margin-top: 0;">✅ OpenAI is Ready!</h3>
+            <p>Your OpenAI API key is working perfectly.</p>
+            <p>Upload resumes for AI-powered analysis.</p>
+        </div>
+        ''' if AI_ENABLED else '''
+        <div style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 10px; padding: 20px; margin: 20px 0;">
+            <h3 style="color: #856404; margin-top: 0;">🔑 Add OpenAI API Key</h3>
+            <p>To enable AI analysis, add your OpenAI API key:</p>
+            <ol style="text-align: left; margin: 10px 20px;">
+                <li>Get key from: <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a></li>
+                <li>In Render dashboard, go to Environment</li>
+                <li>Add variable: <code>OPENAI_API_KEY=your_key_here</code></li>
+                <li>Redeploy the application</li>
+            </ol>
+            <p><strong>Note:</strong> Text analysis works perfectly even without AI!</p>
+        </div>
+        ''') + '''
+        
+        <div class="endpoints">
+            <h3>📡 API Endpoints:</h3>
+            <div class="endpoint">
+                <span class="method">POST</span>
+                <span>/analyze</span>
+                <p>Upload resume with job description</p>
+            </div>
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span>/health</span>
+                <p>Check service status</p>
+            </div>
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span>/test</span>
+                <p>Test with sample data</p>
+            </div>
+        </div>
+        
+        <div style="margin-top: 30px;">
+            <a href="/health" class="btn">Check Health</a>
+            <a href="/test" class="btn">Test Analysis</a>
+        </div>
+        
+        <div class="footer">
+            <p>Powered by Flask & OpenAI | Deployed on Render</p>
+            <p>Visit: <a href="https://resume-analyzer-1-pevo.onrender.com">https://resume-analyzer-1-pevo.onrender.com</a></p>
+        </div>
+    </div>
+</body>
+</html>
+    '''
 
 @app.route('/analyze', methods=['POST'])
 def analyze_resume():
@@ -869,10 +849,10 @@ def analyze_resume():
         print("📥 New analysis request")
         
         if 'resume' not in request.files:
-            return jsonify({'error': 'No resume file'}), 400
+            return jsonify({'error': 'No resume file provided'}), 400
         
         if 'jobDescription' not in request.form:
-            return jsonify({'error': 'No job description'}), 400
+            return jsonify({'error': 'No job description provided'}), 400
         
         resume_file = request.files['resume']
         job_description = request.form['jobDescription']
@@ -880,7 +860,7 @@ def analyze_resume():
         if resume_file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        # Check size
+        # Check file size
         resume_file.seek(0, 2)
         file_size = resume_file.tell()
         resume_file.seek(0)
@@ -904,7 +884,7 @@ def analyze_resume():
         elif file_ext == '.txt':
             resume_text = extract_text_from_txt(file_path)
         else:
-            return jsonify({'error': 'Unsupported format. Use PDF, DOCX, or TXT'}), 400
+            return jsonify({'error': 'Unsupported file format. Use PDF, DOCX, or TXT'}), 400
         
         if resume_text.startswith('Error'):
             return jsonify({'error': resume_text}), 500
@@ -912,17 +892,8 @@ def analyze_resume():
         print(f"✅ Extracted {len(resume_text)} characters")
         
         # Analyze
-        print(f"🤖 Analyzing...")
-        
-        # Try AI first if available
-        if AI_ENABLED:
-            analysis = analyze_with_gemini(resume_text, job_description)
-        elif OPENAI_AVAILABLE:
-            analysis = analyze_with_openai(resume_text, job_description)
-            if not analysis:
-                analysis = get_enhanced_text_analysis(resume_text, job_description)
-        else:
-            analysis = get_enhanced_text_analysis(resume_text, job_description)
+        print(f"🤖 Analyzing with {'OpenAI' if AI_ENABLED else 'Text Analysis'}...")
+        analysis = analyze_with_openai(resume_text, job_description)
         
         # Create Excel report
         print("📊 Creating Excel report...")
@@ -934,7 +905,7 @@ def analyze_resume():
         
         print(f"✅ Analysis complete. Score: {analysis.get('overall_score')}")
         print(f"  Name: {analysis.get('candidate_name')}")
-        print(f"  Mode: {analysis.get('analysis_mode', 'text_analysis')}")
+        print(f"  Mode: {analysis.get('analysis_mode')}")
         print("="*50 + "\n")
         
         return jsonify(analysis)
@@ -945,7 +916,7 @@ def analyze_resume():
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_report(filename):
-    """Download report"""
+    """Download Excel report"""
     try:
         import re
         safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
@@ -970,46 +941,75 @@ def health_check():
     return jsonify({
         'status': 'Running',
         'timestamp': datetime.now().isoformat(),
-        'ai_enabled': AI_ENABLED,
-        'openai_available': OPENAI_AVAILABLE,
-        'mode': 'ai_analysis' if AI_ENABLED else 'text_analysis',
-        'upload_folder': UPLOAD_FOLDER
+        'openai_enabled': AI_ENABLED,
+        'text_analysis': 'always_available',
+        'upload_folder': UPLOAD_FOLDER,
+        'service_url': 'https://resume-analyzer-1-pevo.onrender.com'
     })
 
 @app.route('/test', methods=['GET'])
 def test_analysis():
-    """Test endpoint"""
-    sample_resume = """John Doe
-123 Main St, City, State 12345
-(123) 456-7890 | john.doe@email.com
+    """Test endpoint with sample data"""
+    sample_resume = """John Smith
+Software Engineer
+(123) 456-7890 | john.smith@email.com | LinkedIn: linkedin.com/in/johnsmith
 
-EXPERIENCE
-Software Engineer, ABC Company
-June 2020 - Present
-- Developed web applications using Python and React
-- Implemented RESTful APIs
-- Collaborated with cross-functional teams
+PROFESSIONAL SUMMARY
+Experienced software engineer with 5+ years in full-stack development. 
+Specialized in Python, React, and cloud technologies.
+
+WORK EXPERIENCE
+Senior Software Engineer, Tech Innovations Inc.
+January 2020 - Present
+- Led development of customer-facing web applications using React and Python
+- Implemented RESTful APIs serving 10,000+ daily requests
+- Reduced server costs by 30% through AWS optimization
+- Mentored 3 junior developers
+
+Software Developer, Digital Solutions Corp.
+June 2017 - December 2019
+- Developed and maintained e-commerce platforms
+- Integrated payment gateways and shipping APIs
+- Improved application performance by 40%
 
 EDUCATION
 Bachelor of Science in Computer Science
-XYZ University, 2016-2020
+University of Technology, 2013-2017
+GPA: 3.8/4.0
 
 SKILLS
-Python, JavaScript, React, Node.js, SQL, Git, Docker, AWS"""
+Programming: Python, JavaScript, TypeScript, Java
+Frameworks: React, Node.js, Flask, Django
+Databases: MySQL, PostgreSQL, MongoDB
+Cloud: AWS (EC2, S3, Lambda), Docker, Kubernetes
+Tools: Git, Jenkins, Jira, Postman"""
 
-    sample_job = """Looking for Software Engineer with:
-- Python development experience
-- React and JavaScript skills
-- API development knowledge
-- Cloud experience (AWS)
-- Team collaboration skills"""
+    sample_job = """Software Engineer Position
 
-    analysis = get_enhanced_text_analysis(sample_resume, sample_job)
+We are looking for a skilled Software Engineer to join our team.
+
+Requirements:
+- 3+ years of software development experience
+- Strong proficiency in Python and JavaScript
+- Experience with React or similar frontend frameworks
+- Knowledge of REST API development
+- Familiarity with cloud platforms (AWS preferred)
+- Experience with databases (SQL and NoSQL)
+- Strong problem-solving skills
+- Good communication and teamwork abilities
+
+Nice to have:
+- Experience with Docker and Kubernetes
+- Knowledge of CI/CD pipelines
+- Understanding of microservices architecture
+- Previous experience in agile development"""
+
+    analysis = analyze_with_openai(sample_resume, sample_job)
     
     return jsonify({
         'test': 'success',
         'analysis': analysis,
-        'note': 'This is a test analysis using enhanced text processing'
+        'note': 'This is a test analysis using sample resume and job description'
     })
 
 if __name__ == '__main__':
@@ -1017,19 +1017,14 @@ if __name__ == '__main__':
     debug = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
     
     print(f"\n🌐 Server starting on port {port}")
-    print(f"📊 AI Mode: {'Enabled' if AI_ENABLED else 'Text Analysis Only'}")
-    print(f"🤖 OpenAI: {'Available' if OPENAI_AVAILABLE else 'Not configured'}")
-    print(f"📁 Uploads: {UPLOAD_FOLDER}")
+    print(f"🤖 OpenAI: {'✅ ENABLED' if AI_ENABLED else '⚠️ DISABLED (Add OPENAI_API_KEY)'}")
+    print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print("="*50)
-    print("\n✅ Service is ready! Visit:")
-    print(f"   https://resume-analyzer-1-pevo.onrender.com")
-    print("\nEven without API keys, you get:")
-    print("   ✅ Name extraction")
-    print("   ✅ Skill detection")
-    print("   ✅ Experience analysis")
-    print("   ✅ Education detection")
-    print("   ✅ Intelligent scoring")
-    print("   ✅ Excel report generation")
+    print("\n✅ Service is ready!")
+    print(f"   URL: https://resume-analyzer-1-pevo.onrender.com")
+    print("\n📝 Test endpoints:")
+    print(f"   • /test - Test analysis with sample data")
+    print(f"   • /health - Check service status")
     print("="*50)
     
     app.run(host='0.0.0.0', port=port, debug=debug)
