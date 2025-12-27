@@ -6,6 +6,7 @@ from docx import Document
 import os
 import json
 import time
+import concurrent.futures
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -263,6 +264,12 @@ def home():
             
             <div class="endpoint">
                 <span class="method">GET</span>
+                <span class="path">/ping</span>
+                <p class="description">Simple ping to keep service awake</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
                 <span class="path">/download/{filename}</span>
                 <p class="description">Download generated Excel analysis reports</p>
             </div>
@@ -270,7 +277,7 @@ def home():
         
         <div class="buttons">
             <a href="/health" class="btn">Check Health</a>
-            <a href="/quick-check" class="btn btn-secondary">Quick Check</a>
+            <a href="/ping" class="btn btn-secondary">Ping Service</a>
         </div>
         
         <div class="footer">
@@ -350,26 +357,30 @@ def extract_text_from_txt(file_path):
         print(f"TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
+def fallback_response(reason):
+    """Return a fallback response when AI fails"""
+    return {
+        "candidate_name": reason,
+        "skills_matched": ["Try again in a moment"],
+        "skills_missing": ["AI service issue"],
+        "experience_summary": "Analysis temporarily unavailable",
+        "education_summary": "Please try again shortly",
+        "overall_score": 0,
+        "recommendation": "Service Error - Retry",
+        "key_strengths": [],
+        "areas_for_improvement": []
+    }
+
 def analyze_resume_with_gemini(resume_text, job_description):
-    """Use Gemini AI to analyze resume against job description - FAST VERSION"""
+    """Use Gemini AI to analyze resume against job description - WITH TIMEOUT"""
     
     if client is None:
-        print("❌ Gemini client not initialized. Check API key.")
-        return {
-            "candidate_name": "API Configuration Error",
-            "skills_matched": ["Please check your API key configuration"],
-            "skills_missing": [],
-            "experience_summary": "Gemini API not configured properly",
-            "education_summary": "Check GEMINI_API_KEY in .env file",
-            "overall_score": 0,
-            "recommendation": "Configuration Error",
-            "key_strengths": [],
-            "areas_for_improvement": []
-        }
+        print("❌ Gemini client not initialized.")
+        return fallback_response("API Configuration Error")
     
-    # TRUNCATE text to prevent huge prompts and improve speed
-    resume_text = resume_text[:5000]  # Limit to 5000 chars
-    job_description = job_description[:2000]  # Limit to 2000 chars
+    # TRUNCATE text
+    resume_text = resume_text[:5000]
+    job_description = job_description[:2000]
     
     prompt = f"""RESUME ANALYSIS - BE CONCISE:
 Analyze this resume against the job description.
@@ -383,51 +394,41 @@ JOB DESCRIPTION:
 Return ONLY this JSON:
 {{
     "candidate_name": "extract from resume or 'Candidate'",
-    "skills_matched": ["max 5 skills from resume matching job"],
-    "skills_missing": ["max 5 skills from job not in resume"],
-    "experience_summary": "one sentence summary",
-    "education_summary": "one sentence summary",
-    "overall_score": 0-100 based on match,
+    "skills_matched": ["max 5 skills"],
+    "skills_missing": ["max 5 skills"],
+    "experience_summary": "one sentence",
+    "education_summary": "one sentence",
+    "overall_score": 0-100,
     "recommendation": "Highly Recommended/Recommended/Needs Improvement",
-    "key_strengths": ["max 3 strengths"],
-    "areas_for_improvement": ["max 3 areas"]
+    "key_strengths": ["max 3"],
+    "areas_for_improvement": ["max 3"]
 }}"""
+    
+    def call_gemini():
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
+            return response
+        except Exception as e:
+            raise e
     
     try:
         print("🤖 Sending to Gemini AI...")
         start_time = time.time()
         
-        # Use a timeout wrapper for Gemini call
-        timeout_seconds = 30
-        
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",  # Using flash model for speed
-                contents=prompt
-            )
-        except Exception as api_error:
-            print(f"❌ Gemini API Error: {str(api_error)}")
-            # Return quick fallback for quota issues
-            if "quota" in str(api_error).lower() or "429" in str(api_error):
-                return {
-                    "candidate_name": "AI Service Limit Reached",
-                    "skills_matched": ["Try again in a few hours"],
-                    "skills_missing": ["Daily quota may be exceeded"],
-                    "experience_summary": "AI service temporarily unavailable",
-                    "education_summary": "Please try again later",
-                    "overall_score": 0,
-                    "recommendation": "Service Limit - Retry Later",
-                    "key_strengths": [],
-                    "areas_for_improvement": []
-                }
-            raise api_error
+        # Call with 30 second timeout
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(call_gemini)
+            response = future.result(timeout=30)
         
         elapsed_time = time.time() - start_time
         print(f"✅ Gemini response in {elapsed_time:.2f} seconds")
         
         result_text = response.text.strip()
         
-        # Clean response quickly
+        # Clean response
         result_text = result_text.replace('```json', '').replace('```', '').strip()
         
         # Parse JSON
@@ -441,7 +442,7 @@ Return ONLY this JSON:
             
         print(f"✅ Analysis completed for: {analysis.get('candidate_name', 'Unknown')}")
         
-        # Validate and limit arrays for consistency
+        # Validate and limit arrays
         analysis['skills_matched'] = analysis.get('skills_matched', [])[:5]
         analysis['skills_missing'] = analysis.get('skills_missing', [])[:5]
         analysis['key_strengths'] = analysis.get('key_strengths', [])[:3]
@@ -449,35 +450,21 @@ Return ONLY this JSON:
         
         return analysis
         
+    except concurrent.futures.TimeoutError:
+        print("❌ Gemini API timeout after 30 seconds")
+        return fallback_response("AI Timeout - Service taking too long")
+        
     except json.JSONDecodeError as e:
         print(f"❌ JSON Parse Error: {e}")
-        print(f"Raw response: {result_text[:200]}...")
-        # Return a structured fallback
-        return {
-            "candidate_name": "Analysis Error",
-            "skills_matched": ["JSON parsing failed"],
-            "skills_missing": ["Please try again"],
-            "experience_summary": "Error in AI response format",
-            "education_summary": "Retry analysis",
-            "overall_score": 0,
-            "recommendation": "Parse Error - Retry",
-            "key_strengths": [],
-            "areas_for_improvement": []
-        }
+        return fallback_response("JSON Parse Error")
+        
     except Exception as e:
         print(f"❌ Gemini Analysis Error: {str(e)}")
-        # Return quick fallback instead of waiting
-        return {
-            "candidate_name": "AI Service Error",
-            "skills_matched": ["Service temporarily unavailable"],
-            "skills_missing": ["Please try again shortly"],
-            "experience_summary": f"Error: {str(e)[:100]}",
-            "education_summary": "AI service issue detected",
-            "overall_score": 0,
-            "recommendation": "Service Error - Retry",
-            "key_strengths": [],
-            "areas_for_improvement": []
-        }
+        error_msg = str(e).lower()
+        if "quota" in error_msg or "429" in error_msg:
+            return fallback_response("Daily Quota Exceeded")
+        else:
+            return fallback_response(f"AI Error: {str(e)[:50]}")
 
 def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     """Create a beautiful Excel report with the analysis"""
@@ -803,46 +790,78 @@ def quick_check():
         if client is None:
             return jsonify({'available': False, 'reason': 'Client not initialized'})
         
-        # Very quick test with timeout
+        # Very quick test with thread timeout
         start_time = time.time()
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents="Respond with just 'ready'",
-            timeout=10  # 10 second timeout
-        )
         
-        response_time = time.time() - start_time
+        def gemini_check():
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents="Respond with just 'ready'"
+                )
+                return response
+            except Exception as e:
+                raise e
         
-        if 'ready' in response.text.lower():
+        try:
+            # Use thread with timeout
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(gemini_check)
+                response = future.result(timeout=10)  # 10 second timeout
+            
+            response_time = time.time() - start_time
+            
+            if 'ready' in response.text.lower():
+                return jsonify({
+                    'available': True,
+                    'response_time': f'{response_time:.2f}s',
+                    'status': 'ready',
+                    'quota_status': 'ok'
+                })
+            else:
+                return jsonify({
+                    'available': True,
+                    'response_time': f'{response_time:.2f}s',
+                    'status': 'responding',
+                    'quota_status': 'ok'
+                })
+                
+        except concurrent.futures.TimeoutError:
             return jsonify({
-                'available': True,
-                'response_time': f'{response_time:.2f}s',
-                'status': 'ready',
-                'quota_status': 'ok'
-            })
-        else:
-            return jsonify({
-                'available': True,
-                'response_time': f'{response_time:.2f}s',
-                'status': 'responding',
-                'quota_status': 'ok'
+                'available': False,
+                'reason': 'Request timed out after 10 seconds',
+                'status': 'timeout',
+                'suggestion': 'AI service is taking too long. Please try again.'
             })
             
     except Exception as e:
         error_msg = str(e)
         if "quota" in error_msg.lower() or "429" in error_msg:
             status = 'quota_exceeded'
+            suggestion = 'Daily quota exceeded. Please try again tomorrow.'
         elif "timeout" in error_msg.lower():
             status = 'timeout'
+            suggestion = 'AI service timeout. Please try again in a moment.'
         else:
             status = 'error'
+            suggestion = 'AI service error. Please try again.'
             
         return jsonify({
             'available': False,
             'reason': error_msg[:100],
             'status': status,
-            'suggestion': 'AI service may be busy. Try again in a moment.'
+            'suggestion': suggestion
         })
+
+@app.route('/ping', methods=['GET'])
+def ping():
+    """Simple ping to keep service awake"""
+    return jsonify({
+        'status': 'pong',
+        'timestamp': datetime.now().isoformat(),
+        'service': 'resume-analyzer',
+        'ai_configured': client is not None
+    })
 
 @app.route('/health', methods=['GET'])
 def health_check():
