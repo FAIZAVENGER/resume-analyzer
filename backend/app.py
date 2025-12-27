@@ -28,35 +28,58 @@ CORS(app, resources={
     }
 })
 
-# Configure Gemini AI - Multiple API keys for quota management
-api_keys = os.getenv('GEMINI_API_KEYS', '').split(',')
-api_keys = [key.strip() for key in api_keys if key.strip()]
+# Configure Gemini AI - Support multiple separate API keys
+# Check for keys in this order: GEMINI_API_KEY1, GEMINI_API_KEY2, GEMINI_API_KEY3, GEMINI_API_KEY
+api_keys = []
+
+# Check for individual keys (KEY1, KEY2, KEY3, etc.)
+for i in range(1, 10):  # Check up to 9 separate keys
+    key = os.getenv(f'GEMINI_API_KEY{i}', '').strip()
+    if key:
+        api_keys.append(key)
+        print(f"✅ Found GEMINI_API_KEY{i}: {key[:8]}...")
+
+# Also check for single key (backward compatibility)
+single_key = os.getenv('GEMINI_API_KEY', '').strip()
+if single_key and single_key not in api_keys:
+    api_keys.append(single_key)
+    print(f"✅ Found GEMINI_API_KEY: {single_key[:8]}...")
+
+# Check for comma-separated keys (legacy format)
+comma_keys_str = os.getenv('GEMINI_API_KEYS', '').strip()
+if comma_keys_str:
+    comma_keys = [k.strip() for k in comma_keys_str.split(',') if k.strip()]
+    for key in comma_keys:
+        if key not in api_keys:
+            api_keys.append(key)
+            print(f"✅ Found from GEMINI_API_KEYS: {key[:8]}...")
 
 if not api_keys:
-    print("⚠️  WARNING: No Gemini API keys found in GEMINI_API_KEYS")
+    print("⚠️  WARNING: No Gemini API keys found!")
     print("ℹ️  Using fallback mode only - No AI analysis available")
     clients = []
-    current_key_index = 0
 else:
-    print(f"✅ Loaded {len(api_keys)} API keys")
+    print(f"✅ Total API keys loaded: {len(api_keys)}")
     clients = []
-    current_key_index = 0
     for i, key in enumerate(api_keys):
         try:
             client = genai.Client(api_key=key)
             clients.append({
                 'client': client,
                 'key': key,
+                'name': f"Key {i+1}",
                 'quota_exceeded': False,
                 'last_reset': datetime.now(),
                 'requests_today': 0,
                 'requests_minute': 0,
                 'last_request_time': datetime.now(),
-                'minute_requests': []
+                'minute_requests': [],
+                'errors': 0,
+                'total_requests': 0
             })
-            print(f"  Key {i+1}: {key[:8]}... ✅")
+            print(f"  {i+1}. {key[:8]}... ✅ Initialized")
         except Exception as e:
-            print(f"  Key {i+1}: {key[:8]}... ❌ Error: {str(e)}")
+            print(f"  {i+1}. {key[:8]}... ❌ Error: {str(e)}")
 
 # Quota tracking
 QUOTA_DAILY = 60
@@ -66,7 +89,6 @@ QUOTA_PER_MINUTE = 15
 analysis_cache = {}
 cache_hits = 0
 cache_misses = 0
-request_log = defaultdict(list)
 
 # Get absolute path for uploads folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -84,7 +106,8 @@ def check_quota(client_info):
         client_info['requests_today'] = 0
         client_info['quota_exceeded'] = False
         client_info['minute_requests'] = []
-        print(f"✅ Quota reset for key {client_info['key'][:8]}...")
+        client_info['errors'] = 0
+        print(f"✅ Quota reset for {client_info['name']} ({client_info['key'][:8]}...)")
     
     # Check minute reset
     minute_ago = now - timedelta(minutes=1)
@@ -93,6 +116,11 @@ def check_quota(client_info):
         if t > minute_ago
     ]
     client_info['requests_minute'] = len(client_info['minute_requests'])
+    
+    # Check if key has too many errors (maybe invalid key)
+    if client_info['errors'] > 10:
+        client_info['quota_exceeded'] = True
+        return False, "Too many errors - key may be invalid"
     
     # Check limits
     if client_info['requests_today'] >= QUOTA_DAILY:
@@ -105,28 +133,62 @@ def check_quota(client_info):
     return True, "OK"
 
 def get_available_client():
-    """Get an available client with quota"""
+    """Get the best available client with quota"""
     if not clients:
         return None
     
     now = datetime.now()
     
-    # Try to find a client with available quota
+    # Strategy 1: Try to find a client with available quota and fewest requests today
+    available_clients = []
     for client_info in clients:
+        quota_ok, reason = check_quota(client_info)
+        if quota_ok and not client_info['quota_exceeded']:
+            available_clients.append(client_info)
+    
+    if available_clients:
+        # Pick the one with fewest requests today (load balancing)
+        available_clients.sort(key=lambda x: x['requests_today'])
+        return available_clients[0]
+    
+    # Strategy 2: If all have quota exceeded, try to use one with oldest reset
+    # (might be close to resetting)
+    clients.sort(key=lambda x: x['last_reset'])
+    
+    # Check if any client is close to resetting (< 1 hour)
+    for client_info in clients:
+        hours_to_reset = (client_info['last_reset'] + timedelta(days=1) - now).total_seconds() / 3600
+        if hours_to_reset < 1:
+            return client_info
+    
+    # Strategy 3: Return the first client as last resort
+    return clients[0]
+
+def update_client_stats(client_info, success=True):
+    """Update client request statistics"""
+    now = datetime.now()
+    if success:
+        client_info['requests_today'] += 1
+        client_info['total_requests'] += 1
+        client_info['last_request_time'] = now
+        client_info['minute_requests'].append(now)
+    else:
+        client_info['errors'] += 1
+
+def rotate_client():
+    """Get next available client in rotation"""
+    if not clients:
+        return None
+    
+    # Try to find next available client
+    for i in range(len(clients)):
+        client_info = clients[i]
         quota_ok, reason = check_quota(client_info)
         if quota_ok and not client_info['quota_exceeded']:
             return client_info
     
-    # All clients exhausted, try to use one with oldest reset
-    clients.sort(key=lambda x: x['last_reset'])
+    # If none available, return first one
     return clients[0]
-
-def update_client_stats(client_info):
-    """Update client request statistics"""
-    now = datetime.now()
-    client_info['requests_today'] += 1
-    client_info['last_request_time'] = now
-    client_info['minute_requests'].append(now)
 
 @app.route('/')
 def home():
@@ -211,6 +273,12 @@ def home():
         
         .quota-item {
             margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #ffeaa7;
+        }
+        
+        .quota-item:last-child {
+            border-bottom: none;
         }
         
         .endpoints {
@@ -317,12 +385,17 @@ def home():
             color: #f39c12;
             font-weight: 600;
         }
+        
+        .info {
+            color: #3498db;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🤖 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis using Google Gemini</p>
+        <p class="subtitle">Multi-key AI resume analysis using Google Gemini</p>
         
         <div class="api-status">
             ✅ API IS RUNNING
@@ -334,8 +407,12 @@ def home():
                 <span class="status-value">Online</span>
             </div>
             <div class="status-item">
-                <span class="status-label">Gemini API Keys:</span>
-                ''' + (f'<span class="success">✅ {len(clients)}/{len(api_keys)} Working</span>' if clients else '<span class="error">❌ NOT CONFIGURED</span>') + '''
+                <span class="status-label">Total API Keys:</span>
+                <span class="status-value">''' + str(len(api_keys)) + '''</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Working Clients:</span>
+                <span class="status-value">''' + str(len(clients)) + '''</span>
             </div>
             <div class="status-item">
                 <span class="status-label">Cache Hits:</span>
@@ -348,15 +425,18 @@ def home():
         </div>
         
         <div class="quota-status">
-            <h3>📊 Quota Status</h3>
+            <h3>📊 Multi-Key Quota Status</h3>
+            <p>Using separate keys: GEMINI_API_KEY1, GEMINI_API_KEY2, etc.</p>
             ''' + (''.join([f'''
             <div class="quota-item">
-                <strong>Key {i+1} ({c["key"][:8]}...):</strong>
+                <strong>{c["name"]} ({c["key"][:8]}...):</strong>
                 <span class="{("warning" if c["quota_exceeded"] else "success")}">
                     {'⚠️ Quota Exceeded' if c["quota_exceeded"] else '✅ Available'}
                 </span>
-                <small>(Used: {c["requests_today"]}/{QUOTA_DAILY} today)</small>
-            </div>''' for i, c in enumerate(clients)]) if clients else '<p>No API keys configured</p>') + '''
+                <br>
+                <small>Used: {c["requests_today"]}/{QUOTA_DAILY} today • Total: {c["total_requests"]} • Errors: {c["errors"]}</small>
+            </div>''' for i, c in enumerate(clients)]) if clients else '<p class="warning">No API keys configured</p>') + '''
+            <p><small>Auto-rotates between available keys when quota is exceeded.</small></p>
         </div>
         
         <div class="endpoints">
@@ -389,7 +469,7 @@ def home():
             <div class="endpoint">
                 <span class="method">GET</span>
                 <span class="path">/stats</span>
-                <p class="description">View API usage statistics</p>
+                <p class="description">View detailed API usage statistics</p>
             </div>
             
             <div class="endpoint">
@@ -518,7 +598,7 @@ def get_high_quality_fallback_analysis(resume_text="", job_description=""):
     }
 
 def analyze_resume_with_gemini(resume_text, job_description):
-    """Use Gemini AI to analyze resume against job description"""
+    """Use Gemini AI to analyze resume against job description with key rotation"""
     
     client_info = get_available_client()
     if not client_info:
@@ -530,10 +610,21 @@ def analyze_resume_with_gemini(resume_text, job_description):
     # Check quota
     quota_ok, reason = check_quota(client_info)
     if not quota_ok:
-        print(f"⚠️  Quota issue for client: {reason}")
-        fallback = get_high_quality_fallback_analysis(resume_text, job_description)
-        fallback['fallback_reason'] = f"AI quota: {reason}"
-        return fallback
+        print(f"⚠️  Quota issue for {client_info['name']}: {reason}")
+        # Try to rotate to another client
+        rotated_client = rotate_client()
+        if rotated_client and rotated_client != client_info:
+            print(f"🔄 Rotating from {client_info['name']} to {rotated_client['name']}")
+            client_info = rotated_client
+            quota_ok, reason = check_quota(client_info)
+            if not quota_ok:
+                fallback = get_high_quality_fallback_analysis(resume_text, job_description)
+                fallback['fallback_reason'] = f"All keys exhausted: {reason}"
+                return fallback
+        else:
+            fallback = get_high_quality_fallback_analysis(resume_text, job_description)
+            fallback['fallback_reason'] = f"AI quota: {reason}"
+            return fallback
     
     client = client_info['client']
     
@@ -576,7 +667,7 @@ Ensure summaries are detailed, professional, and comprehensive."""
             raise e
     
     try:
-        print(f"🤖 Sending to Gemini AI (Key: {client_info['key'][:8]}...)")
+        print(f"🤖 Sending to Gemini AI ({client_info['name']}: {client_info['key'][:8]}...)")
         start_time = time.time()
         
         # Call with 30 second timeout
@@ -588,7 +679,7 @@ Ensure summaries are detailed, professional, and comprehensive."""
         print(f"✅ Gemini response in {elapsed_time:.2f} seconds")
         
         # Update client stats (successful request)
-        update_client_stats(client_info)
+        update_client_stats(client_info, success=True)
         
         result_text = response.text.strip()
         
@@ -609,19 +700,23 @@ Ensure summaries are detailed, professional, and comprehensive."""
         analysis['fallback_reason'] = None
         analysis['analysis_quality'] = "ai"
         analysis['quota_status'] = "available"
+        analysis['used_key'] = client_info['name']
         
         print(f"✅ AI Analysis completed for: {analysis.get('candidate_name', 'Unknown')}")
+        print(f"   Used: {client_info['name']}, Requests today: {client_info['requests_today']}/{QUOTA_DAILY}")
         
         return analysis
         
     except concurrent.futures.TimeoutError:
         print("❌ Gemini API timeout after 30 seconds")
+        update_client_stats(client_info, success=False)
         fallback = get_high_quality_fallback_analysis(resume_text, job_description)
         fallback['fallback_reason'] = "AI timeout - using high-quality analysis"
         return fallback
         
     except json.JSONDecodeError as e:
         print(f"❌ JSON Parse Error: {e}")
+        update_client_stats(client_info, success=False)
         fallback = get_high_quality_fallback_analysis(resume_text, job_description)
         fallback['fallback_reason'] = "AI response format error - using high-quality analysis"
         return fallback
@@ -631,18 +726,24 @@ Ensure summaries are detailed, professional, and comprehensive."""
         print(f"❌ Gemini Error: {error_msg[:100]}")
         
         # Update client stats (failed request)
-        client_info['requests_today'] += 1
+        update_client_stats(client_info, success=False)
         
         # Check for quota errors
         if any(keyword in error_msg for keyword in ['quota', '429', 'resource exhausted', 'per minute', 'per day']):
-            print("⚠️  Gemini quota exceeded - marking client")
+            print(f"⚠️  Gemini quota exceeded - marking {client_info['name']}")
             client_info['quota_exceeded'] = True
+            
+            # Try another key immediately
+            rotated_client = rotate_client()
+            if rotated_client and rotated_client != client_info:
+                print(f"🔄 Key exhausted. Rotating to {rotated_client['name']} for next request")
+            
             fallback = get_high_quality_fallback_analysis(resume_text, job_description)
-            fallback['fallback_reason'] = "AI quota exceeded - using high-quality analysis"
+            fallback['fallback_reason'] = f"AI quota exceeded on {client_info['name']} - using high-quality analysis"
             return fallback
         else:
             fallback = get_high_quality_fallback_analysis(resume_text, job_description)
-            fallback['fallback_reason'] = f"AI error: {error_msg[:50]}"
+            fallback['fallback_reason'] = f"AI error on {client_info['name']}: {error_msg[:50]}"
             return fallback
 
 def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
@@ -698,6 +799,12 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
         ws[f'A{row}'].fill = subheader_fill
         ws[f'B{row}'] = "High-Quality Analysis (AI Fallback)"
         ws[f'B{row}'].font = Font(color="FF9900", bold=True)
+        row += 1
+    elif analysis_data.get('used_key'):
+        ws[f'A{row}'] = "AI Key Used"
+        ws[f'A{row}'].font = subheader_font
+        ws[f'A{row}'].fill = subheader_fill
+        ws[f'B{row}'] = analysis_data.get('used_key')
         row += 1
     
     row += 1
@@ -921,6 +1028,8 @@ def analyze_resume():
             print(f"✅ Analysis completed in {ai_time:.2f}s")
             print(f"  Mode: {'AI' if not analysis.get('is_fallback') else 'Fallback'}")
             print(f"  Score: {analysis.get('overall_score')}")
+            if not analysis.get('is_fallback'):
+                print(f"  Used: {analysis.get('used_key', 'Unknown key')}")
             
             # Cache the result for 1 hour
             analysis_cache[cache_key] = analysis
@@ -989,7 +1098,7 @@ def quick_check():
                 'available': False,
                 'reason': 'No API keys configured',
                 'fallback_available': True,
-                'suggestion': 'Configure GEMINI_API_KEYS in .env for AI analysis'
+                'suggestion': 'Configure GEMINI_API_KEY1, GEMINI_API_KEY2, etc. in environment variables'
             })
         
         # Check if any client has available quota
@@ -998,9 +1107,11 @@ def quick_check():
             quota_ok, reason = check_quota(client_info)
             if quota_ok and not client_info['quota_exceeded']:
                 available_clients.append({
+                    'name': client_info['name'],
                     'key': client_info['key'][:8] + '...',
                     'requests_today': client_info['requests_today'],
-                    'quota_remaining': QUOTA_DAILY - client_info['requests_today']
+                    'quota_remaining': QUOTA_DAILY - client_info['requests_today'],
+                    'total_requests': client_info['total_requests']
                 })
         
         if available_clients:
@@ -1009,7 +1120,9 @@ def quick_check():
                 'clients_available': len(available_clients),
                 'available_clients': available_clients,
                 'fallback_available': True,
-                'status': 'ready'
+                'status': 'ready',
+                'total_keys': len(clients),
+                'strategy': 'Load balancing between multiple keys'
             })
         else:
             # Try a quick test with first client
@@ -1033,7 +1146,9 @@ def quick_check():
                     'fallback_available': True,
                     'status': 'ready',
                     'quota_warning': True,
-                    'warning': 'Some clients may have quota limits'
+                    'warning': 'Some keys may have quota limits',
+                    'total_keys': len(clients),
+                    'strategy': 'Auto-rotation when quota exceeded'
                 })
                 
             except Exception as e:
@@ -1042,7 +1157,8 @@ def quick_check():
                     'reason': str(e)[:100],
                     'fallback_available': True,
                     'status': 'quota_exceeded',
-                    'suggestion': 'All API keys may have exceeded daily quota. Fallback analysis available.'
+                    'suggestion': 'All API keys may have exceeded daily quota. Fallback analysis available.',
+                    'total_keys': len(clients)
                 })
                 
     except Exception as e:
@@ -1063,6 +1179,8 @@ def ping():
         'timestamp': datetime.now().isoformat(),
         'service': 'resume-analyzer',
         'ai_configured': len(clients) > 0,
+        'total_keys': len(clients),
+        'working_keys': len([c for c in clients if not c['quota_exceeded']]),
         'cache_stats': {
             'hits': cache_hits,
             'misses': cache_misses,
@@ -1076,51 +1194,84 @@ def health_check():
     return jsonify({
         'status': 'Backend is running!', 
         'timestamp': datetime.now().isoformat(),
-        'api_keys_configured': len(api_keys),
-        'clients_available': len(clients),
+        'total_api_keys': len(api_keys),
+        'working_clients': len(clients),
+        'keys_config': {
+            'format': 'Use GEMINI_API_KEY1, GEMINI_API_KEY2, etc.',
+            'max_keys': 9,
+            'current_keys': len(api_keys)
+        },
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'upload_folder_path': UPLOAD_FOLDER,
         'cache_stats': {
             'hits': cache_hits,
             'misses': cache_misses,
             'size': len(analysis_cache)
+        },
+        'quota_info': {
+            'daily_limit': QUOTA_DAILY,
+            'per_minute_limit': QUOTA_PER_MINUTE,
+            'strategy': 'Auto-rotation between keys'
         }
     })
 
 @app.route('/stats', methods=['GET'])
 def get_stats():
-    """Get API usage statistics"""
+    """Get detailed API usage statistics"""
     now = datetime.now()
     
-    # Calculate quota status
-    quota_status = []
-    for i, client_info in enumerate(clients):
+    # Calculate quota status for each client
+    clients_stats = []
+    for client_info in clients:
         quota_ok, reason = check_quota(client_info)
-        quota_status.append({
-            'key': f"Key {i+1} ({client_info['key'][:8]}...)",
+        time_to_reset = client_info['last_reset'] + timedelta(days=1) - now
+        hours_to_reset = time_to_reset.total_seconds() / 3600
+        
+        clients_stats.append({
+            'name': client_info['name'],
+            'key_preview': client_info['key'][:8] + '...',
             'requests_today': client_info['requests_today'],
             'quota_remaining': QUOTA_DAILY - client_info['requests_today'],
             'quota_exceeded': client_info['quota_exceeded'],
+            'total_requests': client_info['total_requests'],
+            'errors': client_info['errors'],
             'last_reset': client_info['last_reset'].isoformat(),
-            'minutes_to_reset': int((client_info['last_reset'] + timedelta(days=1) - now).total_seconds() / 60)
+            'hours_to_reset': round(hours_to_reset, 2),
+            'requests_minute': client_info['requests_minute'],
+            'status': 'available' if (quota_ok and not client_info['quota_exceeded']) else 'exceeded'
         })
+    
+    # Calculate overall stats
+    total_requests = sum(c['requests_today'] for c in clients)
+    total_quota = QUOTA_DAILY * len(clients)
+    available_keys = len([c for c in clients_stats if c['status'] == 'available'])
     
     return jsonify({
         'timestamp': now.isoformat(),
+        'overall': {
+            'total_keys': len(clients),
+            'available_keys': available_keys,
+            'total_requests_today': total_requests,
+            'total_quota_today': total_quota,
+            'quota_used_percentage': round((total_requests / total_quota * 100) if total_quota > 0 else 0, 1),
+            'cache_hit_rate': round((cache_hits / (cache_hits + cache_misses) * 100) if (cache_hits + cache_misses) > 0 else 0, 1)
+        },
         'cache_stats': {
             'hits': cache_hits,
             'misses': cache_misses,
-            'hit_ratio': cache_hits / (cache_hits + cache_misses) if (cache_hits + cache_misses) > 0 else 0
+            'hit_ratio': cache_hits / (cache_hits + cache_misses) if (cache_hits + cache_misses) > 0 else 0,
+            'size': len(analysis_cache)
         },
-        'quota_stats': {
-            'daily_limit': QUOTA_DAILY,
+        'quota_config': {
+            'daily_limit_per_key': QUOTA_DAILY,
             'per_minute_limit': QUOTA_PER_MINUTE,
-            'clients': quota_status
+            'total_daily_quota': total_quota
         },
+        'clients': clients_stats,
         'service_status': {
             'upload_folder': UPLOAD_FOLDER,
-            'clients_working': len([c for c in clients if not c['quota_exceeded']]),
-            'total_clients': len(clients)
+            'strategy': 'Multi-key auto-rotation',
+            'rotation_logic': 'Load balancing between available keys, auto-switch on quota exceed'
         }
     })
 
@@ -1134,11 +1285,13 @@ def reset_quota():
             client_info['quota_exceeded'] = False
             client_info['last_reset'] = datetime.now()
             client_info['minute_requests'] = []
+            client_info['errors'] = 0
         
         return jsonify({
             'status': 'success',
             'message': 'Quota reset for all clients',
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'clients_reset': len(clients)
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1148,21 +1301,32 @@ if __name__ == '__main__':
     print("🚀 Resume Analyzer Backend Starting...")
     print("="*50)
     
-    # Print quota information
-    print(f"📊 Quota Configuration:")
+    # Print configuration
+    print(f"📊 Configuration:")
     print(f"  Daily limit per key: {QUOTA_DAILY} requests")
     print(f"  Per minute limit: {QUOTA_PER_MINUTE} requests")
-    print(f"  Total API keys: {len(clients)}/{len(api_keys)} working")
+    print(f"  Total API keys loaded: {len(api_keys)}")
+    print(f"  Total clients initialized: {len(clients)}")
     
     if clients:
-        print(f"\n🔑 Available API Keys:")
+        print(f"\n🔑 API Keys Status:")
         for i, client_info in enumerate(clients):
             status = "✅ Available" if not client_info['quota_exceeded'] else "⚠️ Quota Exceeded"
-            print(f"  Key {i+1}: {client_info['key'][:8]}... {status}")
+            print(f"  {client_info['name']}: {client_info['key'][:8]}... {status}")
+        
+        print(f"\n✨ Features:")
+        print(f"  • Auto-rotation between {len(clients)} keys")
+        print(f"  • Load balancing (uses key with fewest requests)")
+        print(f"  • Auto-switch when quota is exceeded")
+        print(f"  • Fallback mode when all keys exhausted")
+        print(f"  • Total daily quota: {QUOTA_DAILY * len(clients)} requests")
     else:
         print("⚠️  WARNING: No working API keys found!")
         print("   The service will run in fallback mode only.")
-        print("   To enable AI analysis, add GEMINI_API_KEYS to .env file")
+        print("   To enable AI analysis, add keys as:")
+        print("   GEMINI_API_KEY1=your_key_1")
+        print("   GEMINI_API_KEY2=your_key_2")
+        print("   GEMINI_API_KEY3=your_key_3")
     
     print(f"\n📁 Upload folder: {UPLOAD_FOLDER}")
     print("="*50 + "\n")
