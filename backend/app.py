@@ -6,7 +6,6 @@ from docx import Document
 import os
 import json
 import time
-import concurrent.futures
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -264,12 +263,6 @@ def home():
             
             <div class="endpoint">
                 <span class="method">GET</span>
-                <span class="path">/ping</span>
-                <p class="description">Simple ping to keep service awake</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
                 <span class="path">/download/{filename}</span>
                 <p class="description">Download generated Excel analysis reports</p>
             </div>
@@ -277,7 +270,7 @@ def home():
         
         <div class="buttons">
             <a href="/health" class="btn">Check Health</a>
-            <a href="/ping" class="btn btn-secondary">Ping Service</a>
+            <a href="/quick-check" class="btn btn-secondary">Quick Check</a>
         </div>
         
         <div class="footer">
@@ -303,8 +296,8 @@ def extract_text_from_pdf(file_path):
             return "Error: PDF appears to be empty or text could not be extracted"
         
         # Limit text size for performance
-        if len(text) > 8000:
-            text = text[:8000] + "\n[Text truncated for processing...]"
+        if len(text) > 10000:
+            text = text[:10000] + "\n[Text truncated for processing...]"
             
         return text
     except Exception as e:
@@ -321,8 +314,8 @@ def extract_text_from_docx(file_path):
             return "Error: Document appears to be empty"
         
         # Limit text size for performance
-        if len(text) > 8000:
-            text = text[:8000] + "\n[Text truncated for processing...]"
+        if len(text) > 10000:
+            text = text[:10000] + "\n[Text truncated for processing...]"
             
         return text
     except Exception as e:
@@ -344,8 +337,8 @@ def extract_text_from_txt(file_path):
                     return "Error: Text file appears to be empty"
                 
                 # Limit text size for performance
-                if len(text) > 8000:
-                    text = text[:8000] + "\n[Text truncated for processing...]"
+                if len(text) > 10000:
+                    text = text[:10000] + "\n[Text truncated for processing...]"
                     
                 return text
             except UnicodeDecodeError:
@@ -357,33 +350,29 @@ def extract_text_from_txt(file_path):
         print(f"TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
-def fallback_response(reason):
-    """Return a fallback response when AI fails"""
-    return {
-        "candidate_name": reason,
-        "skills_matched": ["Try again in a moment"],
-        "skills_missing": ["AI service issue"],
-        "experience_summary": "Analysis temporarily unavailable. Please try again shortly.",
-        "education_summary": "AI service is currently busy. Please refresh and try again.",
-        "overall_score": 0,
-        "recommendation": "Service Error - Please Retry",
-        "key_strengths": ["Server is warming up"],
-        "areas_for_improvement": ["Please try again in a moment"]
-    }
-
 def analyze_resume_with_gemini(resume_text, job_description):
-    """Use Gemini AI to analyze resume against job description - WITH IMPROVED SUMMARIES"""
+    """Use Gemini AI to analyze resume against job description - FAST VERSION"""
     
     if client is None:
-        print("❌ Gemini client not initialized.")
-        return fallback_response("API Configuration Error")
+        print("❌ Gemini client not initialized. Check API key.")
+        return {
+            "candidate_name": "API Configuration Error",
+            "skills_matched": ["Please check your API key configuration"],
+            "skills_missing": [],
+            "experience_summary": "Gemini API not configured properly",
+            "education_summary": "Check GEMINI_API_KEY in .env file",
+            "overall_score": 0,
+            "recommendation": "Configuration Error",
+            "key_strengths": [],
+            "areas_for_improvement": []
+        }
     
-    # TRUNCATE text - increased limits for better summaries
-    resume_text = resume_text[:6000]  # Increased from 5000 to 6000
-    job_description = job_description[:2500]  # Increased from 2000 to 2500
+    # TRUNCATE text to prevent huge prompts and improve speed
+    resume_text = resume_text[:5000]  # Limit to 5000 chars
+    job_description = job_description[:2000]  # Limit to 2000 chars
     
-    prompt = f"""RESUME ANALYSIS - PROVIDE DETAILED SUMMARIES:
-Analyze this resume against the job description and provide comprehensive insights.
+    prompt = f"""RESUME ANALYSIS - BE CONCISE:
+Analyze this resume against the job description.
 
 RESUME TEXT:
 {resume_text}
@@ -391,48 +380,54 @@ RESUME TEXT:
 JOB DESCRIPTION:
 {job_description}
 
-IMPORTANT: Provide detailed and comprehensive summaries (2-3 sentences each) for experience and education.
-
-Return ONLY this JSON with detailed information:
+Return ONLY this JSON:
 {{
-    "candidate_name": "Extract full name from resume or use 'Professional Candidate'",
-    "skills_matched": ["List 5-8 relevant skills from resume that match the job requirements"],
-    "skills_missing": ["List 5-8 important skills from job description not found in resume"],
-    "experience_summary": "Provide a comprehensive 2-3 sentence summary of work experience, including years of experience, key roles, industries, and major accomplishments mentioned in the resume.",
-    "education_summary": "Provide a detailed 2-3 sentence summary of educational background, including degrees, institutions, fields of study, graduation years, and any academic achievements mentioned.",
-    "overall_score": "Calculate 0-100 score based on skill match, experience relevance, and education alignment",
-    "recommendation": "Highly Recommended/Recommended/Moderately Recommended/Needs Improvement",
-    "key_strengths": ["List 3-5 key professional strengths evident from the resume"],
-    "areas_for_improvement": ["List 3-5 areas where the candidate could improve to better match this role"]
-}}
-
-Ensure summaries are detailed, professional, and comprehensive."""
-
-    def call_gemini():
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt
-            )
-            return response
-        except Exception as e:
-            raise e
+    "candidate_name": "extract from resume or 'Candidate'",
+    "skills_matched": ["max 5 skills from resume matching job"],
+    "skills_missing": ["max 5 skills from job not in resume"],
+    "experience_summary": "one sentence summary",
+    "education_summary": "one sentence summary",
+    "overall_score": 0-100 based on match,
+    "recommendation": "Highly Recommended/Recommended/Needs Improvement",
+    "key_strengths": ["max 3 strengths"],
+    "areas_for_improvement": ["max 3 areas"]
+}}"""
     
     try:
         print("🤖 Sending to Gemini AI...")
         start_time = time.time()
         
-        # Call with 30 second timeout
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(call_gemini)
-            response = future.result(timeout=30)
+        # Use a timeout wrapper for Gemini call
+        timeout_seconds = 30
+        
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",  # Using flash model for speed
+                contents=prompt
+            )
+        except Exception as api_error:
+            print(f"❌ Gemini API Error: {str(api_error)}")
+            # Return quick fallback for quota issues
+            if "quota" in str(api_error).lower() or "429" in str(api_error):
+                return {
+                    "candidate_name": "AI Service Limit Reached",
+                    "skills_matched": ["Try again in a few hours"],
+                    "skills_missing": ["Daily quota may be exceeded"],
+                    "experience_summary": "AI service temporarily unavailable",
+                    "education_summary": "Please try again later",
+                    "overall_score": 0,
+                    "recommendation": "Service Limit - Retry Later",
+                    "key_strengths": [],
+                    "areas_for_improvement": []
+                }
+            raise api_error
         
         elapsed_time = time.time() - start_time
         print(f"✅ Gemini response in {elapsed_time:.2f} seconds")
         
         result_text = response.text.strip()
         
-        # Clean response
+        # Clean response quickly
         result_text = result_text.replace('```json', '').replace('```', '').strip()
         
         # Parse JSON
@@ -446,65 +441,43 @@ Ensure summaries are detailed, professional, and comprehensive."""
             
         print(f"✅ Analysis completed for: {analysis.get('candidate_name', 'Unknown')}")
         
-        # Validate and ensure minimum lengths for summaries
-        experience_summary = analysis.get('experience_summary', '')
-        education_summary = analysis.get('education_summary', '')
-        
-        # Ensure summaries are not too short
-        if len(experience_summary.split()) < 15:
-            experience_summary = "Professional with relevant experience as indicated in the resume. Demonstrates competence in required areas with potential for growth in this role."
-        
-        if len(education_summary.split()) < 10:
-            education_summary = "Qualified candidate with appropriate educational background as shown in the resume. Possesses the foundational knowledge required for this position."
-        
-        analysis['experience_summary'] = experience_summary
-        analysis['education_summary'] = education_summary
-        
-        # Validate and limit arrays
-        analysis['skills_matched'] = analysis.get('skills_matched', [])[:8]
-        analysis['skills_missing'] = analysis.get('skills_missing', [])[:8]
-        analysis['key_strengths'] = analysis.get('key_strengths', [])[:5]
-        analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:5]
+        # Validate and limit arrays for consistency
+        analysis['skills_matched'] = analysis.get('skills_matched', [])[:5]
+        analysis['skills_missing'] = analysis.get('skills_missing', [])[:5]
+        analysis['key_strengths'] = analysis.get('key_strengths', [])[:3]
+        analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:3]
         
         return analysis
         
-    except concurrent.futures.TimeoutError:
-        print("❌ Gemini API timeout after 30 seconds")
-        return fallback_response("AI Timeout - Service taking too long")
-        
     except json.JSONDecodeError as e:
         print(f"❌ JSON Parse Error: {e}")
-        # Try to extract some info anyway
+        print(f"Raw response: {result_text[:200]}...")
+        # Return a structured fallback
         return {
-            "candidate_name": "Professional Candidate",
-            "skills_matched": ["Analysis completed successfully"],
-            "skills_missing": ["Check specific requirements"],
-            "experience_summary": "Experienced professional with relevant background suitable for this position based on resume review.",
-            "education_summary": "Qualified candidate with appropriate educational qualifications matching the job requirements.",
-            "overall_score": 75,
-            "recommendation": "Recommended",
-            "key_strengths": ["Strong analytical skills", "Good communication abilities", "Technical proficiency"],
-            "areas_for_improvement": ["Could benefit from additional specific training", "Consider gaining more industry experience"]
+            "candidate_name": "Analysis Error",
+            "skills_matched": ["JSON parsing failed"],
+            "skills_missing": ["Please try again"],
+            "experience_summary": "Error in AI response format",
+            "education_summary": "Retry analysis",
+            "overall_score": 0,
+            "recommendation": "Parse Error - Retry",
+            "key_strengths": [],
+            "areas_for_improvement": []
         }
-        
     except Exception as e:
         print(f"❌ Gemini Analysis Error: {str(e)}")
-        error_msg = str(e).lower()
-        if "quota" in error_msg or "429" in error_msg:
-            return fallback_response("Daily Quota Exceeded")
-        else:
-            # Return a decent fallback instead of error
-            return {
-                "candidate_name": "Professional Candidate",
-                "skills_matched": ["Skill analysis completed"],
-                "skills_missing": ["Review job requirements"],
-                "experience_summary": "Candidate demonstrates relevant professional experience suitable for this role based on resume evaluation.",
-                "education_summary": "Possesses appropriate educational qualifications and background for consideration in this position.",
-                "overall_score": 70,
-                "recommendation": "Consider for Interview",
-                "key_strengths": ["Adaptable learner", "Problem-solving skills", "Team collaboration"],
-                "areas_for_improvement": ["Could enhance specific technical skills", "Consider additional certifications"]
-            }
+        # Return quick fallback instead of waiting
+        return {
+            "candidate_name": "AI Service Error",
+            "skills_matched": ["Service temporarily unavailable"],
+            "skills_missing": ["Please try again shortly"],
+            "experience_summary": f"Error: {str(e)[:100]}",
+            "education_summary": "AI service issue detected",
+            "overall_score": 0,
+            "recommendation": "Service Error - Retry",
+            "key_strengths": [],
+            "areas_for_improvement": []
+        }
 
 def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     """Create a beautiful Excel report with the analysis"""
@@ -626,7 +599,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     cell = ws[f'A{row}']
     cell.value = analysis_data.get('experience_summary', 'N/A')
     cell.alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[row].height = 80  # Increased height for longer summary
+    ws.row_dimensions[row].height = 60
     row += 2
     
     # Education Summary
@@ -642,12 +615,12 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     cell = ws[f'A{row}']
     cell.value = analysis_data.get('education_summary', 'N/A')
     cell.alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[row].height = 60  # Increased height for longer summary
+    ws.row_dimensions[row].height = 40
     row += 2
     
     # Key Strengths
     ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}'])
+    cell = ws[f'A{row}']
     cell.value = "KEY STRENGTHS"
     cell.font = header_font
     cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
@@ -664,7 +637,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     
     # Areas for Improvement
     ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}'])
+    cell = ws[f'A{row}']
     cell.value = "AREAS FOR IMPROVEMENT"
     cell.font = header_font
     cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
@@ -770,8 +743,6 @@ def analyze_resume():
         print(f"🔍 AI Analysis Result:")
         print(f"  Name: {analysis.get('candidate_name')}")
         print(f"  Score: {analysis.get('overall_score')}")
-        print(f"  Experience Summary Length: {len(analysis.get('experience_summary', ''))} chars")
-        print(f"  Education Summary Length: {len(analysis.get('education_summary', ''))} chars")
         print(f"  Matched Skills: {len(analysis.get('skills_matched', []))}")
         print(f"  Missing Skills: {len(analysis.get('skills_missing', []))}")
         
@@ -832,78 +803,46 @@ def quick_check():
         if client is None:
             return jsonify({'available': False, 'reason': 'Client not initialized'})
         
-        # Very quick test with thread timeout
+        # Very quick test with timeout
         start_time = time.time()
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents="Respond with just 'ready'",
+            timeout=10  # 10 second timeout
+        )
         
-        def gemini_check():
-            try:
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents="Respond with just 'ready'"
-                )
-                return response
-            except Exception as e:
-                raise e
+        response_time = time.time() - start_time
         
-        try:
-            # Use thread with timeout
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(gemini_check)
-                response = future.result(timeout=10)  # 10 second timeout
-            
-            response_time = time.time() - start_time
-            
-            if 'ready' in response.text.lower():
-                return jsonify({
-                    'available': True,
-                    'response_time': f'{response_time:.2f}s',
-                    'status': 'ready',
-                    'quota_status': 'ok'
-                })
-            else:
-                return jsonify({
-                    'available': True,
-                    'response_time': f'{response_time:.2f}s',
-                    'status': 'responding',
-                    'quota_status': 'ok'
-                })
-                
-        except concurrent.futures.TimeoutError:
+        if 'ready' in response.text.lower():
             return jsonify({
-                'available': False,
-                'reason': 'Request timed out after 10 seconds',
-                'status': 'timeout',
-                'suggestion': 'AI service is taking too long. Please try again.'
+                'available': True,
+                'response_time': f'{response_time:.2f}s',
+                'status': 'ready',
+                'quota_status': 'ok'
+            })
+        else:
+            return jsonify({
+                'available': True,
+                'response_time': f'{response_time:.2f}s',
+                'status': 'responding',
+                'quota_status': 'ok'
             })
             
     except Exception as e:
         error_msg = str(e)
         if "quota" in error_msg.lower() or "429" in error_msg:
             status = 'quota_exceeded'
-            suggestion = 'Daily quota exceeded. Please try again tomorrow.'
         elif "timeout" in error_msg.lower():
             status = 'timeout'
-            suggestion = 'AI service timeout. Please try again in a moment.'
         else:
             status = 'error'
-            suggestion = 'AI service error. Please try again.'
             
         return jsonify({
             'available': False,
             'reason': error_msg[:100],
             'status': status,
-            'suggestion': suggestion
+            'suggestion': 'AI service may be busy. Try again in a moment.'
         })
-
-@app.route('/ping', methods=['GET'])
-def ping():
-    """Simple ping to keep service awake"""
-    return jsonify({
-        'status': 'pong',
-        'timestamp': datetime.now().isoformat(),
-        'service': 'resume-analyzer',
-        'ai_configured': client is not None
-    })
 
 @app.route('/health', methods=['GET'])
 def health_check():
