@@ -6,7 +6,7 @@ import {
   Target, AlertCircle, Sparkles, Star, Zap, User,
   ChevronRight, Shield, BarChart3, Globe, Clock,
   AlertTriangle, BatteryCharging, Brain, Rocket,
-  RefreshCw, Check, X
+  RefreshCw, Check, X, ExternalLink
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -23,6 +23,7 @@ function App() {
   const [aiStatus, setAiStatus] = useState('idle');
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
 
   // Use production backend URL
   const API_BASE_URL = 'https://resume-analyzer-94mo.onrender.com';
@@ -338,6 +339,17 @@ function App() {
     }
   };
 
+  const handleLeadsocClick = (e) => {
+    e.preventDefault();
+    setIsNavigating(true);
+    
+    // Show immediate feedback
+    setTimeout(() => {
+      window.open('https://www.leadsoc.com/', '_blank');
+      setIsNavigating(false);
+    }, 100);
+  };
+
   return (
     <div className="app">
       {/* Animated Background Elements */}
@@ -365,20 +377,30 @@ function App() {
               </div>
             </div>
             
-            {/* Right Side: Leadsoc Logo */}
+            {/* Right Side: Leadsoc Logo - FIXED LINK */}
             <div className="leadsoc-logo-container">
-              <a 
-                href="https://www.leadsoc.com/" 
-                target="_blank" 
-                rel="noopener noreferrer"
+              <button
+                onClick={handleLeadsocClick}
                 className="leadsoc-logo-link"
+                disabled={isNavigating}
+                title="Visit LEADSOC - Partnering Your Success"
               >
-                <img 
-                  src={logoImage} 
-                  alt="LEADSOC - partnering your success" 
-                  className="leadsoc-logo"
-                />
-              </a>
+                {isNavigating ? (
+                  <div className="leadsoc-loading">
+                    <Loader size={20} className="spinner" />
+                    <span>Opening...</span>
+                  </div>
+                ) : (
+                  <>
+                    <img 
+                      src={logoImage} 
+                      alt="LEADSOC - partnering your success" 
+                      className="leadsoc-logo"
+                    />
+                    <ExternalLink size={14} className="external-link-icon" />
+                  </>
+                )}
+              </button>
             </div>
           </div>
           
@@ -426,8 +448,6 @@ function App() {
               <h2>Start Your Analysis</h2>
               <p>Upload your resume and job description to get AI-powered insights</p>
             </div>
-
-            {/* REMOVED: Service Status Card */}
             
             <div className="upload-grid">
               <div className="upload-card glass">
@@ -797,7 +817,7 @@ function App() {
               </div>
             </div>
 
-            {/* Summary Section */}
+            {/* Summary Section with Improved Summaries */}
             <div className="section-title">
               <h2>Profile Summary</h2>
               <p>AI-generated insights from your resume</p>
@@ -812,7 +832,7 @@ function App() {
                   <h3>Experience Summary</h3>
                 </div>
                 <div className="summary-content">
-                  <p>{analysis.experience_summary}</p>
+                  <p className="detailed-summary">{analysis.experience_summary || "No experience summary available."}</p>
                   <div className="summary-footer">
                     <span className="summary-tag">Professional Experience</span>
                   </div>
@@ -827,7 +847,7 @@ function App() {
                   <h3>Education Summary</h3>
                 </div>
                 <div className="summary-content">
-                  <p>{analysis.education_summary}</p>
+                  <p className="detailed-summary">{analysis.education_summary || "No education summary available."}</p>
                   <div className="summary-footer">
                     <span className="summary-tag">Academic Background</span>
                   </div>
