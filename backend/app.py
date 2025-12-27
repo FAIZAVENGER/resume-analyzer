@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 import traceback
 import hashlib
 import random
-import redis
 from collections import defaultdict
 
 # Load environment variables
@@ -52,7 +51,8 @@ else:
                 'last_reset': datetime.now(),
                 'requests_today': 0,
                 'requests_minute': 0,
-                'last_request_time': datetime.now()
+                'last_request_time': datetime.now(),
+                'minute_requests': []
             })
             print(f"  Key {i+1}: {key[:8]}... ✅")
         except Exception as e:
@@ -83,22 +83,16 @@ def check_quota(client_info):
         client_info['last_reset'] = now
         client_info['requests_today'] = 0
         client_info['quota_exceeded'] = False
+        client_info['minute_requests'] = []
         print(f"✅ Quota reset for key {client_info['key'][:8]}...")
     
     # Check minute reset
     minute_ago = now - timedelta(minutes=1)
-    client_info['requests_minute'] = len([
-        t for t in client_info.get('minute_requests', []) 
-        if t > minute_ago
-    ])
-    
-    # Update minute requests list
-    if 'minute_requests' not in client_info:
-        client_info['minute_requests'] = []
     client_info['minute_requests'] = [
         t for t in client_info['minute_requests'] 
         if t > minute_ago
     ]
+    client_info['requests_minute'] = len(client_info['minute_requests'])
     
     # Check limits
     if client_info['requests_today'] >= QUOTA_DAILY:
@@ -132,9 +126,6 @@ def update_client_stats(client_info):
     now = datetime.now()
     client_info['requests_today'] += 1
     client_info['last_request_time'] = now
-    
-    if 'minute_requests' not in client_info:
-        client_info['minute_requests'] = []
     client_info['minute_requests'].append(now)
 
 @app.route('/')
@@ -789,7 +780,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     
     # Education Summary
     ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}'])
+    cell = ws[f'A{row}']
     cell.value = "EDUCATION SUMMARY"
     cell.font = header_font
     cell.fill = header_fill
@@ -797,7 +788,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     row += 1
     
     ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}'])
+    cell = ws[f'A{row}']
     cell.value = analysis_data.get('education_summary', 'N/A')
     cell.alignment = Alignment(wrap_text=True, vertical='top')
     ws.row_dimensions[row].height = 60
@@ -805,7 +796,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     
     # Key Strengths
     ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}'])
+    cell = ws[f'A{row}']
     cell.value = "KEY STRENGTHS"
     cell.font = header_font
     cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
@@ -822,7 +813,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     
     # Areas for Improvement
     ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}'])
+    cell = ws[f'A{row}']
     cell.value = "AREAS FOR IMPROVEMENT"
     cell.font = header_font
     cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
@@ -1142,8 +1133,7 @@ def reset_quota():
             client_info['requests_today'] = 0
             client_info['quota_exceeded'] = False
             client_info['last_reset'] = datetime.now()
-            if 'minute_requests' in client_info:
-                client_info['minute_requests'] = []
+            client_info['minute_requests'] = []
         
         return jsonify({
             'status': 'success',
@@ -1177,6 +1167,6 @@ if __name__ == '__main__':
     print(f"\n📁 Upload folder: {UPLOAD_FOLDER}")
     print("="*50 + "\n")
     
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 10000))
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
