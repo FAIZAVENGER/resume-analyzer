@@ -8,7 +8,7 @@ import {
   AlertTriangle, BatteryCharging, Brain, Rocket,
   RefreshCw, Check, X, ExternalLink, BarChart,
   Battery, Crown, Users, Coffee, ShieldCheck,
-  Lock, DownloadCloud, Edit3, FileDown
+  Lock, DownloadCloud, Edit3, FileDown, Info
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -29,6 +29,11 @@ function App() {
   const [quotaInfo, setQuotaInfo] = useState(null);
   const [quotaResetTime, setQuotaResetTime] = useState(null);
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
+  const [serviceStatus, setServiceStatus] = useState({
+    enhancedFallback: true,
+    validKeys: 0,
+    totalKeys: 0
+  });
 
   // Use production backend URL
   const API_BASE_URL = 'https://resume-analyzer-94mo.onrender.com';
@@ -54,11 +59,20 @@ function App() {
       
       // First, ping the backend to wake it up
       setLoadingMessage('Initializing service...');
-      await axios.get(`${API_BASE_URL}/ping`, {
+      const pingResponse = await axios.get(`${API_BASE_URL}/ping`, {
         timeout: 15000
       }).catch(() => {
         console.log('Initial ping failed - backend might be sleeping');
+        return null;
       });
+      
+      if (pingResponse?.data) {
+        setServiceStatus({
+          enhancedFallback: pingResponse.data.enhanced_fallback || true,
+          validKeys: pingResponse.data.valid_keys || 0,
+          totalKeys: pingResponse.data.total_keys || 0
+        });
+      }
       
       // Wait a moment for backend to fully wake up
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -83,15 +97,22 @@ function App() {
     }
   };
 
-  const checkAIAvailability = async (retries = 3) => {
+  const checkAIAvailability = async (retries = 2) => {
     for (let i = 0; i < retries; i++) {
       try {
         setAiStatus('checking');
         setLoadingMessage(`Checking AI service... (Attempt ${i + 1}/${retries})`);
         
         const response = await axios.get(`${API_BASE_URL}/quick-check`, {
-          timeout: 20000 // 20 seconds
+          timeout: 15000
         });
+        
+        if (response.data.enhanced_fallback_available) {
+          setServiceStatus(prev => ({
+            ...prev,
+            enhancedFallback: true
+          }));
+        }
         
         if (response.data.available) {
           setAiStatus('available');
@@ -101,13 +122,13 @@ function App() {
         } else {
           if (response.data.status === 'quota_exceeded') {
             setAiStatus('unavailable');
-            setError('AI daily quota exceeded. Showing fallback analysis.');
+            setLoadingMessage('AI quota exceeded. Using enhanced analysis...');
             return false;
           }
         }
         
         if (i < retries - 1) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
         
       } catch (err) {
@@ -118,7 +139,7 @@ function App() {
         }
         
         if (i < retries - 1) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
     }
@@ -133,10 +154,12 @@ function App() {
       const response = await axios.get(`${API_BASE_URL}/stats`);
       setQuotaInfo(response.data);
       
-      if (response.data.quota_stats?.clients?.[0]?.minutes_to_reset) {
-        const resetTime = new Date();
-        resetTime.setMinutes(resetTime.getMinutes() + response.data.quota_stats.clients[0].minutes_to_reset);
-        setQuotaResetTime(resetTime);
+      if (response.data.enhanced_fallback?.enabled) {
+        setServiceStatus(prev => ({
+          ...prev,
+          enhancedFallback: true,
+          extractionFeatures: response.data.enhanced_fallback?.extraction_features || []
+        }));
       }
     } catch (error) {
       console.log('Failed to get quota status:', error);
@@ -205,24 +228,21 @@ function App() {
     let progressInterval;
 
     try {
-      // Check AI availability first
-      setLoadingMessage('Checking AI service availability...');
-      setProgress(10);
-      
-      const isAIAvailable = await checkAIAvailability(2);
-      
-      if (!isAIAvailable) {
-        setLoadingMessage('Using fallback analysis...');
-        // Continue with fallback mode
-      }
-
       // Start progress simulation
       progressInterval = setInterval(() => {
         setProgress(prev => {
-          if (prev >= 80) return 80;
+          if (prev >= 85) return 85;
           return prev + Math.random() * 3;
         });
-      }, 800);
+      }, 500);
+
+      // Update loading message based on service status
+      if (aiStatus === 'available' && serviceStatus.validKeys > 0) {
+        setLoadingMessage('Using AI analysis...');
+      } else {
+        setLoadingMessage('Using enhanced analysis...');
+      }
+      setProgress(20);
 
       // Upload file
       setLoadingMessage('Uploading and processing resume...');
@@ -232,25 +252,30 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 120000,
+        timeout: 90000, // 90 seconds
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            setProgress(30 + percentCompleted * 0.3);
-            setLoadingMessage(percentCompleted < 50 ? 'Uploading file...' : 'Processing document...');
+            setProgress(30 + percentCompleted * 0.4);
+            setLoadingMessage(percentCompleted < 50 ? 'Uploading file...' : 'Extracting text from resume...');
           }
         }
       });
 
       clearInterval(progressInterval);
       setProgress(95);
-      setLoadingMessage('Finalizing analysis...');
+      
+      if (response.data.is_fallback) {
+        setLoadingMessage('Enhanced analysis complete!');
+        setAiStatus('unavailable');
+      } else {
+        setLoadingMessage('AI analysis complete!');
+      }
 
       await new Promise(resolve => setTimeout(resolve, 800));
       
       setAnalysis(response.data);
       setProgress(100);
-      setLoadingMessage('Analysis complete!');
 
       // Update quota status
       await checkQuotaStatus();
@@ -264,29 +289,12 @@ function App() {
       if (progressInterval) clearInterval(progressInterval);
       
       if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Request timeout. The analysis is taking too long. Please try again.');
+        setError('Request timeout. The backend might be waking up. Please try again in 30 seconds.');
       } else if (err.response?.status === 429) {
-        setError('Daily AI limit reached. Please try again tomorrow.');
+        setError('Daily AI limit reached. Enhanced analysis is still available.');
       } else if (err.response?.data?.error?.includes('quota')) {
-        setError('AI service quota exceeded. Showing fallback analysis...');
-        
-        // Provide demo analysis as fallback
-        setTimeout(() => {
-          setAnalysis({
-            candidate_name: "Professional Candidate",
-            skills_matched: ["Communication", "Problem Solving", "Teamwork", "Project Management", "Analytical Skills"],
-            skills_missing: ["Specific technical certifications", "Industry-specific software", "Advanced leadership experience"],
-            experience_summary: "Experienced professional with demonstrated competency in relevant domains. Shows strong foundational skills and practical experience suitable for professional roles with capability for growth and adaptation.",
-            education_summary: "Qualified candidate with appropriate educational background and academic foundation for professional development and career advancement in the chosen field.",
-            overall_score: 75,
-            recommendation: "Consider for Interview",
-            key_strengths: ["Strong foundational knowledge", "Good communication abilities", "Problem-solving skills", "Team player"],
-            areas_for_improvement: ["Consider additional certifications", "Gain more industry-specific experience", "Develop leadership capabilities"],
-            is_fallback: true,
-            fallback_reason: "AI service temporarily unavailable - showing high-quality analysis"
-          });
-          setLoading(false);
-        }, 1000);
+        setError('AI service quota exceeded. Enhanced analysis will extract information from your resume.');
+        setAiStatus('unavailable');
       } else {
         setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
       }
@@ -301,6 +309,8 @@ function App() {
   const handleDownload = () => {
     if (analysis?.excel_filename) {
       window.open(`${API_BASE_URL}/download/${analysis.excel_filename}`, '_blank');
+    } else {
+      setError('No analysis report available for download.');
     }
   };
 
@@ -333,10 +343,10 @@ function App() {
         bgColor: 'rgba(0, 255, 157, 0.1)'
       };
       case 'unavailable': return { 
-        text: 'AI Busy', 
-        color: '#ff6b6b', 
-        icon: <X size={16} />,
-        bgColor: 'rgba(255, 107, 107, 0.1)'
+        text: 'Enhanced Analysis', 
+        color: '#ffd166', 
+        icon: <Info size={16} />,
+        bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       default: return { 
         text: 'AI Status', 
@@ -366,6 +376,28 @@ function App() {
       return `${hours}h ${mins}m`;
     }
     return `${minutes}m`;
+  };
+
+  const getEnhancedFallbackMessage = () => {
+    if (!serviceStatus.enhancedFallback) return null;
+    
+    return (
+      <div className="enhanced-fallback-info glass">
+        <div className="info-header">
+          <Sparkles size={20} />
+          <h4>Enhanced Fallback Active</h4>
+        </div>
+        <p className="info-description">
+          Even without AI, we extract information directly from your resume:
+        </p>
+        <ul className="feature-list">
+          <li><Check size={14} /> Extract candidate name from resume</li>
+          <li><Check size={14} /> Detect skills and experience</li>
+          <li><Check size={14} /> Analyze education background</li>
+          <li><Check size={14} /> Provide personalized scoring</li>
+        </ul>
+      </div>
+    );
   };
 
   return (
@@ -448,6 +480,14 @@ function App() {
               {isWarmingUp && <Loader size={12} className="pulse-spinner" />}
             </div>
             
+            {/* Enhanced Fallback Indicator */}
+            {serviceStatus.enhancedFallback && (
+              <div className="feature enhanced-fallback">
+                <Sparkles size={16} />
+                <span>Enhanced Analysis</span>
+              </div>
+            )}
+            
             {/* Quota Status Toggle */}
             <button 
               className="feature quota-toggle"
@@ -476,7 +516,7 @@ function App() {
             <div className="quota-panel-header">
               <div className="quota-title">
                 <BarChart size={20} />
-                <h3>AI Quota Status</h3>
+                <h3>AI Service Status</h3>
               </div>
               <button 
                 className="close-quota"
@@ -489,73 +529,119 @@ function App() {
             <div className="quota-summary">
               <div className="summary-item">
                 <div className="summary-label">Total Keys</div>
-                <div className="summary-value">{quotaInfo.service_status?.total_clients || 0}</div>
+                <div className="summary-value">{quotaInfo.overall?.total_keys || 0}</div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Available Keys</div>
+                <div className="summary-label">Valid Keys</div>
+                <div className={`summary-value ${(quotaInfo.overall?.valid_keys || 0) > 0 ? 'success' : 'warning'}`}>
+                  {quotaInfo.overall?.valid_keys || 0}
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Enhanced Fallback</div>
                 <div className="summary-value success">
-                  {quotaInfo.service_status?.clients_working || 0}
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Cache Hit Rate</div>
-                <div className="summary-value">
-                  {((quotaInfo.cache_stats?.hit_ratio || 0) * 100).toFixed(1)}%
+                  ✅ Active
                 </div>
               </div>
             </div>
             
-            <div className="quota-details">
-              {quotaInfo.quota_stats?.clients?.map((client, index) => (
-                <div key={index} className="quota-client-card">
-                  <div className="client-header">
-                    <div className="client-name">
-                      <Crown size={14} />
-                      <span>{client.key}</span>
-                    </div>
-                    <div className={`client-status ${client.quota_exceeded ? 'exceeded' : 'available'}`}>
-                      {client.quota_exceeded ? '⚠️ Exceeded' : '✅ Available'}
-                    </div>
+            {quotaInfo.clients?.map((client, index) => (
+              <div key={index} className="quota-client-card">
+                <div className="client-header">
+                  <div className="client-name">
+                    <Crown size={14} />
+                    <span>{client.name}</span>
                   </div>
-                  
-                  <div className="quota-progress-container">
-                    <div className="quota-progress-bar">
-                      <div 
-                        className="quota-progress-fill"
-                        style={{ 
-                          width: `${(client.requests_today / 60) * 100}%`,
-                          backgroundColor: client.quota_exceeded ? '#ff6b6b' : '#00ff9d'
-                        }}
-                      ></div>
-                    </div>
-                    <div className="quota-numbers">
-                      <span className="quota-used">{client.requests_today} used</span>
-                      <span className="quota-total">/ 60 daily</span>
-                    </div>
-                  </div>
-                  
-                  <div className="quota-footer">
-                    <div className="quota-reset-info">
-                      <Clock size={12} />
-                      <span>Resets in: {formatTimeRemaining(client.minutes_to_reset || 0)}</span>
-                    </div>
-                    <div className="quota-remaining">
-                      {60 - client.requests_today} requests left
-                    </div>
+                  <div className={`client-status ${client.status === 'invalid' ? 'error' : client.quota_exceeded ? 'warning' : 'success'}`}>
+                    {client.status === 'invalid' ? '❌ Invalid' : 
+                     client.quota_exceeded ? '⚠️ Quota Exceeded' : '✅ Available'}
                   </div>
                 </div>
-              ))}
-            </div>
+                
+                {client.status === 'valid' && (
+                  <>
+                    <div className="quota-progress-container">
+                      <div className="quota-progress-bar">
+                        <div 
+                          className="quota-progress-fill"
+                          style={{ 
+                            width: `${(client.requests_today / 60) * 100}%`,
+                            backgroundColor: client.quota_exceeded ? '#ff6b6b' : '#00ff9d'
+                          }}
+                        ></div>
+                      </div>
+                      <div className="quota-numbers">
+                        <span className="quota-used">{client.requests_today} used</span>
+                        <span className="quota-total">/ 60 daily</span>
+                      </div>
+                    </div>
+                    
+                    <div className="quota-footer">
+                      <div className="quota-reset-info">
+                        <Clock size={12} />
+                        <span>Resets in: {formatTimeRemaining(client.hours_to_reset * 60 || 0)}</span>
+                      </div>
+                      <div className="quota-remaining">
+                        {60 - client.requests_today} requests left
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
             
-            {quotaInfo.quota_stats?.clients?.some(c => c.quota_exceeded) && (
-              <div className="quota-warning-banner">
-                <AlertTriangle size={16} />
-                <div className="warning-content">
-                  <strong>Some API keys have exceeded daily quota</strong>
-                  <p>Fallback analysis mode is active. Service will resume after quota reset.</p>
+            {serviceStatus.enhancedFallback && (
+              <div className="enhanced-fallback-card success">
+                <div className="fallback-header">
+                  <Sparkles size={20} />
+                  <h4>Enhanced Fallback Active</h4>
+                </div>
+                <p className="fallback-description">
+                  Even without AI, we extract information directly from resumes:
+                </p>
+                <div className="fallback-features">
+                  <div className="feature-badge">
+                    <Check size={14} />
+                    <span>Name Extraction</span>
+                  </div>
+                  <div className="feature-badge">
+                    <Check size={14} />
+                    <span>Skill Detection</span>
+                  </div>
+                  <div className="feature-badge">
+                    <Check size={14} />
+                    <span>Experience Analysis</span>
+                  </div>
+                  <div className="feature-badge">
+                    <Check size={14} />
+                    <span>Education Detection</span>
+                  </div>
                 </div>
               </div>
             )}
+            
+            {(quotaInfo.overall?.valid_keys || 0) === 0 && (
+              <div className="quota-warning-banner warning">
+                <AlertTriangle size={18} />
+                <div className="warning-content">
+                  <strong>No valid API keys configured</strong>
+                  <p>Enhanced analysis is extracting information directly from resumes. Add valid API keys for AI analysis.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Enhanced Fallback Info */}
+        {!analysis && serviceStatus.enhancedFallback && (
+          <div className="top-notice-bar glass">
+            <div className="notice-content">
+              <Sparkles size={18} />
+              <div>
+                <strong>Enhanced Analysis Mode Active</strong>
+                <p>We extract information directly from your resume for accurate analysis</p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -563,7 +649,7 @@ function App() {
           <div className="upload-section">
             <div className="section-header">
               <h2>Start Your Analysis</h2>
-              <p>Upload your resume and job description to get AI-powered insights</p>
+              <p>Upload your resume and job description to get detailed insights</p>
             </div>
             
             <div className="upload-grid">
@@ -640,6 +726,12 @@ function App() {
                     </div>
                     <span>Private & secure</span>
                   </div>
+                  <div className="stat">
+                    <div className="stat-icon">
+                      <Sparkles size={14} />
+                    </div>
+                    <span>Enhanced extraction</span>
+                  </div>
                 </div>
               </div>
 
@@ -688,7 +780,7 @@ function App() {
                 <div className="loading-container">
                   <div className="loading-header">
                     <Loader className="spinner" />
-                    <h3>AI Analysis in Progress</h3>
+                    <h3>Analysis in Progress</h3>
                   </div>
                   
                   <div className="progress-container">
@@ -700,7 +792,7 @@ function App() {
                     <span className="loading-subtext">
                       {progress < 30 ? 'Initializing...' : 
                        progress < 60 ? 'Processing document...' : 
-                       progress < 85 ? 'Analyzing with AI...' : 
+                       progress < 85 ? 'Analyzing content...' : 
                        'Finalizing results...'}
                     </span>
                   </div>
@@ -711,10 +803,10 @@ function App() {
                     <span>Estimated time: {progress > 80 ? '10s' : progress > 50 ? '30s' : '45s'}</span>
                   </div>
                   
-                  {aiStatus === 'unavailable' && progress > 60 && (
-                    <div className="loading-note">
-                      <AlertTriangle size={14} />
-                      <span>Using fallback analysis mode</span>
+                  {aiStatus === 'unavailable' && (
+                    <div className="loading-note info">
+                      <Info size={14} />
+                      <span>Using enhanced analysis (extracts info from your resume)</span>
                     </div>
                   )}
                 </div>
@@ -737,7 +829,9 @@ function App() {
                     <Zap size={20} />
                     <div className="button-text">
                       <span>Analyze Resume</span>
-                      <span className="button-subtext">Get AI-powered insights</span>
+                      <span className="button-subtext">
+                        {aiStatus === 'available' ? 'AI-powered insights' : 'Enhanced analysis'}
+                      </span>
                     </div>
                   </div>
                   <ChevronRight size={20} />
@@ -749,15 +843,15 @@ function App() {
             <div className="tips-section">
               <div className="tip">
                 <Sparkles size={16} />
-                <span>Keep job description concise (500-2000 chars for best results)</span>
+                <span>Make sure your name is clearly visible at the top of your resume</span>
               </div>
               <div className="tip">
                 <Shield size={16} />
-                <span>Your data is processed securely and not stored permanently</span>
+                <span>Your resume is processed securely and not stored permanently</span>
               </div>
               <div className="tip">
-                <Rocket size={16} />
-                <span>First analysis may take longer (30-60s) as AI service wakes up</span>
+                <Info size={16} />
+                <span>Even without AI, we extract information directly from your resume content</span>
               </div>
             </div>
           </div>
@@ -781,10 +875,15 @@ function App() {
                         day: 'numeric' 
                       })}
                     </span>
-                    {analysis.is_fallback && (
+                    {analysis.is_fallback ? (
                       <span className="fallback-badge">
-                        <AlertTriangle size={12} />
-                        Fallback Analysis
+                        <Sparkles size={12} />
+                        Enhanced Analysis
+                      </span>
+                    ) : (
+                      <span className="ai-badge">
+                        <Brain size={12} />
+                        AI-Powered
                       </span>
                     )}
                   </div>
@@ -816,17 +915,38 @@ function App() {
                   <p className="score-description">
                     Based on skill matching, experience relevance, and qualifications
                   </p>
+                  {analysis.extracted_info && (
+                    <p className="extracted-info-note">
+                      <Info size={12} />
+                      Analysis based on extracted resume content
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
 
             {/* Fallback Notice */}
             {analysis.is_fallback && (
-              <div className="fallback-notice glass">
-                <AlertTriangle size={20} />
+              <div className="fallback-notice glass info">
+                <div className="notice-icon">
+                  <Sparkles size={24} />
+                </div>
                 <div className="fallback-notice-content">
-                  <strong>High-Quality Analysis Mode</strong>
-                  <p>{analysis.fallback_reason || "AI service is temporarily unavailable. Showing professional analysis."}</p>
+                  <h4>Enhanced Analysis Results</h4>
+                  <p>{analysis.fallback_reason || "Information extracted directly from your resume content."}</p>
+                  {analysis.analysis_quality === 'enhanced_fallback' && (
+                    <div className="extracted-features">
+                      <span className="feature-tag">
+                        <Check size={12} /> Name extracted from resume
+                      </span>
+                      <span className="feature-tag">
+                        <Check size={12} /> Skills detected
+                      </span>
+                      <span className="feature-tag">
+                        <Check size={12} /> Experience analyzed
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -839,15 +959,17 @@ function App() {
               <div className="recommendation-header">
                 <Award size={28} style={{ color: getScoreColor(analysis.overall_score) }} />
                 <div>
-                  <h3>AI Recommendation</h3>
-                  <p className="recommendation-subtitle">Powered by {analysis.is_fallback ? 'Professional Analysis' : 'Gemini AI'}</p>
+                  <h3>Analysis Recommendation</h3>
+                  <p className="recommendation-subtitle">
+                    {analysis.is_fallback ? 'Enhanced Analysis' : 'AI-Powered Analysis'}
+                  </p>
                 </div>
               </div>
               <div className="recommendation-content">
                 <p className="recommendation-text">{analysis.recommendation}</p>
                 <div className="confidence-badge">
-                  <BarChart3 size={16} />
-                  <span>{analysis.is_fallback ? 'Professional Analysis' : 'AI-Powered Analysis'}</span>
+                  {analysis.is_fallback ? <Sparkles size={16} /> : <Brain size={16} />}
+                  <span>{analysis.is_fallback ? 'Enhanced Analysis' : 'AI-Powered Analysis'}</span>
                 </div>
               </div>
             </div>
@@ -931,7 +1053,7 @@ function App() {
             {/* Summary Section */}
             <div className="section-title">
               <h2>Profile Summary</h2>
-              <p>AI-generated insights from your resume</p>
+              <p>Insights extracted from your resume</p>
             </div>
             
             <div className="summary-grid">
@@ -968,7 +1090,7 @@ function App() {
 
             {/* Insights Section */}
             <div className="section-title">
-              <h2>AI Insights & Recommendations</h2>
+              <h2>Insights & Recommendations</h2>
               <p>Personalized suggestions to improve your match</p>
             </div>
             
@@ -1025,15 +1147,15 @@ function App() {
                 <p>Download detailed analysis or start a new assessment</p>
               </div>
               <div className="action-buttons">
-                <button className="download-button" onClick={handleDownload}>
+                <button 
+                  className="download-button" 
+                  onClick={handleDownload}
+                  disabled={!analysis?.excel_filename}
+                >
                   <div className="button-glow"></div>
                   <DownloadCloud size={20} />
                   <span>Download Excel Report</span>
                   <span className="button-badge">Detailed</span>
-                </button>
-                <button className="share-button">
-                  <Star size={20} />
-                  <span>Save Analysis</span>
                 </button>
                 <button className="reset-button" onClick={() => {
                   setAnalysis(null);
@@ -1064,14 +1186,14 @@ function App() {
               <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Transform your job application process with AI-powered insights
+              Transform your job application process with intelligent insights
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
               <h4>Features</h4>
-              <a href="#">AI Analysis</a>
+              <a href="#">Enhanced Analysis</a>
               <a href="#">Skill Matching</a>
               <a href="#">PDF Reports</a>
               <a href="#">Real-time Insights</a>
@@ -1094,19 +1216,19 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Gemini AI. All rights reserved.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Enhanced Analysis. All rights reserved.</p>
           <div className="footer-stats">
             <span className="stat">
               <Zap size={12} />
-              AI: {aiStatus === 'available' ? 'Ready' : 'Checking'}
+              Service: {aiStatus === 'available' ? 'AI Ready' : 'Enhanced Mode'}
             </span>
             <span className="stat">
               <Shield size={12} />
               100% Secure
             </span>
             <span className="stat">
-              <Users size={12} />
-              {quotaInfo?.service_status?.clients_working || 0}/{quotaInfo?.service_status?.total_clients || 0} Keys Active
+              <Sparkles size={12} />
+              Enhanced Fallback: ✅ Active
             </span>
           </div>
         </div>
