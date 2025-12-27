@@ -1,778 +1,756 @@
-import os
-import re
-import json
-import time
-import logging
-import tempfile
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
-from pathlib import Path
-
-from flask import Flask, request, jsonify, send_file, Response
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-from werkzeug.utils import secure_filename
-import pdfplumber
+from google import genai
+from PyPDF2 import PdfReader
 from docx import Document
-
-# Import pandas only if available
-try:
-    import pandas as pd
-    PANDAS_AVAILABLE = True
-except ImportError:
-    PANDAS_AVAILABLE = False
-    print("⚠️ Pandas not available - Excel reports will not be generated")
-
-# Try to import AI libraries
-try:
-    import openai
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    print("⚠️ OpenAI not available")
-
-try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-    print("⚠️ Google Gemini not available")
-
+import os
+import json
+from datetime import datetime
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from dotenv import load_dotenv
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import traceback
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
 
-# Configuration
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-ALLOWED_EXTENSIONS = {'.pdf', '.doc', '.docx', '.txt'}
-UPLOAD_FOLDER = Path('uploads')
-UPLOAD_FOLDER.mkdir(exist_ok=True)
+# Configure Gemini AI
+api_key = os.getenv('GEMINI_API_KEY')
+if not api_key:
+    print("❌ ERROR: GEMINI_API_KEY not found in .env file!")
+    client = None
+else:
+    print(f"✅ API Key loaded: {api_key[:10]}...")
+    client = genai.Client(api_key=api_key)
 
-# Initialize AI clients with enhanced fallback
-ai_clients = []
-enhanced_fallback_enabled = True
-extraction_features = [
-    "candidate_name_extraction",
-    "skill_keyword_detection", 
-    "experience_pattern_recognition",
-    "education_qualification_scanning",
-    "contact_info_extraction"
-]
+# Get absolute path for uploads folder
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+print(f"📁 Upload folder: {UPLOAD_FOLDER}")
 
-# Try to initialize OpenAI if available
-openai_api_key = os.getenv('OPENAI_API_KEY')
-if openai_api_key and OPENAI_AVAILABLE:
+@app.route('/')
+def home():
+    """Root route - API landing page"""
+    return '''
+    <!DOCTYPE html>
+<html>
+<head>
+    <title>Resume Analyzer API</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            text-align: center;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 5px solid #667eea;
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .status-label {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .status-value {
+            color: #27ae60;
+            font-weight: 600;
+        }
+        
+        .endpoints {
+            text-align: left;
+            margin: 30px 0;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            border: 2px solid #e9ecef;
+        }
+        
+        .endpoint {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            transition: transform 0.3s;
+        }
+        
+        .endpoint:hover {
+            transform: translateX(10px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .method {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 0.9rem;
+        }
+        
+        .path {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .description {
+            color: #7f8c8d;
+            margin-top: 5px;
+            font-size: 0.95rem;
+        }
+        
+        .api-status {
+            display: inline-block;
+            padding: 8px 20px;
+            background: #27ae60;
+            color: white;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        
+        .buttons {
+            margin-top: 30px;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 12px 30px;
+            margin: 0 10px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            color: white;
+            text-decoration: none;
+            border-radius: 30px;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(90deg, #11998e, #38ef7d);
+        }
+        
+        .footer {
+            margin-top: 40px;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+        
+        .error {
+            color: #e74c3c;
+            font-weight: 600;
+        }
+        
+        .success {
+            color: #27ae60;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Resume Analyzer API</h1>
+        <p class="subtitle">AI-powered resume analysis using Google Gemini</p>
+        
+        <div class="api-status">
+            ✅ API IS RUNNING
+        </div>
+        
+        <div class="status-card">
+            <div class="status-item">
+                <span class="status-label">Service Status:</span>
+                <span class="status-value">Online</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Gemini API:</span>
+                ''' + (f'<span class="success">✅ Configured ({api_key[:10]}...)</span>' if api_key else '<span class="error">❌ Not Configured</span>') + '''
+            </div>
+            <div class="status-item">
+                <span class="status-label">Client:</span>
+                ''' + ('<span class="success">✅ Initialized</span>' if client else '<span class="error">❌ Not Initialized</span>') + '''
+            </div>
+            <div class="status-item">
+                <span class="status-label">Upload Folder:</span>
+                <span class="status-value">''' + UPLOAD_FOLDER + '''</span>
+            </div>
+        </div>
+        
+        <div class="endpoints">
+            <h2>📡 API Endpoints</h2>
+            
+            <div class="endpoint">
+                <span class="method">POST</span>
+                <span class="path">/analyze</span>
+                <p class="description">Upload a resume (PDF/DOCX/TXT) with job description for AI analysis</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/health</span>
+                <p class="description">Check API health status and configuration</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/download/{filename}</span>
+                <p class="description">Download generated Excel analysis reports</p>
+            </div>
+        </div>
+        
+        <div class="buttons">
+            <a href="/health" class="btn">Check Health</a>
+            <a href="/" class="btn btn-secondary">Refresh</a>
+        </div>
+        
+        <div class="footer">
+            <p>Powered by Flask & Google Gemini AI | Deployed on Render</p>
+            <p>Upload folder: ''' + str(os.path.exists(UPLOAD_FOLDER)) + '''</p>
+        </div>
+    </div>
+</body>
+</html>
+    '''
+
+def extract_text_from_pdf(file_path):
+    """Extract text from PDF file"""
     try:
-        openai_client = OpenAI(api_key=openai_api_key)
-        # Test the key
-        test_response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": "test"}],
-            max_tokens=5
+        reader = PdfReader(file_path)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text()
+        if not text.strip():
+            return "Error: PDF appears to be empty or text could not be extracted"
+        return text
+    except Exception as e:
+        print(f"PDF Error: {traceback.format_exc()}")
+        return f"Error reading PDF: {str(e)}"
+
+def extract_text_from_docx(file_path):
+    """Extract text from DOCX file"""
+    try:
+        doc = Document(file_path)
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+        if not text.strip():
+            return "Error: Document appears to be empty"
+        return text
+    except Exception as e:
+        print(f"DOCX Error: {traceback.format_exc()}")
+        return f"Error reading DOCX: {str(e)}"
+
+def extract_text_from_txt(file_path):
+    """Extract text from TXT file"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            text = file.read()
+        if not text.strip():
+            return "Error: Text file appears to be empty"
+        return text
+    except Exception as e:
+        print(f"TXT Error: {traceback.format_exc()}")
+        return f"Error reading TXT: {str(e)}"
+
+def analyze_resume_with_gemini(resume_text, job_description):
+    """Use Gemini AI to analyze resume against job description"""
+    
+    if client is None:
+        print("❌ Gemini client not initialized. Check API key.")
+        return {
+            "candidate_name": "API Error",
+            "skills_matched": [],
+            "skills_missing": [],
+            "experience_summary": "Gemini API not configured properly. Check your API key.",
+            "education_summary": "Please ensure GEMINI_API_KEY is set in .env file",
+            "overall_score": 0,
+            "recommendation": "Configuration Error",
+            "key_strengths": [],
+            "areas_for_improvement": []
+        }
+    
+    prompt = f"""ANALYSIS INSTRUCTIONS:
+1. Read the resume carefully
+2. Extract ALL information ONLY from the provided resume text
+3. DO NOT use any external knowledge or assumptions
+4. If information is missing from resume, acknowledge it's missing
+
+RESUME TEXT TO ANALYZE:
+{resume_text[:8000]}
+
+JOB DESCRIPTION:
+{job_description[:4000]}
+
+IMPORTANT: Extract the candidate name from the resume. If no name is found, use "Unknown Candidate".
+
+Return ONLY this JSON format with analysis based SOLELY on the provided resume:
+{{
+    "candidate_name": "Name extracted from resume or 'Unknown Candidate'",
+    "skills_matched": ["list actual skills from resume that match job"],
+    "skills_missing": ["list skills from job not found in resume"],
+    "experience_summary": "1-2 sentence summary of experience from resume",
+    "education_summary": "1-2 sentence summary of education from resume",
+    "overall_score": 0-100 based on match percentage,
+    "recommendation": "Highly Recommended/Recommended/Not Recommended",
+    "key_strengths": ["strengths evident from resume"],
+    "areas_for_improvement": ["areas to improve based on resume gaps"]
+}}"""
+
+    try:
+        print("🤖 Sending to Gemini AI...")
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
         )
-        ai_clients.append({
-            "name": "OpenAI GPT-3.5",
-            "client": openai_client,
-            "model": "gpt-3.5-turbo",
-            "status": "valid",
-            "requests_today": 0,
-            "quota_exceeded": False,
-            "last_reset": datetime.now()
-        })
-        logger.info("✅ OpenAI GPT-3.5 API initialized successfully")
-    except Exception as e:
-        logger.error(f"❌ OpenAI initialization failed: {e}")
-        ai_clients.append({
-            "name": "OpenAI GPT-3.5",
-            "client": None,
-            "model": "gpt-3.5-turbo",
-            "status": "invalid",
-            "error": str(e)
-        })
-elif openai_api_key and not OPENAI_AVAILABLE:
-    logger.warning("⚠️ OpenAI API key found but library not installed")
-
-# Try to initialize Google Gemini if available
-gemini_api_key = os.getenv('GEMINI_API_KEY')
-if gemini_api_key and GEMINI_AVAILABLE:
-    try:
-        genai.configure(api_key=gemini_api_key)
-        gemini_client = genai.GenerativeModel('gemini-pro')
-        # Test with a simple prompt
-        response = gemini_client.generate_content("Hello")
-        ai_clients.append({
-            "name": "Google Gemini Pro",
-            "client": gemini_client,
-            "model": "gemini-pro",
-            "status": "valid",
-            "requests_today": 0,
-            "quota_exceeded": False,
-            "last_reset": datetime.now()
-        })
-        logger.info("✅ Google Gemini Pro API initialized successfully")
-    except Exception as e:
-        logger.error(f"❌ Google Gemini initialization failed: {e}")
-        ai_clients.append({
-            "name": "Google Gemini Pro",
-            "client": None,
-            "model": "gemini-pro",
-            "status": "invalid",
-            "error": str(e)
-        })
-elif gemini_api_key and not GEMINI_AVAILABLE:
-    logger.warning("⚠️ Gemini API key found but library not installed")
-
-logger.info(f"📊 Service Summary:")
-logger.info(f"   AI Clients: {len([c for c in ai_clients if c['status'] == 'valid'])}/{len(ai_clients)} valid")
-logger.info(f"   Enhanced Fallback: {'✅ Enabled' if enhanced_fallback_enabled else '❌ Disabled'}")
-logger.info(f"   Extraction Features: {len(extraction_features)}")
-logger.info(f"   Pandas Available: {'✅ Yes' if PANDAS_AVAILABLE else '❌ No'}")
-
-def extract_text_from_file(file_path: str) -> str:
-    """Extract text from various file formats with enhanced parsing."""
-    text = ""
-    file_ext = Path(file_path).suffix.lower()
-    
-    try:
-        if file_ext == '.pdf':
-            with pdfplumber.open(file_path) as pdf:
-                for page in pdf.pages:
-                    text += page.extract_text() + "\n"
         
-        elif file_ext in ['.doc', '.docx']:
-            doc = Document(file_path)
-            for paragraph in doc.paragraphs:
-                text += paragraph.text + "\n"
+        result_text = response.text.strip()
         
-        elif file_ext == '.txt':
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                text = f.read()
+        # Clean response
+        if '```json' in result_text:
+            result_text = result_text.replace('```json', '').replace('```', '').strip()
+        elif '```' in result_text:
+            result_text = result_text.replace('```', '').strip()
         
-        # Clean up text
-        text = re.sub(r'\s+', ' ', text)
-        text = re.sub(r'\n+', '\n', text)
+        # Parse JSON
+        analysis = json.loads(result_text)
+        print(f"✅ Analysis received for: {analysis.get('candidate_name', 'Unknown')}")
         
-    except Exception as e:
-        logger.error(f"Error extracting text: {e}")
-        raise
-    
-    return text.strip()
-
-def extract_candidate_name(text: str) -> str:
-    """Enhanced candidate name extraction from resume text."""
-    # Look for common name patterns at the beginning of the text
-    lines = text.strip().split('\n')
-    
-    # Check first few lines for name-like patterns
-    for line in lines[:5]:
-        line = line.strip()
-        # Remove common resume headers
-        clean_line = re.sub(r'(resume|curriculum vitae|cv|portfolio)', '', line, flags=re.IGNORECASE)
-        clean_line = clean_line.strip()
+        # Validate required fields
+        required_fields = [
+            'candidate_name', 'skills_matched', 'skills_missing',
+            'experience_summary', 'education_summary', 'overall_score',
+            'recommendation', 'key_strengths', 'areas_for_improvement'
+        ]
         
-        # Look for name patterns (2-3 words, capitalized, no special characters)
-        if re.match(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}$', clean_line):
-            return clean_line
+        for field in required_fields:
+            if field not in analysis:
+                if 'skill' in field or 'strength' in field or 'improvement' in field:
+                    analysis[field] = []
+                else:
+                    analysis[field] = "Information not found in resume"
         
-        # Check for email or phone numbers that might precede name
-        if '@' in line or re.search(r'\(\d{3}\)\s*\d{3}-\d{4}|\+\d{1,3}\s*\d{10}', line):
-            continue
-            
-        # If line has reasonable length and looks like a name
-        if 2 <= len(clean_line.split()) <= 4 and len(clean_line) <= 50:
-            # Check if it contains common name indicators
-            name_words = clean_line.split()
-            if all(len(word) >= 2 for word in name_words):
-                return clean_line
-    
-    # Fallback: Return first non-empty line that looks reasonable
-    for line in lines:
-        line = line.strip()
-        if line and len(line) <= 100 and not any(word in line.lower() for word in ['objective', 'summary', 'experience', 'education']):
-            return line.split('\n')[0] if '\n' in line else line
-    
-    return "Candidate"
-
-def extract_skills_from_text(text: str, job_description: str) -> Dict[str, List[str]]:
-    """Extract skills from resume text and compare with job description."""
-    # Common skill keywords
-    common_skills = {
-        'programming': ['python', 'java', 'javascript', 'c++', 'c#', 'ruby', 'go', 'rust', 'swift', 'kotlin'],
-        'web': ['html', 'css', 'react', 'angular', 'vue', 'node.js', 'django', 'flask', 'express', 'spring'],
-        'databases': ['sql', 'mysql', 'postgresql', 'mongodb', 'redis', 'oracle', 'sqlite'],
-        'cloud': ['aws', 'azure', 'gcp', 'docker', 'kubernetes', 'terraform', 'jenkins'],
-        'data': ['excel', 'tableau', 'power bi', 'pandas', 'numpy', 'scikit-learn', 'tensorflow', 'pytorch'],
-        'soft': ['communication', 'leadership', 'teamwork', 'problem solving', 'creativity', 'adaptability']
-    }
-    
-    # Extract skills from resume
-    resume_skills = []
-    text_lower = text.lower()
-    
-    for category, skills in common_skills.items():
-        for skill in skills:
-            if skill in text_lower:
-                resume_skills.append(skill.title())
-    
-    # Extract skills from job description
-    job_skills = []
-    job_lower = job_description.lower()
-    
-    for category, skills in common_skills.items():
-        for skill in skills:
-            if skill in job_lower:
-                job_skills.append(skill.title())
-    
-    # Find matched and missing skills
-    matched_skills = [skill for skill in job_skills if skill in resume_skills]
-    missing_skills = [skill for skill in job_skills if skill not in resume_skills]
-    
-    # Remove duplicates
-    matched_skills = list(dict.fromkeys(matched_skills))
-    missing_skills = list(dict.fromkeys(missing_skills))
-    
-    return {
-        'matched': matched_skills[:15],  # Limit to top 15
-        'missing': missing_skills[:15]
-    }
-
-def analyze_with_ai(client_config: Dict, resume_text: str, job_description: str) -> Dict[str, Any]:
-    """Analyze resume with AI service."""
-    client = client_config['client']
-    model = client_config['model']
-    
-    prompt = f"""
-    Analyze this resume against the job description and provide a comprehensive analysis.
-    
-    RESUME:
-    {resume_text[:3000]}  # Limit resume text
-    
-    JOB DESCRIPTION:
-    {job_description[:2000]}  # Limit job description
-    
-    Please provide analysis in the following JSON format:
-    {{
-        "overall_score": 85,
-        "recommendation": "Brief recommendation text",
-        "skills_matched": ["Python", "React", "AWS"],
-        "skills_missing": ["Kubernetes", "Docker"],
-        "experience_summary": "Summary of candidate experience",
-        "education_summary": "Summary of education",
-        "key_strengths": ["Strength 1", "Strength 2"],
-        "areas_for_improvement": ["Area 1", "Area 2"]
-    }}
-    
-    Overall score should be 0-100 based on match quality.
-    """
-    
-    try:
-        if "gpt" in model:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You are a resume analysis expert."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=1000
-            )
-            result_text = response.choices[0].message.content
-            
-        elif "gemini" in model:
-            response = client.generate_content(prompt)
-            result_text = response.text
-        else:
-            raise ValueError(f"Unknown model: {model}")
-        
-        # Parse JSON from response
-        try:
-            # Find JSON in response
-            json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-            if json_match:
-                analysis = json.loads(json_match.group())
-            else:
-                # Fallback if no JSON found
-                analysis = {
-                    "overall_score": 75,
-                    "recommendation": "AI analysis completed. Consider the following insights.",
-                    "skills_matched": [],
-                    "skills_missing": [],
-                    "experience_summary": "Experience analyzed from resume.",
-                    "education_summary": "Education background reviewed.",
-                    "key_strengths": ["AI-powered analysis completed"],
-                    "areas_for_improvement": ["Consider adding more specific skills mentioned in job description"]
-                }
-        except json.JSONDecodeError:
-            # Fallback analysis
-            analysis = create_enhanced_fallback_analysis(resume_text, job_description)
-        
-        client_config['requests_today'] += 1
         return analysis
         
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON Error: {e}")
+        return {
+            "candidate_name": "Parse Error",
+            "skills_matched": ["JSON parsing failed"],
+            "skills_missing": [],
+            "experience_summary": "Error parsing AI response",
+            "education_summary": "Please try again",
+            "overall_score": 0,
+            "recommendation": "Error - Retry analysis",
+            "key_strengths": [],
+            "areas_for_improvement": []
+        }
     except Exception as e:
-        logger.error(f"AI analysis error: {e}")
-        raise
-
-def create_enhanced_fallback_analysis(resume_text: str, job_description: str) -> Dict[str, Any]:
-    """Create analysis using enhanced text parsing when AI is unavailable."""
-    # Extract candidate name
-    candidate_name = extract_candidate_name(resume_text)
-    
-    # Extract skills
-    skills_result = extract_skills_from_text(resume_text, job_description)
-    
-    # Calculate score based on skill match
-    total_skills = len(skills_result['matched']) + len(skills_result['missing'])
-    if total_skills > 0:
-        score = int((len(skills_result['matched']) / total_skills) * 100)
-    else:
-        score = 50  # Default score
-    
-    # Adjust score based on text length and quality
-    if len(resume_text) > 500:
-        score = min(score + 10, 95)
-    
-    # Create summaries
-    experience_summary = extract_experience_summary(resume_text)
-    education_summary = extract_education_summary(resume_text)
-    
-    return {
-        "overall_score": score,
-        "candidate_name": candidate_name,
-        "recommendation": create_recommendation(score, skills_result),
-        "skills_matched": skills_result['matched'],
-        "skills_missing": skills_result['missing'],
-        "experience_summary": experience_summary,
-        "education_summary": education_summary,
-        "key_strengths": extract_key_strengths(resume_text, skills_result['matched']),
-        "areas_for_improvement": suggest_improvements(skills_result['missing']),
-        "is_fallback": True,
-        "fallback_reason": "Enhanced text analysis (no AI available)",
-        "analysis_quality": "enhanced_fallback",
-        "extracted_info": True
-    }
-
-def extract_experience_summary(text: str) -> str:
-    """Extract experience summary from resume text."""
-    # Look for experience-related sections
-    exp_keywords = ['experience', 'work history', 'employment', 'career']
-    text_lower = text.lower()
-    
-    for keyword in exp_keywords:
-        if keyword in text_lower:
-            # Find the section
-            start_idx = text_lower.find(keyword)
-            if start_idx != -1:
-                # Take next 500 characters after the keyword
-                section = text[start_idx:start_idx + 500]
-                # Clean up the section
-                section = re.sub(r'\s+', ' ', section)
-                return f"Experience section detected: {section[:200]}..."
-    
-    # If no explicit experience section, look for date patterns
-    date_pattern = r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}\b'
-    dates = re.findall(date_pattern, text, re.IGNORECASE)
-    if dates:
-        return f"Professional experience timeline detected with {len(dates)} date entries."
-    
-    return "Experience details extracted from resume content."
-
-def extract_education_summary(text: str) -> str:
-    """Extract education summary from resume text."""
-    # Look for education-related sections
-    edu_keywords = ['education', 'academic', 'qualifications', 'degree', 'university', 'college']
-    text_lower = text.lower()
-    
-    for keyword in edu_keywords:
-        if keyword in text_lower:
-            start_idx = text_lower.find(keyword)
-            if start_idx != -1:
-                section = text[start_idx:start_idx + 300]
-                section = re.sub(r'\s+', ' ', section)
-                return f"Education background: {section[:150]}..."
-    
-    # Look for degree patterns
-    degree_pattern = r'\b(?:B\.?S\.?|B\.?A\.?|M\.?S\.?|M\.?A\.?|Ph\.?D\.?|MBA)\b'
-    degrees = re.findall(degree_pattern, text, re.IGNORECASE)
-    if degrees:
-        return f"Educational qualifications include: {', '.join(set(degrees))}"
-    
-    return "Education information analyzed from resume."
-
-def extract_key_strengths(text: str, matched_skills: List[str]) -> List[str]:
-    """Extract key strengths from resume."""
-    strengths = []
-    
-    if matched_skills:
-        strengths.append(f"Strong match with {len(matched_skills)} required skills")
-    
-    # Check for experience duration
-    exp_pattern = r'(\d+)\s*(?:years?|yrs?)\s+.*?(?:experience|exp)'
-    exp_matches = re.findall(exp_pattern, text, re.IGNORECASE)
-    if exp_matches:
-        years = max([int(m) for m in exp_matches if m.isdigit()], default=0)
-        if years >= 3:
-            strengths.append(f"Substantial professional experience ({years}+ years)")
-    
-    # Check for certifications
-    cert_keywords = ['certified', 'certification', 'license', 'accredited']
-    if any(keyword in text.lower() for keyword in cert_keywords):
-        strengths.append("Professional certifications identified")
-    
-    # Add generic strengths if needed
-    if len(strengths) < 2:
-        strengths.append("Well-structured resume with clear sections")
-        strengths.append("Relevant professional background")
-    
-    return strengths[:4]  # Limit to 4 strengths
-
-def suggest_improvements(missing_skills: List[str]) -> List[str]:
-    """Suggest improvements based on missing skills."""
-    improvements = []
-    
-    if missing_skills:
-        improvements.append(f"Consider adding {', '.join(missing_skills[:3])} skills")
-    
-    improvements.append("Quantify achievements with specific metrics")
-    improvements.append("Highlight relevant projects and their impact")
-    
-    return improvements[:3]
-
-def create_recommendation(score: int, skills_result: Dict) -> str:
-    """Create recommendation based on score and skills."""
-    if score >= 80:
-        return f"Strong match! You have {len(skills_result['matched'])} of the required skills. Consider highlighting your experience with specific examples."
-    elif score >= 60:
-        return f"Good match with {len(skills_result['matched'])} skills. Consider adding {', '.join(skills_result['missing'][:2])} to improve your score."
-    else:
-        return f"Focus on developing {', '.join(skills_result['missing'][:3])} skills. Consider relevant courses or projects to strengthen your profile."
-
-def create_excel_report(analysis: Dict[str, Any], filename: str) -> str:
-    """Create Excel report from analysis."""
-    if not PANDAS_AVAILABLE:
-        logger.warning("Pandas not available - skipping Excel report generation")
-        return None
-    
-    try:
-        # Create DataFrames for different sections
-        data = {
-            'Metric': ['Overall Match Score', 'Skills Matched', 'Skills Missing'],
-            'Value': [
-                f"{analysis['overall_score']}/100",
-                len(analysis.get('skills_matched', [])),
-                len(analysis.get('skills_missing', []))
-            ]
+        print(f"❌ Gemini Error: {str(e)}")
+        return {
+            "candidate_name": "API Error",
+            "skills_matched": [],
+            "skills_missing": [],
+            "experience_summary": f"API Error: {str(e)}",
+            "education_summary": "Check API configuration",
+            "overall_score": 0,
+            "recommendation": "Error occurred",
+            "key_strengths": [],
+            "areas_for_improvement": []
         }
-        
-        df_summary = pd.DataFrame(data)
-        
-        # Skills matched DataFrame
-        if analysis.get('skills_matched'):
-            df_matched = pd.DataFrame({
-                'Matched Skills': analysis['skills_matched']
-            })
-        else:
-            df_matched = pd.DataFrame({'Matched Skills': ['No skills matched']})
-        
-        # Skills missing DataFrame
-        if analysis.get('skills_missing'):
-            df_missing = pd.DataFrame({
-                'Missing Skills': analysis['skills_missing'],
-                'Priority': ['High' if i < 3 else 'Medium' if i < 6 else 'Low' 
-                           for i in range(len(analysis['skills_missing']))]
-            })
-        else:
-            df_missing = pd.DataFrame({'Missing Skills': ['All required skills present!'], 'Priority': ['N/A']})
-        
-        # Key insights DataFrame
-        insights_data = {
-            'Key Strengths': analysis.get('key_strengths', []) + [''] * (3 - len(analysis.get('key_strengths', []))),
-            'Areas for Improvement': analysis.get('areas_for_improvement', []) + [''] * (3 - len(analysis.get('areas_for_improvement', [])))
-        }
-        df_insights = pd.DataFrame(insights_data)
-        
-        # Create Excel writer
-        report_path = UPLOAD_FOLDER / filename
-        
-        # Use try-except for Excel writing
-        try:
-            with pd.ExcelWriter(report_path, engine='openpyxl') as writer:
-                df_summary.to_excel(writer, sheet_name='Summary', index=False)
-                df_matched.to_excel(writer, sheet_name='Skills Matched', index=False)
-                df_missing.to_excel(writer, sheet_name='Skills Missing', index=False)
-                df_insights.to_excel(writer, sheet_name='Insights', index=False)
-                
-                # Summary sheet
-                workbook = writer.book
-                summary_sheet = writer.sheets['Summary']
-                summary_sheet.column_dimensions['A'].width = 25
-                summary_sheet.column_dimensions['B'].width = 25
-                
-                # Add analysis details
-                summary_sheet['D1'] = 'Analysis Details'
-                summary_sheet['D2'] = f"Candidate: {analysis.get('candidate_name', 'N/A')}"
-                summary_sheet['D3'] = f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                summary_sheet['D4'] = f"Analysis Type: {'AI-Powered' if not analysis.get('is_fallback') else 'Enhanced Text Analysis'}"
-                summary_sheet['D5'] = 'Recommendation:'
-                summary_sheet['D6'] = analysis.get('recommendation', '')
-            
-            return str(report_path)
-            
-        except Exception as excel_error:
-            logger.error(f"Error writing Excel file: {excel_error}")
-            return None
-        
-    except Exception as e:
-        logger.error(f"Error creating Excel report: {e}")
-        return None
 
-@app.route('/ping', methods=['GET'])
-def ping():
-    """Health check endpoint."""
-    valid_keys = len([c for c in ai_clients if c.get('status') == 'valid'])
-    return jsonify({
-        "status": "ok",
-        "timestamp": datetime.now().isoformat(),
-        "ai_clients": len(ai_clients),
-        "valid_keys": valid_keys,
-        "enhanced_fallback": enhanced_fallback_enabled,
-        "extraction_features": extraction_features if enhanced_fallback_enabled else [],
-        "pandas_available": PANDAS_AVAILABLE
-    })
-
-@app.route('/quick-check', methods=['GET'])
-def quick_check():
-    """Quick AI availability check."""
-    # Check if any AI client is available and not exceeding quota
-    available_clients = [
-        c for c in ai_clients 
-        if c.get('status') == 'valid' and not c.get('quota_exceeded', False)
-    ]
+def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
+    """Create a beautiful Excel report with the analysis"""
     
-    if available_clients:
-        return jsonify({
-            "available": True,
-            "status": "ai_available",
-            "clients_available": len(available_clients),
-            "enhanced_fallback_available": enhanced_fallback_enabled
-        })
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Resume Analysis"
+    
+    # Define styles
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=12)
+    subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    subheader_font = Font(bold=True, size=11)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Set column widths
+    ws.column_dimensions['A'].width = 30
+    ws.column_dimensions['B'].width = 60
+    
+    row = 1
+    
+    # Title
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "RESUME ANALYSIS REPORT"
+    cell.font = Font(bold=True, size=16, color="FFFFFF")
+    cell.fill = PatternFill(start_color="203864", end_color="203864", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    row += 2
+    
+    # Candidate Information
+    ws[f'A{row}'] = "Candidate Name"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = analysis_data.get('candidate_name', 'N/A')
+    row += 1
+    
+    ws[f'A{row}'] = "Analysis Date"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row += 2
+    
+    # Overall Score
+    ws[f'A{row}'] = "Overall Match Score"
+    ws[f'A{row}'].font = Font(bold=True, size=12)
+    ws[f'A{row}'].fill = header_fill
+    ws[f'A{row}'].font = Font(bold=True, size=12, color="FFFFFF")
+    ws[f'B{row}'] = f"{analysis_data.get('overall_score', 0)}/100"
+    ws[f'B{row}'].font = Font(bold=True, size=12, color="C00000")
+    row += 1
+    
+    ws[f'A{row}'] = "Recommendation"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = analysis_data.get('recommendation', 'N/A')
+    row += 2
+    
+    # Skills Matched Section
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "SKILLS MATCHED ✓"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    skills_matched = analysis_data.get('skills_matched', [])
+    if skills_matched:
+        for i, skill in enumerate(skills_matched, 1):
+            ws[f'A{row}'] = f"{i}."
+            ws[f'B{row}'] = skill
+            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
+            row += 1
     else:
-        return jsonify({
-            "available": False,
-            "status": "enhanced_only",
-            "enhanced_fallback_available": enhanced_fallback_enabled,
-            "message": "Using enhanced text analysis"
-        })
-
-@app.route('/stats', methods=['GET'])
-def get_stats():
-    """Get service statistics and quota status."""
-    now = datetime.now()
+        ws[f'A{row}'] = "No matched skills found"
+        row += 1
     
-    # Update client statuses
-    for client in ai_clients:
-        if client.get('last_reset'):
-            # Reset daily counts if more than 24 hours have passed
-            if now - client['last_reset'] > timedelta(hours=24):
-                client['requests_today'] = 0
-                client['quota_exceeded'] = False
-                client['last_reset'] = now
+    row += 1
     
-    stats = {
-        "timestamp": now.isoformat(),
-        "overall": {
-            "total_keys": len(ai_clients),
-            "valid_keys": len([c for c in ai_clients if c.get('status') == 'valid']),
-            "active_requests": sum(c.get('requests_today', 0) for c in ai_clients),
-            "enhanced_fallback": {
-                "enabled": enhanced_fallback_enabled,
-                "extraction_features": extraction_features
-            },
-            "pandas_available": PANDAS_AVAILABLE
-        },
-        "clients": []
-    }
+    # Skills Missing Section
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "SKILLS MISSING ✗"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
     
-    for client in ai_clients:
-        client_info = {
-            "name": client["name"],
-            "status": client.get("status", "unknown"),
-            "model": client.get("model", "unknown"),
-            "requests_today": client.get("requests_today", 0),
-            "quota_exceeded": client.get("quota_exceeded", False)
-        }
-        
-        if client.get('last_reset'):
-            time_since_reset = now - client['last_reset']
-            hours_to_reset = max(0, 24 - time_since_reset.total_seconds() / 3600)
-            client_info["hours_to_reset"] = round(hours_to_reset, 1)
-        
-        stats["clients"].append(client_info)
+    skills_missing = analysis_data.get('skills_missing', [])
+    if skills_missing:
+        for i, skill in enumerate(skills_missing, 1):
+            ws[f'A{row}'] = f"{i}."
+            ws[f'B{row}'] = skill
+            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
+            row += 1
+    else:
+        ws[f'A{row}'] = "All required skills are present!"
+        row += 1
     
-    return jsonify(stats)
+    row += 1
+    
+    # Experience Summary
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "EXPERIENCE SUMMARY"
+    cell.font = header_font
+    cell.fill = header_fill
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = analysis_data.get('experience_summary', 'N/A')
+    cell.alignment = Alignment(wrap_text=True, vertical='top')
+    ws.row_dimensions[row].height = 60
+    row += 2
+    
+    # Education Summary
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "EDUCATION SUMMARY"
+    cell.font = header_font
+    cell.fill = header_fill
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = analysis_data.get('education_summary', 'N/A')
+    cell.alignment = Alignment(wrap_text=True, vertical='top')
+    ws.row_dimensions[row].height = 40
+    row += 2
+    
+    # Key Strengths
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "KEY STRENGTHS"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    for strength in analysis_data.get('key_strengths', []):
+        ws[f'A{row}'] = "•"
+        ws[f'B{row}'] = strength
+        ws[f'B{row}'].alignment = Alignment(wrap_text=True)
+        row += 1
+    
+    row += 1
+    
+    # Areas for Improvement
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "AREAS FOR IMPROVEMENT"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    for area in analysis_data.get('areas_for_improvement', []):
+        ws[f'A{row}'] = "•"
+        ws[f'B{row}'] = area
+        ws[f'B{row}'].alignment = Alignment(wrap_text=True)
+        row += 1
+    
+    # Apply borders to all cells
+    for row_cells in ws.iter_rows(min_row=1, max_row=row, min_col=1, max_col=2):
+        for cell in row_cells:
+            cell.border = border
+    
+    # Save the file using ABSOLUTE path
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    wb.save(filepath)
+    print(f"📄 Excel report saved to: {filepath}")
+    return filepath
 
 @app.route('/analyze', methods=['POST'])
 def analyze_resume():
-    """Main analysis endpoint."""
-    start_time = time.time()
-    
-    # Check file in request
-    if 'resume' not in request.files:
-        return jsonify({"error": "No resume file provided"}), 400
-    
-    file = request.files['resume']
-    job_description = request.form.get('jobDescription', '')
-    
-    if not job_description:
-        return jsonify({"error": "Job description is required"}), 400
-    
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-    
-    # Validate file
-    file_ext = Path(file.filename).suffix.lower()
-    if file_ext not in ALLOWED_EXTENSIONS:
-        return jsonify({"error": f"File type not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
-    
-    # Save uploaded file
-    filename = secure_filename(f"{int(time.time())}_{file.filename}")
-    file_path = UPLOAD_FOLDER / filename
-    file.save(file_path)
+    """Main endpoint to analyze resume"""
     
     try:
-        # Extract text from resume
-        resume_text = extract_text_from_file(str(file_path))
-        if not resume_text or len(resume_text) < 50:
-            return jsonify({"error": "Could not extract sufficient text from resume"}), 400
+        print("\n" + "="*50)
+        print("📥 New analysis request received")
         
-        # Try AI analysis first
-        analysis_result = None
-        ai_used = False
-        fallback_reason = ""
+        if 'resume' not in request.files:
+            print("❌ No resume file in request")
+            return jsonify({'error': 'No resume file provided'}), 400
         
-        # Find available AI client
-        available_clients = [
-            c for c in ai_clients 
-            if c.get('status') == 'valid' and not c.get('quota_exceeded', False)
-        ]
+        if 'jobDescription' not in request.form:
+            print("❌ No job description in request")
+            return jsonify({'error': 'No job description provided'}), 400
         
-        if available_clients:
-            try:
-                client_config = available_clients[0]  # Use first available
-                logger.info(f"Using AI client: {client_config['name']}")
-                analysis_result = analyze_with_ai(client_config, resume_text, job_description)
-                ai_used = True
-            except Exception as ai_error:
-                logger.error(f"AI analysis failed: {ai_error}")
-                fallback_reason = f"AI service error: {str(ai_error)}"
-                # Mark client as possibly exceeding quota if it's a quota error
-                if "quota" in str(ai_error).lower() or "429" in str(ai_error):
-                    client_config['quota_exceeded'] = True
-                    fallback_reason = "AI quota exceeded"
+        resume_file = request.files['resume']
+        job_description = request.form['jobDescription']
         
-        # If AI failed or not available, use enhanced fallback
-        if not analysis_result and enhanced_fallback_enabled:
-            logger.info("Using enhanced fallback analysis")
-            analysis_result = create_enhanced_fallback_analysis(resume_text, job_description)
-            analysis_result['fallback_reason'] = fallback_reason or "Enhanced text analysis (AI unavailable)"
+        print(f"📄 Resume file: {resume_file.filename}")
+        print(f"📋 Job description length: {len(job_description)} characters")
         
-        if not analysis_result:
-            return jsonify({"error": "Analysis failed. Please try again."}), 500
+        if resume_file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
         
-        # Add metadata
-        analysis_result['analysis_time'] = round(time.time() - start_time, 2)
-        analysis_result['is_fallback'] = not ai_used
-        analysis_result['text_length'] = len(resume_text)
+        # Save the uploaded file
+        file_ext = os.path.splitext(resume_file.filename)[1].lower()
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}{file_ext}")
+        resume_file.save(file_path)
+        print(f"💾 File saved to: {file_path}")
         
-        # Ensure candidate name is present
-        if not analysis_result.get('candidate_name'):
-            analysis_result['candidate_name'] = extract_candidate_name(resume_text)
-        
-        # Create Excel report if pandas is available
-        if PANDAS_AVAILABLE:
-            excel_filename = f"analysis_{int(time.time())}.xlsx"
-            try:
-                report_path = create_excel_report(analysis_result, excel_filename)
-                if report_path:
-                    analysis_result['excel_filename'] = excel_filename
-                    analysis_result['excel_url'] = f"/download/{excel_filename}"
-                else:
-                    logger.warning("Excel report creation failed")
-            except Exception as e:
-                logger.error(f"Excel report creation failed: {e}")
+        # Extract text based on file type
+        print(f"📖 Extracting text from {file_ext} file...")
+        if file_ext == '.pdf':
+            resume_text = extract_text_from_pdf(file_path)
+        elif file_ext in ['.docx', '.doc']:
+            resume_text = extract_text_from_docx(file_path)
+        elif file_ext == '.txt':
+            resume_text = extract_text_from_txt(file_path)
         else:
-            logger.info("Excel reports disabled (pandas not available)")
+            print(f"❌ Unsupported file format: {file_ext}")
+            return jsonify({'error': 'Unsupported file format. Please upload PDF, DOCX, or TXT'}), 400
         
-        # Clean up uploaded file
-        try:
-            os.remove(file_path)
-        except:
-            pass
+        if resume_text.startswith('Error'):
+            print(f"❌ Text extraction error: {resume_text}")
+            return jsonify({'error': resume_text}), 500
         
-        return jsonify(analysis_result)
+        print(f"✅ Extracted {len(resume_text)} characters from resume")
+        
+        # Check if API key is configured
+        if not api_key:
+            print("❌ API key not configured")
+            return jsonify({'error': 'API key not configured. Please add GEMINI_API_KEY to .env file'}), 500
+        
+        if client is None:
+            print("❌ Gemini client not initialized")
+            return jsonify({'error': 'Gemini AI client not properly initialized'}), 500
+        
+        # Analyze with Gemini AI
+        print("🤖 Starting AI analysis...")
+        analysis = analyze_resume_with_gemini(resume_text, job_description)
+        
+        print(f"✅ Analysis completed. Score: {analysis.get('overall_score', 0)}")
+        print(f"🔍 AI Analysis Result:")
+        print(f"  Name: {analysis.get('candidate_name')}")
+        print(f"  Score: {analysis.get('overall_score')}")
+        print(f"  Matched Skills: {len(analysis.get('skills_matched', []))}")
+        print(f"  Missing Skills: {len(analysis.get('skills_missing', []))}")
+        
+        # Create Excel report
+        print("📊 Creating Excel report...")
+        excel_filename = f"analysis_{timestamp}.xlsx"
+        excel_path = create_excel_report(analysis, excel_filename)
+        print(f"✅ Excel report created: {excel_path}")
+        
+        # Return analysis with download link
+        analysis['excel_filename'] = os.path.basename(excel_path)
+        
+        print("✅ Request completed successfully")
+        print("="*50 + "\n")
+        
+        return jsonify(analysis)
         
     except Exception as e:
-        logger.error(f"Analysis error: {e}")
-        # Clean up on error
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        except:
-            pass
-        return jsonify({"error": f"Analysis failed: {str(e)}"}), 500
+        print(f"❌ Unexpected error: {traceback.format_exc()}")
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 @app.route('/download/<filename>', methods=['GET'])
-def download_file(filename):
-    """Download analysis report."""
-    file_path = UPLOAD_FOLDER / secure_filename(filename)
-    
-    if not file_path.exists():
-        return jsonify({"error": "File not found"}), 404
-    
+def download_report(filename):
+    """Download the Excel report"""
     try:
+        print(f"📥 Download request for: {filename}")
+        print(f"📁 Upload folder path: {UPLOAD_FOLDER}")
+        
+        # Sanitize filename
+        import re
+        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
+        
+        file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
+        
+        print(f"🔍 Looking for file at: {file_path}")
+        print(f"📁 Upload folder exists: {os.path.exists(UPLOAD_FOLDER)}")
+        
+        if not os.path.exists(UPLOAD_FOLDER):
+            print(f"❌ Upload folder doesn't exist: {UPLOAD_FOLDER}")
+            return jsonify({'error': 'Upload folder not found'}), 500
+            
+        if not os.path.exists(file_path):
+            print(f"❌ File not found: {file_path}")
+            # List available files
+            available_files = os.listdir(UPLOAD_FOLDER)
+            print(f"📂 Available files in {UPLOAD_FOLDER}: {available_files}")
+            return jsonify({'error': f'File not found. Available files: {available_files}'}), 404
+        
+        print(f"✅ File found! Size: {os.path.getsize(file_path)} bytes")
+        
         return send_file(
             file_path,
             as_attachment=True,
-            download_name=f"resume_analysis_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            download_name=safe_filename,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
+        
     except Exception as e:
-        logger.error(f"Download error: {e}")
-        return jsonify({"error": "Download failed"}), 500
+        print(f"❌ Download error: {traceback.format_exc()}")
+        return jsonify({'error': f'Download failed: {str(e)}'}), 500
 
-@app.route('/cleanup', methods=['POST'])
-def cleanup_files():
-    """Clean up old files."""
-    try:
-        cutoff_time = time.time() - 3600  # 1 hour ago
-        files_deleted = 0
-        
-        for file_path in UPLOAD_FOLDER.glob('*'):
-            if file_path.is_file():
-                file_age = time.time() - file_path.stat().st_mtime
-                if file_age > 3600:  # Delete files older than 1 hour
-                    try:
-                        file_path.unlink()
-                        files_deleted += 1
-                    except:
-                        pass
-        
-        return jsonify({
-            "message": f"Cleaned up {files_deleted} old files",
-            "timestamp": datetime.now().isoformat()
-        })
-    except Exception as e:
-        logger.error(f"Cleanup error: {e}")
-        return jsonify({"error": str(e)}), 500
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'Backend is running!', 
+        'timestamp': datetime.now().isoformat(),
+        'api_key_configured': bool(api_key),
+        'client_initialized': client is not None,
+        'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
+        'upload_folder_path': UPLOAD_FOLDER
+    })
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    print("\n" + "="*50)
+    print("🚀 Resume Analyzer Backend Starting...")
+    print("="*50)
+    port = int(os.environ.get('PORT', 5002))
+    print(f"📍 Server: http://localhost:{port}")
+    print(f"🔑 API Key: {'✅ Configured' if api_key else '❌ NOT FOUND'}")
+    print(f"🤖 Gemini Client: {'✅ Initialized' if client else '❌ NOT INITIALIZED'}")
+    print(f"📁 Upload folder: {UPLOAD_FOLDER}")
+    print("="*50 + "\n")
+    
+    if not api_key:
+        print("⚠️  WARNING: GEMINI_API_KEY not found!")
+        print("Please create a .env file with: GEMINI_API_KEY=your_key_here\n")
+        print("Get your API key from: https://makersuite.google.com/app/apikey")
+    
+    # Use PORT environment variable (Render provides $PORT)
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
