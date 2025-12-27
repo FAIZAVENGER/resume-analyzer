@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-from google import genai
+import google.generativeai as genai
 from PyPDF2 import PdfReader
 from docx import Document
 import os
@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 import traceback
 import hashlib
 import re
+import requests
 
 # Load environment variables
 load_dotenv()
@@ -83,59 +84,108 @@ else:
         
         print(f"\n🔄 Testing Key {i+1} ({key[:8]}...)")
         
-        # Try different models
-        for model in GEMINI_MODELS:
-            try:
-                print(f"  Trying model: {model}")
-                client = genai.Client(api_key=key)
-                
-                # Quick test with simple prompt
-                test_response = client.models.generate_content(
-                    model=model,
-                    contents="Say 'OK'",
-                    generation_config={
-                        "max_output_tokens": 10,
-                        "temperature": 0
-                    }
-                )
-                
-                if test_response and hasattr(test_response, 'text'):
-                    text = test_response.text.strip()
-                    if 'OK' in text or 'ok' in text.lower():
-                        key_valid = True
-                        working_model = model
-                        print(f"  ✅ Success with model: {model}")
-                        break
-                    else:
-                        print(f"  ⚠️  Model {model} returned unexpected: {text[:50]}")
-                else:
-                    print(f"  ⚠️  Model {model} returned no text")
+        # Test the key by making a direct API call
+        try:
+            # Test with a simple direct API call
+            headers = {'Content-Type': 'application/json'}
+            data = {
+                "contents": [{
+                    "parts": [{"text": "Say 'OK'"}]
+                }]
+            }
+            
+            # Try different endpoints
+            endpoints = [
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={key}",
+                f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={key}"
+            ]
+            
+            for endpoint in endpoints:
+                try:
+                    print(f"  Testing endpoint: {endpoint.split('/')[-2]}")
+                    response = requests.post(endpoint, headers=headers, json=data, timeout=10)
                     
-            except Exception as e:
-                error_msg = str(e)
-                if '404' in error_msg or 'model' in error_msg.lower():
-                    # Model not found, try next one
+                    if response.status_code == 200:
+                        result = response.json()
+                        if 'candidates' in result and len(result['candidates']) > 0:
+                            key_valid = True
+                            model_name = endpoint.split('/')[-2]
+                            working_model = model_name
+                            print(f"  ✅ Success with endpoint: {model_name}")
+                            break
+                    else:
+                        print(f"  ❌ Status {response.status_code}: {response.text[:100]}")
+                        error_message = f"HTTP {response.status_code}: {response.text[:100]}"
+                        
+                except Exception as e:
+                    print(f"  ⚠️  Endpoint failed: {str(e)[:80]}")
                     continue
-                elif '403' in error_msg or 'permission' in error_msg.lower() or 'quota' in error_msg.lower():
-                    # Key might be valid but no permission or quota
-                    print(f"  ⚠️  Model {model}: Permission/Quota issue")
-                    key_valid = True  # Mark as valid but with limitations
-                    working_model = model
-                    error_message = error_msg
-                    break
-                else:
-                    # Other error
-                    error_message = error_msg
-                    print(f"  ❌ Model {model} failed: {error_msg[:80]}")
+            
+            # If direct API didn't work, try the official library with multiple models
+            if not key_valid:
+                for model in GEMINI_MODELS:
+                    try:
+                        print(f"  Trying model via library: {model}")
+                        # Configure the library
+                        genai.configure(api_key=key)
+                        
+                        # Create model instance
+                        model_instance = genai.GenerativeModel(model)
+                        
+                        # Make a simple request
+                        response = model_instance.generate_content("Say 'OK'")
+                        
+                        if response and response.text:
+                            if 'OK' in response.text or 'ok' in response.text.lower():
+                                key_valid = True
+                                working_model = model
+                                print(f"  ✅ Success with library model: {model}")
+                                break
+                            else:
+                                print(f"  ⚠️  Model {model} returned unexpected: {response.text[:50]}")
+                        else:
+                            print(f"  ⚠️  Model {model} returned no text")
+                            
+                    except Exception as e:
+                        error_msg = str(e)
+                        if '404' in error_msg or 'model' in error_msg.lower():
+                            # Model not found, try next one
+                            continue
+                        elif '403' in error_msg or 'permission' in error_msg.lower() or 'quota' in error_msg.lower():
+                            # Key might be valid but no permission or quota
+                            print(f"  ⚠️  Model {model}: Permission/Quota issue - {error_msg[:80]}")
+                            key_valid = True  # Mark as valid but with limitations
+                            working_model = model
+                            error_message = error_msg
+                            break
+                        elif 'API key not valid' in error_msg or 'API_KEY_INVALID' in error_msg:
+                            print(f"  ❌ API Key is INVALID")
+                            error_message = "API key is invalid"
+                            break
+                        else:
+                            # Other error
+                            error_message = error_msg
+                            print(f"  ❌ Model {model} failed: {error_msg[:80]}")
+        
+        except Exception as e:
+            error_message = str(e)
+            print(f"  ❌ Overall testing failed: {error_message[:80]}")
         
         if key_valid:
             try:
-                client = genai.Client(api_key=key)
+                # Configure the library with this key
+                genai.configure(api_key=key)
+                
+                # Create model instance
+                model_instance = genai.GenerativeModel(working_model) if working_model else genai.GenerativeModel('gemini-pro')
+                
                 clients.append({
-                    'client': client,
+                    'client': genai,
                     'key': key,
                     'name': f"Key {i+1}",
                     'model': working_model,
+                    'model_instance': model_instance,
                     'quota_exceeded': False,
                     'last_reset': datetime.now(),
                     'requests_today': 0,
@@ -166,16 +216,21 @@ else:
         else:
             # Test if key format is valid (starts with AIzaSy)
             if key.startswith('AIzaSy'):
-                print(f"  ℹ️  Key format looks correct but not working with any model")
-                print(f"  💡 Check: 1) Enable Gemini API in Google Cloud Console")
-                print(f"           2) Ensure API key has proper permissions")
-                print(f"           3) Check billing is enabled for the project")
+                print(f"  ℹ️  Key format looks correct but not working")
+                print(f"  💡 TROUBLESHOOTING STEPS:")
+                print(f"     1. Visit: https://aistudio.google.com/app/apikey")
+                print(f"     2. Click 'Create API Key'")
+                print(f"     3. Select 'Create API Key in new project'")
+                print(f"     4. Copy the new key")
+                print(f"     5. Add it as GEMINI_API_KEY1 in Render environment")
+                print(f"     6. OR use Google AI Studio directly: https://makersuite.google.com")
             
             clients.append({
                 'client': None,
                 'key': key,
                 'name': f"Key {i+1} (Invalid)",
                 'model': None,
+                'model_instance': None,
                 'quota_exceeded': True,
                 'last_reset': datetime.now(),
                 'requests_today': 60,  # Mark as exceeded
@@ -210,6 +265,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 print(f"📁 Upload folder: {UPLOAD_FOLDER}")
+
+# Alternative AI Service (OpenAI as backup if you have keys)
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '').strip()
+if OPENAI_API_KEY:
+    print(f"✅ Found OpenAI API key backup: {OPENAI_API_KEY[:8]}...")
 
 def extract_name_from_resume(resume_text):
     """Extract candidate name from resume text"""
@@ -633,22 +693,130 @@ def get_high_quality_fallback_analysis(resume_text="", job_description=""):
         ]
     }
 
+def analyze_resume_with_openai(resume_text, job_description):
+    """Use OpenAI as backup if Gemini fails"""
+    if not OPENAI_API_KEY:
+        return None
+    
+    try:
+        print("🤖 Trying OpenAI as backup...")
+        
+        # TRUNCATE text
+        resume_text = resume_text[:4000]
+        job_description = job_description[:1500]
+        
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {OPENAI_API_KEY}'
+        }
+        
+        prompt = f"""RESUME ANALYSIS:
+Analyze this resume against the job description and provide comprehensive insights.
+
+RESUME TEXT:
+{resume_text}
+
+JOB DESCRIPTION:
+{job_description}
+
+IMPORTANT: Extract the candidate's actual name from the resume. Look for patterns like "Name:", "Full Name:", or names at the beginning of the resume.
+
+Return ONLY valid JSON with this structure:
+{{
+    "candidate_name": "Extract actual name from resume or use 'Professional Candidate'",
+    "skills_matched": ["list 5-8 skills from resume that match job requirements"],
+    "skills_missing": ["list 5-8 important skills from job description not found in resume"],
+    "experience_summary": "2-3 sentence professional summary of work experience",
+    "education_summary": "2-3 sentence summary of educational background", 
+    "overall_score": "0-100 based on how well resume matches job description",
+    "recommendation": "Highly Recommended/Recommended/Consider for Interview/Needs Improvement",
+    "key_strengths": ["list 3-5 key strengths from the resume"],
+    "areas_for_improvement": ["list 3-5 areas where candidate could improve"]
+}}
+
+Be specific and base analysis on actual content from the resume."""
+        
+        data = {
+            "model": "gpt-3.5-turbo",
+            "messages": [
+                {"role": "system", "content": "You are a resume analysis assistant. Return valid JSON only."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 1500
+        }
+        
+        response = requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers=headers,
+            json=data,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result['choices'][0]['message']['content']
+            
+            # Clean response
+            content = content.replace('```json', '').replace('```', '').strip()
+            
+            # Parse JSON
+            analysis = json.loads(content)
+            
+            # Ensure score is numeric
+            try:
+                analysis['overall_score'] = int(analysis.get('overall_score', 0))
+                if analysis['overall_score'] > 100:
+                    analysis['overall_score'] = 100
+                elif analysis['overall_score'] < 0:
+                    analysis['overall_score'] = 0
+            except:
+                analysis['overall_score'] = 75
+            
+            # Ensure required fields
+            analysis['is_fallback'] = False
+            analysis['fallback_reason'] = None
+            analysis['analysis_quality'] = "openai_backup"
+            analysis['used_key'] = "OpenAI Backup"
+            
+            print(f"✅ OpenAI Analysis completed for: {analysis.get('candidate_name', 'Unknown')}")
+            print(f"   Score: {analysis.get('overall_score')}")
+            
+            return analysis
+        
+    except Exception as e:
+        print(f"❌ OpenAI Error: {str(e)[:100]}")
+    
+    return None
+
 def analyze_resume_with_gemini(resume_text, job_description):
     """Use Gemini AI to analyze resume against job description"""
     
     client_info = get_available_client()
-    if not client_info or not client_info.get('valid', True) or not client_info.get('client'):
-        print("⚠️  No valid Gemini clients - using enhanced fallback")
+    if not client_info or not client_info.get('valid', True):
+        print("⚠️  No valid Gemini clients - trying OpenAI backup...")
+        openai_result = analyze_resume_with_openai(resume_text, job_description)
+        if openai_result:
+            return openai_result
+        print("⚠️  OpenAI also failed - using enhanced fallback")
         return get_high_quality_fallback_analysis(resume_text, job_description)
     
     # Check quota
     quota_ok, reason = check_quota(client_info)
     if not quota_ok:
         print(f"⚠️  Quota issue for {client_info['name']}: {reason}")
+        openai_result = analyze_resume_with_openai(resume_text, job_description)
+        if openai_result:
+            return openai_result
         return get_high_quality_fallback_analysis(resume_text, job_description)
     
-    client = client_info['client']
-    model = client_info.get('model', 'gemini-1.5-flash')
+    model_instance = client_info.get('model_instance')
+    if not model_instance:
+        print(f"⚠️  No model instance for {client_info['name']}")
+        openai_result = analyze_resume_with_openai(resume_text, job_description)
+        if openai_result:
+            return openai_result
+        return get_high_quality_fallback_analysis(resume_text, job_description)
     
     # TRUNCATE text
     resume_text = resume_text[:6000]
@@ -682,9 +850,8 @@ Be specific and base analysis on actual content from the resume."""
 
     def call_gemini():
         try:
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
+            response = model_instance.generate_content(
+                prompt,
                 generation_config={
                     "max_output_tokens": 2000,
                     "temperature": 0.2
@@ -695,7 +862,7 @@ Be specific and base analysis on actual content from the resume."""
             raise e
     
     try:
-        print(f"🤖 Attempting AI analysis with {client_info['name']} (model: {model})")
+        print(f"🤖 Attempting AI analysis with {client_info['name']} (model: {client_info.get('model', 'unknown')})")
         start_time = time.time()
         
         # Call with manual timeout using ThreadPoolExecutor
@@ -706,6 +873,9 @@ Be specific and base analysis on actual content from the resume."""
             except concurrent.futures.TimeoutError:
                 print("❌ Gemini API timeout after 30 seconds")
                 update_client_stats(client_info, success=False)
+                openai_result = analyze_resume_with_openai(resume_text, job_description)
+                if openai_result:
+                    return openai_result
                 return get_high_quality_fallback_analysis(resume_text, job_description)
         
         elapsed_time = time.time() - start_time
@@ -737,17 +907,21 @@ Be specific and base analysis on actual content from the resume."""
         analysis['fallback_reason'] = None
         analysis['analysis_quality'] = "ai"
         analysis['used_key'] = client_info['name']
-        analysis['model_used'] = model
+        analysis['model_used'] = client_info.get('model', 'unknown')
         
         print(f"✅ AI Analysis completed for: {analysis.get('candidate_name', 'Unknown')}")
-        print(f"   Score: {analysis.get('overall_score')}, Key: {client_info['name']}, Model: {model}")
+        print(f"   Score: {analysis.get('overall_score')}, Key: {client_info['name']}, Model: {client_info.get('model', 'unknown')}")
         
         return analysis
         
     except json.JSONDecodeError as e:
         print(f"❌ JSON Parse Error: {e}")
-        print(f"Raw response: {result_text[:200]}")
+        print(f"Raw response: {result_text[:200] if 'result_text' in locals() else 'No response'}")
         update_client_stats(client_info, success=False)
+        print("🔄 Trying OpenAI backup due to JSON error...")
+        openai_result = analyze_resume_with_openai(resume_text, job_description)
+        if openai_result:
+            return openai_result
         print("🔄 Using enhanced fallback due to JSON error")
         return get_high_quality_fallback_analysis(resume_text, job_description)
         
@@ -763,6 +937,10 @@ Be specific and base analysis on actual content from the resume."""
             print(f"⚠️  Marking {client_info['name']} as invalid")
             client_info['valid'] = False
         
+        print("🔄 Trying OpenAI backup due to API error...")
+        openai_result = analyze_resume_with_openai(resume_text, job_description)
+        if openai_result:
+            return openai_result
         print("🔄 Using enhanced fallback due to API error")
         return get_high_quality_fallback_analysis(resume_text, job_description)
 
@@ -907,8 +1085,8 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
         row += 1
         if analysis_data.get('model_used'):
             ws[f'A{row}'] = "AI Model"
-            ws[f'A{row}'].font = subheader_font
-            ws[f'A{row}'].fill = subheader_fill
+            ws[f'A{row}].font = subheader_font
+            ws[f'A{row}].fill = subheader_fill
             ws[f'B{row}'] = analysis_data.get('model_used')
             row += 1
     
@@ -1340,6 +1518,12 @@ def home():
             
             <div class="endpoint">
                 <span class="method">GET</span>
+                <span class="path">/debug-keys</span>
+                <p class="description">Debug API key issues</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
                 <span class="path">/download/{filename}</span>
                 <p class="description">Download generated Excel analysis reports</p>
             </div>
@@ -1347,12 +1531,13 @@ def home():
         
         <div class="buttons">
             <a href="/health" class="btn">Check Health</a>
-            <a href="/stats" class="btn btn-secondary">View Stats</a>
+            <a href="/debug-keys" class="btn btn-secondary">Debug Keys</a>
         </div>
         
         <div class="footer">
             <p>Powered by Flask & Google Gemini AI | Deployed on Render</p>
             <p>Enhanced Fallback Analysis: Extracts names, skills, and experience from resumes</p>
+            <p><strong>Troubleshooting:</strong> Visit <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a> to get valid API keys</p>
         </div>
     </div>
 </body>
@@ -1530,7 +1715,8 @@ def quick_check():
                     'Experience analysis',
                     'Education detection'
                 ],
-                'suggestion': 'Configure valid GEMINI_API_KEY1, GEMINI_API_KEY2, etc. in environment variables',
+                'openai_backup_available': bool(OPENAI_API_KEY),
+                'suggestion': 'Get valid API keys from: https://aistudio.google.com/app/apikey',
                 'key_test_results': test_results if 'test_results' in globals() else []
             })
         
@@ -1555,6 +1741,7 @@ def quick_check():
                 'clients_available': len(available_clients),
                 'available_clients': available_clients,
                 'enhanced_fallback_available': True,
+                'openai_backup_available': bool(OPENAI_API_KEY),
                 'status': 'ready',
                 'total_keys': len(clients),
                 'valid_keys': len(valid_clients),
@@ -1568,6 +1755,7 @@ def quick_check():
                 'available': False,
                 'reason': 'All API keys have exceeded quota or are invalid',
                 'enhanced_fallback_available': True,
+                'openai_backup_available': bool(OPENAI_API_KEY),
                 'fallback_features': [
                     'Name extraction from resumes',
                     'Skill extraction from text',
@@ -1588,6 +1776,7 @@ def quick_check():
             'available': False,
             'reason': error_msg[:100],
             'enhanced_fallback_available': True,
+            'openai_backup_available': bool(OPENAI_API_KEY),
             'status': 'error',
             'suggestion': 'Enhanced fallback analysis is available and will extract information from resumes',
             'key_test_results': test_results if 'test_results' in globals() else []
@@ -1603,6 +1792,7 @@ def ping():
         'ai_configured': len(valid_clients) > 0,
         'total_keys': len(clients),
         'valid_keys': len(valid_clients),
+        'openai_backup': bool(OPENAI_API_KEY),
         'enhanced_fallback': True,
         'cache_stats': {
             'hits': cache_hits,
@@ -1625,6 +1815,10 @@ def health_check():
             'max_keys': 9,
             'current_keys': len(api_keys),
             'valid_keys': len(valid_clients)
+        },
+        'openai_backup': {
+            'available': bool(OPENAI_API_KEY),
+            'key_preview': OPENAI_API_KEY[:8] + '...' if OPENAI_API_KEY else 'Not configured'
         },
         'enhanced_fallback': {
             'enabled': True,
@@ -1715,6 +1909,10 @@ def get_stats():
             ],
             'status': 'active'
         },
+        'openai_backup': {
+            'available': bool(OPENAI_API_KEY),
+            'key_preview': OPENAI_API_KEY[:8] + '...' if OPENAI_API_KEY else 'Not configured'
+        },
         'quota_config': {
             'daily_limit_per_key': QUOTA_DAILY,
             'per_minute_limit': QUOTA_PER_MINUTE,
@@ -1782,7 +1980,8 @@ def test_keys():
         'api_keys_in_memory': len(api_keys),
         'valid_clients': len(valid_clients),
         'key_test_results': test_results if 'test_results' in globals() else [],
-        'gemini_models_available': GEMINI_MODELS
+        'gemini_models_available': GEMINI_MODELS,
+        'openai_backup': 'Available' if OPENAI_API_KEY else 'Not configured'
     })
 
 @app.route('/debug-keys', methods=['GET'])
@@ -1825,13 +2024,50 @@ def debug_keys():
                 'Using wrong model name (tried multiple models)'
             ],
             'solutions': [
-                'Regenerate API keys in Google AI Studio',
-                'Enable Gemini API in Google Cloud Console',
-                'Ensure billing is enabled for the project',
-                'Check API key permissions',
-                'Visit: https://makersuite.google.com/app/apikey'
-            ]
-        }
+                '1. Visit: https://aistudio.google.com/app/apikey',
+                '2. Click "Create API Key"',
+                '3. Select "Create API Key in new project"',
+                '4. Copy the new key',
+                '5. Add it as GEMINI_API_KEY1 in Render environment',
+                '6. Delete old keys from environment variables'
+            ],
+            'quick_fix': 'Try using Google AI Studio directly: https://makersuite.google.com'
+        },
+        'alternative_solutions': [
+            'Use OpenAI as backup (add OPENAI_API_KEY environment variable)',
+            'The enhanced fallback will work without any API keys',
+            'Upload resumes and get analysis based on text extraction'
+        ]
+    })
+
+@app.route('/get-new-key', methods=['GET'])
+def get_new_key_instructions():
+    """Instructions to get a new API key"""
+    return jsonify({
+        'instructions': [
+            '1. Go to: https://aistudio.google.com/app/apikey',
+            '2. Sign in with your Google account',
+            '3. Click "Create API Key"',
+            '4. Select "Create API Key in new project"',
+            '5. Copy the generated API key (starts with AIzaSy...)',
+            '6. In Render dashboard, go to Environment settings',
+            '7. Add environment variable: GEMINI_API_KEY1',
+            '8. Paste your new API key as the value',
+            '9. Redeploy your application',
+            '10. Check /debug-keys endpoint to verify it works'
+        ],
+        'alternative': [
+            'If the above doesn\'t work:',
+            '1. Visit: https://makersuite.google.com',
+            '2. Sign in with Google',
+            '3. Try the API from the web interface first',
+            '4. Then get the API key from AI Studio'
+        ],
+        'notes': [
+            'Make sure billing is enabled for your Google Cloud project',
+            'Gemini API requires billing to be set up (free tier available)',
+            'You can use multiple keys: GEMINI_API_KEY1, GEMINI_API_KEY2, etc.'
+        ]
     })
 
 if __name__ == '__main__':
@@ -1863,14 +2099,17 @@ if __name__ == '__main__':
     else:
         print("⚠️  WARNING: No valid API keys found!")
         print("   The service will run in ENHANCED FALLBACK mode.")
-        print("\n   To enable AI analysis, follow these steps:")
-        print("   1. Go to: https://makersuite.google.com/app/apikey")
+        print("\n   To fix this issue:")
+        print("   1. Visit: https://aistudio.google.com/app/apikey")
         print("   2. Create a new API key")
-        print("   3. Enable Gemini API in Google Cloud Console")
-        print("   4. Add your keys as environment variables:")
-        print("      GEMINI_API_KEY1=your_first_key_here")
-        print("      GEMINI_API_KEY2=your_second_key_here")
-        print("      GEMINI_API_KEY3=your_third_key_here")
+        print("   3. Add it to Render as GEMINI_API_KEY1")
+        print("   4. Redeploy the application")
+        print("\n   Or use the web interface at: https://makersuite.google.com")
+    
+    if OPENAI_API_KEY:
+        print(f"\n🤖 OpenAI Backup: ✅ Available")
+    else:
+        print(f"\n🤖 OpenAI Backup: ⚠️  Not configured (add OPENAI_API_KEY for backup)")
     
     print(f"\n🛡️ Enhanced Fallback Features:")
     print(f"  • Name extraction from resumes")
@@ -1885,4 +2124,3 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
-    
