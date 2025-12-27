@@ -2355,7 +2355,67 @@ html, body {
   border-radius: 12px;
   font-size: 0.8rem;
 }
+/* OpenAI-specific styles */
+.openai-badge {
+  background: linear-gradient(90deg, #10a37f, #00a67e);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin: 0 8px;
+}
 
+.ai-badge {
+  background: linear-gradient(90deg, #10a37f20, #00a67e20);
+  color: #10a37f;
+  border: 1px solid #10a37f40;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.openai-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #10a37f;
+}
+
+.openai-logo::before {
+  content: '';
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  background: linear-gradient(135deg, #10a37f, #00a67e);
+  border-radius: 3px;
+  transform: rotate(45deg);
+}
+
+/* Update existing styles for OpenAI */
+.ai-status-indicator {
+  position: relative;
+}
+
+.ai-status-indicator[data-status="available"] {
+  color: #10a37f;
+  background-color: rgba(16, 163, 127, 0.1);
+  border-color: rgba(16, 163, 127, 0.3);
+}
+
+/* Logo animation for OpenAI */
+.logo-glow.openai {
+  background: radial-gradient(circle, rgba(16, 163, 127, 0.3) 0%, transparent 70%);
+}
+
+.logo-glow.openai .logo-icon {
+  color: #10a37f;
+}
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .service-status-actions {
