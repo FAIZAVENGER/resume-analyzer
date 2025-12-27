@@ -1,8 +1,7 @@
-Flask
-flask-cors
-PyPDF2
-python-docx
-openpyxl
-python-dotenv
-google-genai
-gunicorn
+Flask==2.3.3
+Flask-CORS==4.0.0
+google-generativeai==0.3.2
+PyPDF2==3.0.1
+python-docx==1.1.0
+openpyxl==3.1.2
+python-dotenv==1.0.0
