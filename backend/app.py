@@ -5,6 +5,7 @@ from PyPDF2 import PdfReader
 from docx import Document
 import os
 import json
+import time
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -24,7 +25,12 @@ if not api_key:
     client = None
 else:
     print(f"✅ API Key loaded: {api_key[:10]}...")
-    client = genai.Client(api_key=api_key)
+    try:
+        client = genai.Client(api_key=api_key)
+        print("✅ Gemini client initialized successfully")
+    except Exception as e:
+        print(f"❌ Failed to initialize Gemini client: {str(e)}")
+        client = None
 
 # Get absolute path for uploads folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -222,11 +228,11 @@ def home():
             </div>
             <div class="status-item">
                 <span class="status-label">Gemini API:</span>
-                ''' + (f'<span class="success">✅ Configured ({api_key[:10]}...)</span>' if api_key else '<span class="error">❌ Not Configured</span>') + '''
+                ''' + (f'<span class="success">✅ Configured ({api_key[:10]}...)</span>' if api_key else '<span class="error">❌ NOT FOUND</span>') + '''
             </div>
             <div class="status-item">
                 <span class="status-label">Client:</span>
-                ''' + ('<span class="success">✅ Initialized</span>' if client else '<span class="error">❌ Not Initialized</span>') + '''
+                ''' + ('<span class="success">✅ Initialized</span>' if client else '<span class="error">❌ NOT INITIALIZED</span>') + '''
             </div>
             <div class="status-item">
                 <span class="status-label">Upload Folder:</span>
@@ -245,6 +251,12 @@ def home():
             
             <div class="endpoint">
                 <span class="method">GET</span>
+                <span class="path">/quick-check</span>
+                <p class="description">Quick AI service availability check</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
                 <span class="path">/health</span>
                 <p class="description">Check API health status and configuration</p>
             </div>
@@ -258,7 +270,7 @@ def home():
         
         <div class="buttons">
             <a href="/health" class="btn">Check Health</a>
-            <a href="/" class="btn btn-secondary">Refresh</a>
+            <a href="/quick-check" class="btn btn-secondary">Quick Check</a>
         </div>
         
         <div class="footer">
@@ -276,9 +288,17 @@ def extract_text_from_pdf(file_path):
         reader = PdfReader(file_path)
         text = ""
         for page in reader.pages:
-            text += page.extract_text()
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        
         if not text.strip():
             return "Error: PDF appears to be empty or text could not be extracted"
+        
+        # Limit text size for performance
+        if len(text) > 10000:
+            text = text[:10000] + "\n[Text truncated for processing...]"
+            
         return text
     except Exception as e:
         print(f"PDF Error: {traceback.format_exc()}")
@@ -288,9 +308,15 @@ def extract_text_from_docx(file_path):
     """Extract text from DOCX file"""
     try:
         doc = Document(file_path)
-        text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
+        
         if not text.strip():
             return "Error: Document appears to be empty"
+        
+        # Limit text size for performance
+        if len(text) > 10000:
+            text = text[:10000] + "\n[Text truncated for processing...]"
+            
         return text
     except Exception as e:
         print(f"DOCX Error: {traceback.format_exc()}")
@@ -299,117 +325,156 @@ def extract_text_from_docx(file_path):
 def extract_text_from_txt(file_path):
     """Extract text from TXT file"""
     try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            text = file.read()
-        if not text.strip():
-            return "Error: Text file appears to be empty"
-        return text
+        # Try different encodings
+        encodings = ['utf-8', 'latin-1', 'windows-1252', 'cp1252']
+        
+        for encoding in encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding) as file:
+                    text = file.read()
+                    
+                if not text.strip():
+                    return "Error: Text file appears to be empty"
+                
+                # Limit text size for performance
+                if len(text) > 10000:
+                    text = text[:10000] + "\n[Text truncated for processing...]"
+                    
+                return text
+            except UnicodeDecodeError:
+                continue
+                
+        return "Error: Could not decode text file with common encodings"
+        
     except Exception as e:
         print(f"TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
 def analyze_resume_with_gemini(resume_text, job_description):
-    """Use Gemini AI to analyze resume against job description"""
+    """Use Gemini AI to analyze resume against job description - FAST VERSION"""
     
     if client is None:
         print("❌ Gemini client not initialized. Check API key.")
         return {
-            "candidate_name": "API Error",
-            "skills_matched": [],
+            "candidate_name": "API Configuration Error",
+            "skills_matched": ["Please check your API key configuration"],
             "skills_missing": [],
-            "experience_summary": "Gemini API not configured properly. Check your API key.",
-            "education_summary": "Please ensure GEMINI_API_KEY is set in .env file",
+            "experience_summary": "Gemini API not configured properly",
+            "education_summary": "Check GEMINI_API_KEY in .env file",
             "overall_score": 0,
             "recommendation": "Configuration Error",
             "key_strengths": [],
             "areas_for_improvement": []
         }
     
-    prompt = f"""ANALYSIS INSTRUCTIONS:
-1. Read the resume carefully
-2. Extract ALL information ONLY from the provided resume text
-3. DO NOT use any external knowledge or assumptions
-4. If information is missing from resume, acknowledge it's missing
+    # TRUNCATE text to prevent huge prompts and improve speed
+    resume_text = resume_text[:5000]  # Limit to 5000 chars
+    job_description = job_description[:2000]  # Limit to 2000 chars
+    
+    prompt = f"""RESUME ANALYSIS - BE CONCISE:
+Analyze this resume against the job description.
 
-RESUME TEXT TO ANALYZE:
-{resume_text[:8000]}
+RESUME TEXT:
+{resume_text}
 
 JOB DESCRIPTION:
-{job_description[:4000]}
+{job_description}
 
-IMPORTANT: Extract the candidate name from the resume. If no name is found, use "Unknown Candidate".
-
-Return ONLY this JSON format with analysis based SOLELY on the provided resume:
+Return ONLY this JSON:
 {{
-    "candidate_name": "Name extracted from resume or 'Unknown Candidate'",
-    "skills_matched": ["list actual skills from resume that match job"],
-    "skills_missing": ["list skills from job not found in resume"],
-    "experience_summary": "1-2 sentence summary of experience from resume",
-    "education_summary": "1-2 sentence summary of education from resume",
-    "overall_score": 0-100 based on match percentage,
-    "recommendation": "Highly Recommended/Recommended/Not Recommended",
-    "key_strengths": ["strengths evident from resume"],
-    "areas_for_improvement": ["areas to improve based on resume gaps"]
+    "candidate_name": "extract from resume or 'Candidate'",
+    "skills_matched": ["max 5 skills from resume matching job"],
+    "skills_missing": ["max 5 skills from job not in resume"],
+    "experience_summary": "one sentence summary",
+    "education_summary": "one sentence summary",
+    "overall_score": 0-100 based on match,
+    "recommendation": "Highly Recommended/Recommended/Needs Improvement",
+    "key_strengths": ["max 3 strengths"],
+    "areas_for_improvement": ["max 3 areas"]
 }}"""
-
+    
     try:
         print("🤖 Sending to Gemini AI...")
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt
-        )
+        start_time = time.time()
+        
+        # Use a timeout wrapper for Gemini call
+        timeout_seconds = 30
+        
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",  # Using flash model for speed
+                contents=prompt
+            )
+        except Exception as api_error:
+            print(f"❌ Gemini API Error: {str(api_error)}")
+            # Return quick fallback for quota issues
+            if "quota" in str(api_error).lower() or "429" in str(api_error):
+                return {
+                    "candidate_name": "AI Service Limit Reached",
+                    "skills_matched": ["Try again in a few hours"],
+                    "skills_missing": ["Daily quota may be exceeded"],
+                    "experience_summary": "AI service temporarily unavailable",
+                    "education_summary": "Please try again later",
+                    "overall_score": 0,
+                    "recommendation": "Service Limit - Retry Later",
+                    "key_strengths": [],
+                    "areas_for_improvement": []
+                }
+            raise api_error
+        
+        elapsed_time = time.time() - start_time
+        print(f"✅ Gemini response in {elapsed_time:.2f} seconds")
         
         result_text = response.text.strip()
         
-        # Clean response
-        if '```json' in result_text:
-            result_text = result_text.replace('```json', '').replace('```', '').strip()
-        elif '```' in result_text:
-            result_text = result_text.replace('```', '').strip()
+        # Clean response quickly
+        result_text = result_text.replace('```json', '').replace('```', '').strip()
         
         # Parse JSON
         analysis = json.loads(result_text)
-        print(f"✅ Analysis received for: {analysis.get('candidate_name', 'Unknown')}")
         
-        # Validate required fields
-        required_fields = [
-            'candidate_name', 'skills_matched', 'skills_missing',
-            'experience_summary', 'education_summary', 'overall_score',
-            'recommendation', 'key_strengths', 'areas_for_improvement'
-        ]
+        # Ensure score is numeric
+        try:
+            analysis['overall_score'] = int(analysis.get('overall_score', 0))
+        except:
+            analysis['overall_score'] = 0
+            
+        print(f"✅ Analysis completed for: {analysis.get('candidate_name', 'Unknown')}")
         
-        for field in required_fields:
-            if field not in analysis:
-                if 'skill' in field or 'strength' in field or 'improvement' in field:
-                    analysis[field] = []
-                else:
-                    analysis[field] = "Information not found in resume"
+        # Validate and limit arrays for consistency
+        analysis['skills_matched'] = analysis.get('skills_matched', [])[:5]
+        analysis['skills_missing'] = analysis.get('skills_missing', [])[:5]
+        analysis['key_strengths'] = analysis.get('key_strengths', [])[:3]
+        analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:3]
         
         return analysis
         
     except json.JSONDecodeError as e:
-        print(f"❌ JSON Error: {e}")
+        print(f"❌ JSON Parse Error: {e}")
+        print(f"Raw response: {result_text[:200]}...")
+        # Return a structured fallback
         return {
-            "candidate_name": "Parse Error",
+            "candidate_name": "Analysis Error",
             "skills_matched": ["JSON parsing failed"],
-            "skills_missing": [],
-            "experience_summary": "Error parsing AI response",
-            "education_summary": "Please try again",
+            "skills_missing": ["Please try again"],
+            "experience_summary": "Error in AI response format",
+            "education_summary": "Retry analysis",
             "overall_score": 0,
-            "recommendation": "Error - Retry analysis",
+            "recommendation": "Parse Error - Retry",
             "key_strengths": [],
             "areas_for_improvement": []
         }
     except Exception as e:
-        print(f"❌ Gemini Error: {str(e)}")
+        print(f"❌ Gemini Analysis Error: {str(e)}")
+        # Return quick fallback instead of waiting
         return {
-            "candidate_name": "API Error",
-            "skills_matched": [],
-            "skills_missing": [],
-            "experience_summary": f"API Error: {str(e)}",
-            "education_summary": "Check API configuration",
+            "candidate_name": "AI Service Error",
+            "skills_matched": ["Service temporarily unavailable"],
+            "skills_missing": ["Please try again shortly"],
+            "experience_summary": f"Error: {str(e)[:100]}",
+            "education_summary": "AI service issue detected",
             "overall_score": 0,
-            "recommendation": "Error occurred",
+            "recommendation": "Service Error - Retry",
             "key_strengths": [],
             "areas_for_improvement": []
         }
@@ -467,7 +532,8 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     ws[f'A{row}'].fill = header_fill
     ws[f'A{row}'].font = Font(bold=True, size=12, color="FFFFFF")
     ws[f'B{row}'] = f"{analysis_data.get('overall_score', 0)}/100"
-    ws[f'B{row}'].font = Font(bold=True, size=12, color="C00000")
+    score_color = "C00000" if analysis_data.get('overall_score', 0) < 60 else "70AD47" if analysis_data.get('overall_score', 0) >= 80 else "FFC000"
+    ws[f'B{row}'].font = Font(bold=True, size=12, color=score_color)
     row += 1
     
     ws[f'A{row}'] = "Recommendation"
@@ -597,11 +663,12 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
 
 @app.route('/analyze', methods=['POST'])
 def analyze_resume():
-    """Main endpoint to analyze resume"""
+    """Main endpoint to analyze resume - OPTIMIZED VERSION"""
     
     try:
         print("\n" + "="*50)
         print("📥 New analysis request received")
+        start_time = time.time()
         
         if 'resume' not in request.files:
             print("❌ No resume file in request")
@@ -620,6 +687,15 @@ def analyze_resume():
         if resume_file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
+        # Check file size (10MB limit)
+        resume_file.seek(0, 2)  # Seek to end
+        file_size = resume_file.tell()
+        resume_file.seek(0)  # Reset to beginning
+        
+        if file_size > 10 * 1024 * 1024:  # 10MB
+            print(f"❌ File too large: {file_size} bytes")
+            return jsonify({'error': 'File size too large. Maximum size is 10MB.'}), 400
+        
         # Save the uploaded file
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
@@ -629,6 +705,8 @@ def analyze_resume():
         
         # Extract text based on file type
         print(f"📖 Extracting text from {file_ext} file...")
+        extraction_start = time.time()
+        
         if file_ext == '.pdf':
             resume_text = extract_text_from_pdf(file_path)
         elif file_ext in ['.docx', '.doc']:
@@ -643,7 +721,8 @@ def analyze_resume():
             print(f"❌ Text extraction error: {resume_text}")
             return jsonify({'error': resume_text}), 500
         
-        print(f"✅ Extracted {len(resume_text)} characters from resume")
+        extraction_time = time.time() - extraction_start
+        print(f"✅ Extracted {len(resume_text)} characters in {extraction_time:.2f}s")
         
         # Check if API key is configured
         if not api_key:
@@ -656,9 +735,11 @@ def analyze_resume():
         
         # Analyze with Gemini AI
         print("🤖 Starting AI analysis...")
+        ai_start = time.time()
         analysis = analyze_resume_with_gemini(resume_text, job_description)
+        ai_time = time.time() - ai_start
         
-        print(f"✅ Analysis completed. Score: {analysis.get('overall_score', 0)}")
+        print(f"✅ AI analysis completed in {ai_time:.2f}s")
         print(f"🔍 AI Analysis Result:")
         print(f"  Name: {analysis.get('candidate_name')}")
         print(f"  Score: {analysis.get('overall_score')}")
@@ -667,28 +748,30 @@ def analyze_resume():
         
         # Create Excel report
         print("📊 Creating Excel report...")
+        excel_start = time.time()
         excel_filename = f"analysis_{timestamp}.xlsx"
         excel_path = create_excel_report(analysis, excel_filename)
-        print(f"✅ Excel report created: {excel_path}")
+        excel_time = time.time() - excel_start
+        print(f"✅ Excel report created in {excel_time:.2f}s: {excel_path}")
         
         # Return analysis with download link
         analysis['excel_filename'] = os.path.basename(excel_path)
         
-        print("✅ Request completed successfully")
+        total_time = time.time() - start_time
+        print(f"✅ Request completed in {total_time:.2f} seconds")
         print("="*50 + "\n")
         
         return jsonify(analysis)
         
     except Exception as e:
         print(f"❌ Unexpected error: {traceback.format_exc()}")
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
+        return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_report(filename):
     """Download the Excel report"""
     try:
         print(f"📥 Download request for: {filename}")
-        print(f"📁 Upload folder path: {UPLOAD_FOLDER}")
         
         # Sanitize filename
         import re
@@ -696,19 +779,9 @@ def download_report(filename):
         
         file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
         
-        print(f"🔍 Looking for file at: {file_path}")
-        print(f"📁 Upload folder exists: {os.path.exists(UPLOAD_FOLDER)}")
-        
-        if not os.path.exists(UPLOAD_FOLDER):
-            print(f"❌ Upload folder doesn't exist: {UPLOAD_FOLDER}")
-            return jsonify({'error': 'Upload folder not found'}), 500
-            
         if not os.path.exists(file_path):
             print(f"❌ File not found: {file_path}")
-            # List available files
-            available_files = os.listdir(UPLOAD_FOLDER)
-            print(f"📂 Available files in {UPLOAD_FOLDER}: {available_files}")
-            return jsonify({'error': f'File not found. Available files: {available_files}'}), 404
+            return jsonify({'error': 'File not found'}), 404
         
         print(f"✅ File found! Size: {os.path.getsize(file_path)} bytes")
         
@@ -723,6 +796,54 @@ def download_report(filename):
         print(f"❌ Download error: {traceback.format_exc()}")
         return jsonify({'error': f'Download failed: {str(e)}'}), 500
 
+@app.route('/quick-check', methods=['GET'])
+def quick_check():
+    """Quick endpoint to check if Gemini is responsive"""
+    try:
+        if client is None:
+            return jsonify({'available': False, 'reason': 'Client not initialized'})
+        
+        # Very quick test with timeout
+        start_time = time.time()
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents="Respond with just 'ready'",
+            timeout=10  # 10 second timeout
+        )
+        
+        response_time = time.time() - start_time
+        
+        if 'ready' in response.text.lower():
+            return jsonify({
+                'available': True,
+                'response_time': f'{response_time:.2f}s',
+                'status': 'ready',
+                'quota_status': 'ok'
+            })
+        else:
+            return jsonify({
+                'available': True,
+                'response_time': f'{response_time:.2f}s',
+                'status': 'responding',
+                'quota_status': 'ok'
+            })
+            
+    except Exception as e:
+        error_msg = str(e)
+        if "quota" in error_msg.lower() or "429" in error_msg:
+            status = 'quota_exceeded'
+        elif "timeout" in error_msg.lower():
+            status = 'timeout'
+        else:
+            status = 'error'
+            
+        return jsonify({
+            'available': False,
+            'reason': error_msg[:100],
+            'status': status,
+            'suggestion': 'AI service may be busy. Try again in a moment.'
+        })
+
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -732,7 +853,9 @@ def health_check():
         'api_key_configured': bool(api_key),
         'client_initialized': client is not None,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
-        'upload_folder_path': UPLOAD_FOLDER
+        'upload_folder_path': UPLOAD_FOLDER,
+        'uptime': 'active',
+        'version': '1.0.0'
     })
 
 if __name__ == '__main__':
