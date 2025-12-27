@@ -1710,7 +1710,290 @@ html, body {
 .results-section {
   width: 100%;
 }
+/* Add these new styles to your existing App.css */
 
+/* Loading Section Styles */
+.loading-section {
+  border-radius: 20px;
+  padding: 2.5rem;
+  margin-bottom: 2rem;
+  animation: slideIn 0.5s ease-out;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.loading-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.loading-header h3 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, #00ff9d, #4cc9f0);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.spinner {
+  animation: spin 1.5s linear infinite;
+  color: #6366f1;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.progress-container {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #00ff9d, #4cc9f0);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.loading-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: center;
+}
+
+.loading-message {
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.loading-subtext {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  opacity: 0.8;
+}
+
+.progress-stats {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  padding: 0.75rem 1.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 20px;
+  border: 1px solid var(--border);
+}
+
+.progress-stats span:first-child {
+  color: #00ff9d;
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.button-loading-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  justify-content: center;
+  width: 100%;
+}
+
+/* Wake-up Message */
+.wakeup-message {
+  background: linear-gradient(135deg, 
+    rgba(255, 215, 0, 0.1) 0%,
+    rgba(255, 165, 0, 0.05) 100%);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  border-radius: 16px;
+  padding: 1.25rem;
+  margin-bottom: 2rem;
+  animation: fadeInUp 0.5s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.wakeup-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.wakeup-content svg {
+  color: #FFD700;
+  flex-shrink: 0;
+}
+
+.wakeup-content h4 {
+  color: #FFD700;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.wakeup-content p {
+  color: rgba(255, 215, 0, 0.9);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+/* Tips Section */
+.tips-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.tip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(99, 102, 241, 0.05);
+  border-radius: 12px;
+  border: 1px solid rgba(99, 102, 241, 0.1);
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.tip svg {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+/* AI Status Indicator in Header */
+.header-features .feature:last-child {
+  animation: pulseStatus 2s infinite;
+}
+
+@keyframes pulseStatus {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Progress animations for analyze button */
+.analyze-button:disabled .spinner {
+  animation: spin 1s linear infinite;
+}
+
+.analyze-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* File size warning */
+.upload-hint.warning {
+  color: #ff6b6b;
+  font-weight: 500;
+}
+
+/* Responsive adjustments for loading */
+@media (max-width: 768px) {
+  .loading-section {
+    padding: 1.5rem;
+  }
+  
+  .loading-header h3 {
+    font-size: 1.3rem;
+  }
+  
+  .progress-stats {
+    flex-direction: column;
+    gap: 0.5rem;
+    text-align: center;
+  }
+  
+  .wakeup-content {
+    flex-direction: column;
+    text-align: center;
+    gap: 0.75rem;
+  }
+  
+  .tips-section {
+    gap: 0.5rem;
+  }
+  
+  .tip {
+    padding: 0.5rem;
+    font-size: 0.85rem;
+  }
+}
+
+/* Enhanced button states */
+.analyze-button:disabled:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.analyze-button:disabled::before {
+  display: none;
+}
+
+/* Success animation for completion */
+@keyframes successPulse {
+  0%, 100% { 
+    box-shadow: 0 0 20px rgba(0, 255, 157, 0.3);
+  }
+  50% { 
+    box-shadow: 0 0 40px rgba(0, 255, 157, 0.5);
+  }
+}
+
+.analyze-button.success {
+  animation: successPulse 1s ease-in-out;
+}
+
+/* Keep existing styles and add these at the end */
 /* Force full width on larger screens */
 @media (min-width: 1200px) {
   .header-content,
