@@ -35,8 +35,8 @@ function App() {
     totalKeys: 0
   });
 
-  // Use production backend URL
-  const API_BASE_URL = 'https://resume-analyzer-94mo.onrender.com';
+  // Use your new Render backend URL
+  const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
   
   const keepAliveInterval = useRef(null);
 
