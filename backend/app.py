@@ -647,7 +647,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     
     # Key Strengths
     ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}'])
+    cell = ws[f'A{row}']  # FIXED: Removed extra )
     cell.value = "KEY STRENGTHS"
     cell.font = header_font
     cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
@@ -664,7 +664,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     
     # Areas for Improvement
     ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}'])
+    cell = ws[f'A{row}']  # FIXED: Removed extra )
     cell.value = "AREAS FOR IMPROVEMENT"
     cell.font = header_font
     cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
