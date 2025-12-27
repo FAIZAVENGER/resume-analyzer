@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-from google import genai
+import openai
 from PyPDF2 import PdfReader
 from docx import Document
 import os
@@ -19,18 +19,18 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Configure Gemini AI
-api_key = os.getenv('GEMINI_API_KEY')
+# Configure OpenAI API
+api_key = os.getenv('OPENAI_API_KEY')
 if not api_key:
-    print("❌ ERROR: GEMINI_API_KEY not found in .env file!")
+    print("❌ ERROR: OPENAI_API_KEY not found in .env file!")
     client = None
 else:
     print(f"✅ API Key loaded: {api_key[:10]}...")
     try:
-        client = genai.Client(api_key=api_key)
-        print("✅ Gemini client initialized successfully")
+        client = openai.OpenAI(api_key=api_key)
+        print("✅ OpenAI client initialized successfully")
     except Exception as e:
-        print(f"❌ Failed to initialize Gemini client: {str(e)}")
+        print(f"❌ Failed to initialize OpenAI client: {str(e)}")
         client = None
 
 # Get absolute path for uploads folder
@@ -216,7 +216,7 @@ def home():
 <body>
     <div class="container">
         <h1>🤖 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis using Google Gemini</p>
+        <p class="subtitle">AI-powered resume analysis using OpenAI</p>
         
         <div class="api-status">
             ✅ API IS RUNNING
@@ -228,7 +228,7 @@ def home():
                 <span class="status-value">Online</span>
             </div>
             <div class="status-item">
-                <span class="status-label">Gemini API:</span>
+                <span class="status-label">OpenAI API:</span>
                 ''' + (f'<span class="success">✅ Configured ({api_key[:10]}...)</span>' if api_key else '<span class="error">❌ NOT FOUND</span>') + '''
             </div>
             <div class="status-item">
@@ -281,7 +281,7 @@ def home():
         </div>
         
         <div class="footer">
-            <p>Powered by Flask & Google Gemini AI | Deployed on Render</p>
+            <p>Powered by Flask & OpenAI | Deployed on Render</p>
             <p>Upload folder: ''' + str(os.path.exists(UPLOAD_FOLDER)) + '''</p>
         </div>
     </div>
@@ -371,18 +371,20 @@ def fallback_response(reason):
         "areas_for_improvement": ["Please try again in a moment"]
     }
 
-def analyze_resume_with_gemini(resume_text, job_description):
-    """Use Gemini AI to analyze resume against job description - WITH IMPROVED SUMMARIES"""
+def analyze_resume_with_openai(resume_text, job_description):
+    """Use OpenAI to analyze resume against job description"""
     
     if client is None:
-        print("❌ Gemini client not initialized.")
+        print("❌ OpenAI client not initialized.")
         return fallback_response("API Configuration Error")
     
-    # TRUNCATE text - increased limits for better summaries
-    resume_text = resume_text[:6000]  # Increased from 5000 to 6000
-    job_description = job_description[:2500]  # Increased from 2000 to 2500
+    # TRUNCATE text
+    resume_text = resume_text[:6000]
+    job_description = job_description[:2500]
     
-    prompt = f"""RESUME ANALYSIS - PROVIDE DETAILED SUMMARIES:
+    system_prompt = """You are an expert resume analyzer. Analyze resumes against job descriptions and provide detailed insights."""
+    
+    user_prompt = f"""RESUME ANALYSIS - PROVIDE DETAILED SUMMARIES:
 Analyze this resume against the job description and provide comprehensive insights.
 
 RESUME TEXT:
@@ -408,29 +410,35 @@ Return ONLY this JSON with detailed information:
 
 Ensure summaries are detailed, professional, and comprehensive."""
 
-    def call_gemini():
+    def call_openai():
         try:
-            response = client.models.generate_content(
-                model="gemini-3-pro-preview",  # UPDATED MODEL NAME
-                contents=prompt
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",  # You can use "gpt-4", "gpt-4-turbo", or "gpt-3.5-turbo"
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=1500,
+                response_format={"type": "json_object"}
             )
             return response
         except Exception as e:
             raise e
     
     try:
-        print("🤖 Sending to Gemini AI...")
+        print("🤖 Sending to OpenAI...")
         start_time = time.time()
         
         # Call with 30 second timeout
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(call_gemini)
+            future = executor.submit(call_openai)
             response = future.result(timeout=30)
         
         elapsed_time = time.time() - start_time
-        print(f"✅ Gemini response in {elapsed_time:.2f} seconds")
+        print(f"✅ OpenAI response in {elapsed_time:.2f} seconds")
         
-        result_text = response.text.strip()
+        result_text = response.choices[0].message.content.strip()
         
         # Clean response
         result_text = result_text.replace('```json', '').replace('```', '').strip()
@@ -469,7 +477,7 @@ Ensure summaries are detailed, professional, and comprehensive."""
         return analysis
         
     except concurrent.futures.TimeoutError:
-        print("❌ Gemini API timeout after 30 seconds")
+        print("❌ OpenAI API timeout after 30 seconds")
         return fallback_response("AI Timeout - Service taking too long")
         
     except json.JSONDecodeError as e:
@@ -488,10 +496,12 @@ Ensure summaries are detailed, professional, and comprehensive."""
         }
         
     except Exception as e:
-        print(f"❌ Gemini Analysis Error: {str(e)}")
+        print(f"❌ OpenAI Analysis Error: {str(e)}")
         error_msg = str(e).lower()
-        if "quota" in error_msg or "429" in error_msg:
-            return fallback_response("Daily Quota Exceeded")
+        if "quota" in error_msg or "429" in error_msg or "insufficient_quota" in error_msg:
+            return fallback_response("API Quota Exceeded")
+        elif "rate limit" in error_msg:
+            return fallback_response("Rate Limit Exceeded")
         else:
             # Return a decent fallback instead of error
             return {
@@ -647,7 +657,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     
     # Key Strengths
     ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}']  # FIXED: Removed extra )
+    cell = ws[f'A{row}']
     cell.value = "KEY STRENGTHS"
     cell.font = header_font
     cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
@@ -664,7 +674,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     
     # Areas for Improvement
     ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}']  # FIXED: Removed extra )
+    cell = ws[f'A{row}']
     cell.value = "AREAS FOR IMPROVEMENT"
     cell.font = header_font
     cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
@@ -754,16 +764,16 @@ def analyze_resume():
         # Check if API key is configured
         if not api_key:
             print("❌ API key not configured")
-            return jsonify({'error': 'API key not configured. Please add GEMINI_API_KEY to .env file'}), 500
+            return jsonify({'error': 'API key not configured. Please add OPENAI_API_KEY to .env file'}), 500
         
         if client is None:
-            print("❌ Gemini client not initialized")
-            return jsonify({'error': 'Gemini AI client not properly initialized'}), 500
+            print("❌ OpenAI client not initialized")
+            return jsonify({'error': 'OpenAI client not properly initialized'}), 500
         
-        # Analyze with Gemini AI
+        # Analyze with OpenAI
         print("🤖 Starting AI analysis...")
         ai_start = time.time()
-        analysis = analyze_resume_with_gemini(resume_text, job_description)
+        analysis = analyze_resume_with_openai(resume_text, job_description)
         ai_time = time.time() - ai_start
         
         print(f"✅ AI analysis completed in {ai_time:.2f}s")
@@ -827,7 +837,7 @@ def download_report(filename):
 
 @app.route('/quick-check', methods=['GET'])
 def quick_check():
-    """Quick endpoint to check if Gemini is responsive"""
+    """Quick endpoint to check if OpenAI is responsive"""
     try:
         if client is None:
             return jsonify({'available': False, 'reason': 'Client not initialized'})
@@ -835,11 +845,15 @@ def quick_check():
         # Very quick test with thread timeout
         start_time = time.time()
         
-        def gemini_check():
+        def openai_check():
             try:
-                response = client.models.generate_content(
-                    model="gemini-3-pro-preview",  # UPDATED MODEL NAME
-                    contents="Respond with just 'ready'"
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": "Respond with just 'ready'"}
+                    ],
+                    max_tokens=10
                 )
                 return response
             except Exception as e:
@@ -848,12 +862,12 @@ def quick_check():
         try:
             # Use thread with timeout
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(gemini_check)
+                future = executor.submit(openai_check)
                 response = future.result(timeout=10)  # 10 second timeout
             
             response_time = time.time() - start_time
             
-            if 'ready' in response.text.lower():
+            if 'ready' in response.choices[0].message.content.lower():
                 return jsonify({
                     'available': True,
                     'response_time': f'{response_time:.2f}s',
@@ -878,9 +892,12 @@ def quick_check():
             
     except Exception as e:
         error_msg = str(e)
-        if "quota" in error_msg.lower() or "429" in error_msg:
+        if "quota" in error_msg.lower() or "429" in error_msg or "insufficient_quota" in error_msg:
             status = 'quota_exceeded'
-            suggestion = 'Daily quota exceeded. Please try again tomorrow.'
+            suggestion = 'API quota exceeded. Please check your OpenAI account.'
+        elif "rate limit" in error_msg.lower():
+            status = 'rate_limit'
+            suggestion = 'Rate limit exceeded. Please try again in a minute.'
         elif "timeout" in error_msg.lower():
             status = 'timeout'
             suggestion = 'AI service timeout. Please try again in a moment.'
@@ -927,7 +944,7 @@ def list_models():
             return jsonify({'error': 'Client not initialized'})
         
         models = client.models.list()
-        model_names = [model.name for model in models]
+        model_names = [model.id for model in models.data]
         
         return jsonify({
             'available_models': model_names,
@@ -943,14 +960,14 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5002))
     print(f"📍 Server: http://localhost:{port}")
     print(f"🔑 API Key: {'✅ Configured' if api_key else '❌ NOT FOUND'}")
-    print(f"🤖 Gemini Client: {'✅ Initialized' if client else '❌ NOT INITIALIZED'}")
+    print(f"🤖 OpenAI Client: {'✅ Initialized' if client else '❌ NOT INITIALIZED'}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print("="*50 + "\n")
     
     if not api_key:
-        print("⚠️  WARNING: GEMINI_API_KEY not found!")
-        print("Please create a .env file with: GEMINI_API_KEY=your_key_here\n")
-        print("Get your API key from: https://makersuite.google.com/app/apikey")
+        print("⚠️  WARNING: OPENAI_API_KEY not found!")
+        print("Please create a .env file with: OPENAI_API_KEY=your_key_here\n")
+        print("Get your API key from: https://platform.openai.com/api-keys")
     
     # Use PORT environment variable (Render provides $PORT)
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
