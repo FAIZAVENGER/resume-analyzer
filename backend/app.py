@@ -13,6 +13,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from dotenv import load_dotenv
 import traceback
 import hashlib
+import re
 import random
 from collections import defaultdict
 
@@ -29,57 +30,100 @@ CORS(app, resources={
 })
 
 # Configure Gemini AI - Support multiple separate API keys
-# Check for keys in this order: GEMINI_API_KEY1, GEMINI_API_KEY2, GEMINI_API_KEY3, GEMINI_API_KEY
+print("🔍 Checking for API keys...")
 api_keys = []
 
 # Check for individual keys (KEY1, KEY2, KEY3, etc.)
 for i in range(1, 10):  # Check up to 9 separate keys
     key = os.getenv(f'GEMINI_API_KEY{i}', '').strip()
-    if key:
+    if key and len(key) > 10:  # Basic validation
         api_keys.append(key)
         print(f"✅ Found GEMINI_API_KEY{i}: {key[:8]}...")
 
 # Also check for single key (backward compatibility)
 single_key = os.getenv('GEMINI_API_KEY', '').strip()
-if single_key and single_key not in api_keys:
+if single_key and len(single_key) > 10 and single_key not in api_keys:
     api_keys.append(single_key)
     print(f"✅ Found GEMINI_API_KEY: {single_key[:8]}...")
 
 # Check for comma-separated keys (legacy format)
 comma_keys_str = os.getenv('GEMINI_API_KEYS', '').strip()
 if comma_keys_str:
-    comma_keys = [k.strip() for k in comma_keys_str.split(',') if k.strip()]
+    comma_keys = [k.strip() for k in comma_keys_str.split(',') if k.strip() and len(k.strip()) > 10]
     for key in comma_keys:
         if key not in api_keys:
             api_keys.append(key)
             print(f"✅ Found from GEMINI_API_KEYS: {key[:8]}...")
 
+# Initialize clients
+clients = []
+valid_clients = []
+
 if not api_keys:
     print("⚠️  WARNING: No Gemini API keys found!")
-    print("ℹ️  Using fallback mode only - No AI analysis available")
-    clients = []
+    print("ℹ️  Using enhanced fallback mode only - No AI analysis available")
 else:
     print(f"✅ Total API keys loaded: {len(api_keys)}")
-    clients = []
+    
+    # Test each key
     for i, key in enumerate(api_keys):
         try:
-            client = genai.Client(api_key=key)
-            clients.append({
-                'client': client,
-                'key': key,
-                'name': f"Key {i+1}",
-                'quota_exceeded': False,
-                'last_reset': datetime.now(),
-                'requests_today': 0,
-                'requests_minute': 0,
-                'last_request_time': datetime.now(),
-                'minute_requests': [],
-                'errors': 0,
-                'total_requests': 0
-            })
-            print(f"  {i+1}. {key[:8]}... ✅ Initialized")
+            print(f"🔄 Testing Key {i+1} ({key[:8]}...)")
+            client = genai.Client(api_key=key, timeout=10)
+            
+            # Quick test to validate key
+            test_response = client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents="Say 'OK' if you're working."
+            )
+            
+            if test_response and hasattr(test_response, 'text'):
+                clients.append({
+                    'client': client,
+                    'key': key,
+                    'name': f"Key {i+1}",
+                    'quota_exceeded': False,
+                    'last_reset': datetime.now(),
+                    'requests_today': 0,
+                    'requests_minute': 0,
+                    'last_request_time': datetime.now(),
+                    'minute_requests': [],
+                    'errors': 0,
+                    'total_requests': 0,
+                    'valid': True
+                })
+                valid_clients.append(key)
+                print(f"  ✅ Key {i+1} is VALID")
+            else:
+                print(f"  ❌ Key {i+1} returned unexpected response")
+                
         except Exception as e:
-            print(f"  {i+1}. {key[:8]}... ❌ Error: {str(e)}")
+            error_msg = str(e)
+            print(f"  ❌ Key {i+1} failed: {error_msg[:100]}")
+            
+            # Check error type
+            if '404' in error_msg or '401' in error_msg or '403' in error_msg or 'invalid' in error_msg.lower():
+                print(f"  ⚠️  Key {i+1} appears to be INVALID or deactivated")
+            elif 'quota' in error_msg.lower() or '429' in error_msg:
+                print(f"  ⚠️  Key {i+1} has quota exceeded")
+                clients.append({
+                    'client': None,
+                    'key': key,
+                    'name': f"Key {i+1} (Quota Exceeded)",
+                    'quota_exceeded': True,
+                    'last_reset': datetime.now(),
+                    'requests_today': 60,  # Mark as exceeded
+                    'requests_minute': 0,
+                    'last_request_time': datetime.now(),
+                    'minute_requests': [],
+                    'errors': 0,
+                    'total_requests': 0,
+                    'valid': False
+                })
+            else:
+                print(f"  ⚠️  Key {i+1} has other issues: {error_msg[:50]}")
+
+print(f"\n📊 Summary: {len(clients)} keys registered, {len(valid_clients)} valid keys")
 
 # Quota tracking
 QUOTA_DAILY = 60
@@ -96,8 +140,226 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 print(f"📁 Upload folder: {UPLOAD_FOLDER}")
 
+def extract_name_from_resume(resume_text):
+    """Extract candidate name from resume text"""
+    if not resume_text:
+        return "Professional Candidate"
+    
+    # Clean the text
+    resume_text = resume_text.strip()
+    
+    # Common patterns for names in resumes
+    patterns = [
+        r'^([A-Z][a-z]+ [A-Z][a-z]+(?: [A-Z][a-z]+)?)',  # First Last or First Middle Last at start
+        r'Name[:\s]+([A-Z][a-z]+ [A-Z][a-z]+)',  # Name: John Doe
+        r'Full Name[:\s]+([A-Z][a-z]+ [A-Z][a-z]+)',  # Full Name: John Doe
+        r'Candidate[:\s]+([A-Z][a-z]+ [A-Z][a-z]+)',  # Candidate: John Doe
+        r'^([A-Z][A-Z]+ [A-Z][A-Z]+)',  # JOHN DOE (all caps)
+        r'Contact Information\s*\n([A-Z][a-z]+ [A-Z][a-z]+)',  # After Contact Information
+        r'RESUME\s*OF\s*([A-Z][a-z]+ [A-Z][a-z]+)',  # RESUME OF John Doe
+        r'CURRICULUM VITAE\s*OF\s*([A-Z][a-z]+ [A-Z][a-z]+)',  # CV OF John Doe
+    ]
+    
+    # Look at first 20 lines
+    lines = resume_text.split('\n')[:20]
+    
+    for line in lines:
+        line = line.strip()
+        if len(line) > 3 and len(line) < 50:  # Reasonable name length
+            for pattern in patterns:
+                match = re.search(pattern, line, re.IGNORECASE)
+                if match:
+                    name = match.group(1).strip()
+                    # Basic validation: should have at least 2 words, not too long
+                    if len(name.split()) >= 2 and len(name) < 50:
+                        print(f"✅ Extracted name: {name}")
+                        return name.title()
+    
+    # If no name found with patterns, look for lines that look like names
+    for line in lines:
+        line = line.strip()
+        words = line.split()
+        if 2 <= len(words) <= 4:
+            # Check if words look like names (start with capital, not all caps, not too long)
+            if all(word and word[0].isupper() for word in words):
+                # Not an email, not a URL, not a section header, not a date
+                if '@' not in line and '://' not in line and not line.endswith(':') and not re.search(r'\d{4}', line):
+                    if len(line) < 40:  # Not too long
+                        print(f"✅ Found possible name: {line}")
+                        return line
+    
+    # Check for email signature patterns
+    email_pattern = r'([A-Z][a-z]+ [A-Z][a-z]+)\s*<[^>]+>'
+    for line in lines:
+        match = re.search(email_pattern, line)
+        if match:
+            name = match.group(1).strip()
+            print(f"✅ Extracted name from email: {name}")
+            return name
+    
+    return "Professional Candidate"
+
+def extract_skills_from_resume(resume_text):
+    """Extract skills from resume text"""
+    if not resume_text:
+        return []
+    
+    # Common technical and soft skills
+    common_skills = [
+        # Technical skills
+        'Python', 'JavaScript', 'Java', 'C++', 'React', 'Node.js', 'SQL',
+        'AWS', 'Docker', 'Kubernetes', 'Git', 'Linux', 'HTML', 'CSS',
+        'TypeScript', 'Angular', 'Vue.js', 'MongoDB', 'PostgreSQL', 'MySQL',
+        'REST API', 'GraphQL', 'Machine Learning', 'Data Analysis', 'Excel',
+        'PowerPoint', 'Word', 'Power BI', 'Tableau', 'Photoshop', 'Illustrator',
+        'Android', 'iOS', 'Swift', 'Kotlin', 'Flutter', 'React Native',
+        'PHP', '.NET', 'C#', 'Ruby', 'Go', 'Rust',
+        
+        # Soft skills
+        'Communication', 'Teamwork', 'Problem Solving', 'Leadership',
+        'Project Management', 'Time Management', 'Critical Thinking',
+        'Creativity', 'Adaptability', 'Attention to Detail', 'Analytical Skills',
+        'Presentation Skills', 'Negotiation', 'Customer Service',
+        
+        # Business skills
+        'Agile', 'Scrum', 'Waterfall', 'DevOps', 'CI/CD', 'Testing',
+        'UX/UI Design', 'Data Science', 'Business Analysis', 'Marketing',
+        'Sales', 'Finance', 'Accounting', 'Human Resources'
+    ]
+    
+    found_skills = []
+    resume_lower = resume_text.lower()
+    
+    for skill in common_skills:
+        skill_lower = skill.lower()
+        # Check for skill in various formats
+        if skill_lower in resume_lower or f' {skill_lower} ' in f' {resume_lower} ':
+            found_skills.append(skill)
+    
+    # Also look for skills section
+    skills_section_pattern = r'(?:skills|technical skills|competencies)[:\s]*\n(.+?)(?:\n\n|\n[A-Z]|$)'
+    match = re.search(skills_section_pattern, resume_text, re.IGNORECASE | re.DOTALL)
+    if match:
+        skills_section = match.group(1)
+        # Extract skills from section (comma, bullet, or line separated)
+        skill_items = re.split(r'[,\n•\-]', skills_section)
+        for item in skill_items:
+            item = item.strip()
+            if len(item) > 2 and len(item) < 30:
+                # Check if it looks like a skill (not empty, not too long)
+                if item and not re.search(r'[0-9]{4}', item):  # Not a year
+                    found_skills.append(item)
+    
+    # Remove duplicates and limit
+    unique_skills = []
+    for skill in found_skills:
+        if skill not in unique_skills:
+            unique_skills.append(skill)
+    
+    return unique_skills[:12]  # Return top 12 skills
+
+def extract_experience_summary(resume_text):
+    """Extract experience summary from resume"""
+    if not resume_text:
+        return "Experienced professional with relevant background."
+    
+    # Look for experience-related keywords
+    experience_keywords = ['experience', 'worked', 'employment', 'career', 'professional', 'work history']
+    
+    lines = resume_text.split('\n')
+    experience_lines = []
+    
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        if any(keyword in line_lower for keyword in experience_keywords):
+            # Get this line and next few lines
+            context_lines = []
+            # Start from current line, go forward up to 5 lines
+            for j in range(0, 5):
+                if i + j < len(lines):
+                    context_line = lines[i + j].strip()
+                    if context_line and len(context_line) > 10:  # Not too short
+                        context_lines.append(context_line)
+            
+            if context_lines:
+                experience_lines.append(" ".join(context_lines))
+    
+    if experience_lines:
+        # Join first few experience lines
+        summary = " ".join(experience_lines[:2])
+        if len(summary) > 150:
+            summary = summary[:200] + "..."
+        return summary
+    
+    # Count years if mentioned
+    year_pattern = r'(20\d{2}|19\d{2})'
+    years = re.findall(year_pattern, resume_text)
+    if years:
+        years = sorted([int(y) for y in years if 1900 <= int(y) <= 2025])
+        if len(years) >= 2:
+            experience_years = years[-1] - years[0]
+            if 0 < experience_years <= 50:
+                return f"Professional with approximately {experience_years} years of experience as indicated in the resume."
+    
+    # Look for job titles
+    job_title_pattern = r'(?:Senior|Junior|Lead|Principal|Manager|Director|Engineer|Developer|Designer|Analyst|Consultant|Specialist)\s+[A-Za-z]+'
+    job_titles = re.findall(job_title_pattern, resume_text, re.IGNORECASE)
+    if job_titles:
+        unique_titles = list(set(job_titles[:3]))  # Get unique titles
+        return f"Experienced professional with background in roles such as {', '.join(unique_titles)}."
+    
+    return "Experienced professional with relevant background as shown in the resume."
+
+def extract_education_summary(resume_text):
+    """Extract education summary from resume"""
+    if not resume_text:
+        return "Qualified candidate with appropriate educational background."
+    
+    # Look for education-related keywords
+    education_keywords = [
+        'education', 'university', 'college', 'degree', 'bachelor', 'master',
+        'phd', 'graduate', 'diploma', 'certificate', 'school', 'academic',
+        'b.a.', 'b.s.', 'm.a.', 'm.s.', 'mba', 'ph.d'
+    ]
+    
+    lines = resume_text.split('\n')
+    education_lines = []
+    
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        if any(keyword in line_lower for keyword in education_keywords):
+            # Get this line and next few lines
+            context_lines = []
+            # Start from current line, go forward up to 4 lines
+            for j in range(0, 4):
+                if i + j < len(lines):
+                    context_line = lines[i + j].strip()
+                    if context_line:
+                        context_lines.append(context_line)
+            
+            if context_lines:
+                education_lines.append(" ".join(context_lines))
+    
+    if education_lines:
+        summary = " ".join(education_lines[:2])
+        if len(summary) > 120:
+            summary = summary[:150] + "..."
+        return summary
+    
+    # Look for degree patterns
+    degree_pattern = r'(?:B\.?[AS]\.?|M\.?[AS]\.?|MBA|PhD|Bachelor|Master|Doctorate)[\s\w]+'
+    degrees = re.findall(degree_pattern, resume_text, re.IGNORECASE)
+    if degrees:
+        unique_degrees = list(set(degrees[:2]))
+        return f"Education includes {', '.join(unique_degrees)}."
+    
+    return "Qualified candidate with appropriate educational background as indicated in the resume."
+
 def check_quota(client_info):
     """Check if client has exceeded quota"""
+    if not client_info.get('valid', True):
+        return False, "Invalid key"
+    
     now = datetime.now()
     
     # Check daily reset
@@ -107,7 +369,7 @@ def check_quota(client_info):
         client_info['quota_exceeded'] = False
         client_info['minute_requests'] = []
         client_info['errors'] = 0
-        print(f"✅ Quota reset for {client_info['name']} ({client_info['key'][:8]}...)")
+        print(f"✅ Quota reset for {client_info['name']}")
     
     # Check minute reset
     minute_ago = now - timedelta(minutes=1)
@@ -117,10 +379,10 @@ def check_quota(client_info):
     ]
     client_info['requests_minute'] = len(client_info['minute_requests'])
     
-    # Check if key has too many errors (maybe invalid key)
-    if client_info['errors'] > 10:
+    # Check if key has too many errors
+    if client_info['errors'] > 5:
         client_info['quota_exceeded'] = True
-        return False, "Too many errors - key may be invalid"
+        return False, "Too many errors"
     
     # Check limits
     if client_info['requests_today'] >= QUOTA_DAILY:
@@ -128,7 +390,7 @@ def check_quota(client_info):
         return False, "Daily quota exceeded"
     
     if client_info['requests_minute'] >= QUOTA_PER_MINUTE:
-        return False, "Rate limit exceeded (per minute)"
+        return False, "Rate limit exceeded"
     
     return True, "OK"
 
@@ -137,32 +399,23 @@ def get_available_client():
     if not clients:
         return None
     
-    now = datetime.now()
+    # Filter valid clients
+    valid_clients_list = [c for c in clients if c.get('valid', True)]
+    if not valid_clients_list:
+        return None
     
-    # Strategy 1: Try to find a client with available quota and fewest requests today
-    available_clients = []
-    for client_info in clients:
+    # Try to find a client with available quota
+    for client_info in valid_clients_list:
         quota_ok, reason = check_quota(client_info)
         if quota_ok and not client_info['quota_exceeded']:
-            available_clients.append(client_info)
-    
-    if available_clients:
-        # Pick the one with fewest requests today (load balancing)
-        available_clients.sort(key=lambda x: x['requests_today'])
-        return available_clients[0]
-    
-    # Strategy 2: If all have quota exceeded, try to use one with oldest reset
-    # (might be close to resetting)
-    clients.sort(key=lambda x: x['last_reset'])
-    
-    # Check if any client is close to resetting (< 1 hour)
-    for client_info in clients:
-        hours_to_reset = (client_info['last_reset'] + timedelta(days=1) - now).total_seconds() / 3600
-        if hours_to_reset < 1:
             return client_info
     
-    # Strategy 3: Return the first client as last resort
-    return clients[0]
+    # If all have quota exceeded, return the first valid one
+    for client_info in valid_clients_list:
+        if client_info.get('valid', True):
+            return client_info
+    
+    return None
 
 def update_client_stats(client_info, success=True):
     """Update client request statistics"""
@@ -175,20 +428,509 @@ def update_client_stats(client_info, success=True):
     else:
         client_info['errors'] += 1
 
-def rotate_client():
-    """Get next available client in rotation"""
-    if not clients:
-        return None
+def get_high_quality_fallback_analysis(resume_text="", job_description=""):
+    """Return a high-quality fallback analysis when AI fails"""
+    # Extract actual information from resume
+    candidate_name = extract_name_from_resume(resume_text)
+    extracted_skills = extract_skills_from_resume(resume_text)
+    experience_summary = extract_experience_summary(resume_text)
+    education_summary = extract_education_summary(resume_text)
     
-    # Try to find next available client
-    for i in range(len(clients)):
-        client_info = clients[i]
-        quota_ok, reason = check_quota(client_info)
-        if quota_ok and not client_info['quota_exceeded']:
-            return client_info
+    # Determine skills matched based on job description
+    skills_matched = []
+    skills_missing = []
     
-    # If none available, return first one
-    return clients[0]
+    if job_description and extracted_skills:
+        job_desc_lower = job_description.lower()
+        for skill in extracted_skills:
+            skill_lower = skill.lower()
+            # Check if skill or its variants appear in job description
+            if skill_lower in job_desc_lower:
+                skills_matched.append(skill)
+            else:
+                # Check for partial matches
+                words = skill_lower.split()
+                if any(word in job_desc_lower for word in words if len(word) > 3):
+                    skills_matched.append(skill)
+                else:
+                    skills_missing.append(skill)
+    
+    # If no skills matched from extraction, use default ones
+    if not skills_matched or len(skills_matched) < 3:
+        default_skills = ["Problem Solving", "Communication Skills", "Team Collaboration", 
+                         "Analytical Thinking", "Project Management"]
+        # Add some from extracted skills if available
+        if extracted_skills:
+            skills_matched = extracted_skills[:3] + default_skills[:2]
+        else:
+            skills_matched = default_skills[:5]
+    
+    # Add some relevant missing skills based on common job requirements
+    if not skills_missing or len(skills_missing) < 3:
+        common_missing = ["Advanced certifications", "Industry-specific tools", 
+                         "Leadership training", "Cloud platform experience",
+                         "Data visualization", "Agile methodology"]
+        skills_missing.extend(common_missing[:3])
+    
+    # Calculate a realistic score based on extracted info
+    base_score = 70
+    
+    # Adjust based on extracted skills match
+    if len(skills_matched) > 5:
+        base_score += 8
+    elif len(skills_matched) > 3:
+        base_score += 5
+    
+    # Adjust based on experience indicators
+    if "year" in experience_summary.lower():
+        if "10" in experience_summary or "15" in experience_summary or "20" in experience_summary:
+            base_score += 10
+        elif "5" in experience_summary:
+            base_score += 7
+        else:
+            base_score += 5
+    
+    # Adjust based on education indicators
+    if any(word in education_summary.lower() for word in ['master', 'mba', 'phd', 'doctorate']):
+        base_score += 8
+    elif any(word in education_summary.lower() for word in ['bachelor', 'degree', 'university']):
+        base_score += 5
+    
+    # Cap the score
+    overall_score = min(max(base_score, 60), 88)  # Between 60-88 for fallback
+    
+    # Determine recommendation
+    if overall_score >= 80:
+        recommendation = "Recommended"
+    elif overall_score >= 70:
+        recommendation = "Consider for Interview"
+    else:
+        recommendation = "Review Needed"
+    
+    return {
+        "candidate_name": candidate_name,
+        "skills_matched": skills_matched[:8],
+        "skills_missing": skills_missing[:8],
+        "experience_summary": experience_summary,
+        "education_summary": education_summary,
+        "overall_score": overall_score,
+        "recommendation": recommendation,
+        "key_strengths": skills_matched[:4] if skills_matched else ["Strong foundational skills", "Good communication abilities"],
+        "areas_for_improvement": skills_missing[:4] if skills_missing else ["Consider additional certifications", "Gain industry-specific experience"],
+        "is_fallback": True,
+        "fallback_reason": "Using enhanced resume analysis",
+        "analysis_quality": "enhanced_fallback",
+        "extracted_info": True,
+        "quota_reset_time": (datetime.now() + timedelta(hours=24)).isoformat()
+    }
+
+def analyze_resume_with_gemini(resume_text, job_description):
+    """Use Gemini AI to analyze resume against job description"""
+    
+    client_info = get_available_client()
+    if not client_info or not client_info.get('valid', True):
+        print("⚠️  No valid Gemini clients - using enhanced fallback")
+        return get_high_quality_fallback_analysis(resume_text, job_description)
+    
+    # Check quota
+    quota_ok, reason = check_quota(client_info)
+    if not quota_ok:
+        print(f"⚠️  Quota issue for {client_info['name']}: {reason}")
+        return get_high_quality_fallback_analysis(resume_text, job_description)
+    
+    client = client_info['client']
+    if not client:
+        print(f"⚠️  Client not initialized for {client_info['name']}")
+        return get_high_quality_fallback_analysis(resume_text, job_description)
+    
+    # TRUNCATE text
+    resume_text = resume_text[:6000]
+    job_description = job_description[:2500]
+    
+    prompt = f"""RESUME ANALYSIS:
+Analyze this resume against the job description and provide comprehensive insights.
+
+RESUME TEXT:
+{resume_text}
+
+JOB DESCRIPTION:
+{job_description}
+
+IMPORTANT: Extract the candidate's actual name from the resume. Look for patterns like "Name:", "Full Name:", or names at the beginning of the resume.
+
+Return ONLY valid JSON with this structure:
+{{
+    "candidate_name": "Extract actual name from resume or use 'Professional Candidate'",
+    "skills_matched": ["list 5-8 skills from resume that match job requirements"],
+    "skills_missing": ["list 5-8 important skills from job description not found in resume"],
+    "experience_summary": "2-3 sentence professional summary of work experience",
+    "education_summary": "2-3 sentence summary of educational background", 
+    "overall_score": "0-100 based on how well resume matches job description",
+    "recommendation": "Highly Recommended/Recommended/Consider for Interview/Needs Improvement",
+    "key_strengths": ["list 3-5 key strengths from the resume"],
+    "areas_for_improvement": ["list 3-5 areas where candidate could improve"]
+}}
+
+Be specific and base analysis on actual content from the resume."""
+
+    def call_gemini():
+        try:
+            response = client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=prompt,
+                timeout=10
+            )
+            return response
+        except Exception as e:
+            raise e
+    
+    try:
+        print(f"🤖 Attempting AI analysis with {client_info['name']}")
+        start_time = time.time()
+        
+        # Call with timeout
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(call_gemini)
+            response = future.result(timeout=15)
+        
+        elapsed_time = time.time() - start_time
+        print(f"✅ Gemini response in {elapsed_time:.2f} seconds")
+        
+        # Update client stats (successful request)
+        update_client_stats(client_info, success=True)
+        
+        result_text = response.text.strip()
+        
+        # Clean response
+        result_text = result_text.replace('```json', '').replace('```', '').strip()
+        
+        # Parse JSON
+        analysis = json.loads(result_text)
+        
+        # Ensure score is numeric
+        try:
+            analysis['overall_score'] = int(analysis.get('overall_score', 0))
+            if analysis['overall_score'] > 100:
+                analysis['overall_score'] = 100
+            elif analysis['overall_score'] < 0:
+                analysis['overall_score'] = 0
+        except:
+            analysis['overall_score'] = 75
+        
+        # Ensure required fields
+        analysis['is_fallback'] = False
+        analysis['fallback_reason'] = None
+        analysis['analysis_quality'] = "ai"
+        analysis['used_key'] = client_info['name']
+        
+        print(f"✅ AI Analysis completed for: {analysis.get('candidate_name', 'Unknown')}")
+        print(f"   Score: {analysis.get('overall_score')}, Key: {client_info['name']}")
+        
+        return analysis
+        
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON Parse Error: {e}")
+        update_client_stats(client_info, success=False)
+        print("🔄 Using enhanced fallback due to JSON error")
+        return get_high_quality_fallback_analysis(resume_text, job_description)
+        
+    except Exception as e:
+        error_msg = str(e).lower()
+        print(f"❌ Gemini Error: {error_msg[:100]}")
+        
+        # Update client stats (failed request)
+        update_client_stats(client_info, success=False)
+        
+        # Mark as invalid if authentication error
+        if '404' in error_msg or '401' in error_msg or '403' in error_msg or 'invalid' in error_msg:
+            print(f"⚠️  Marking {client_info['name']} as invalid")
+            client_info['valid'] = False
+        
+        print("🔄 Using enhanced fallback due to API error")
+        return get_high_quality_fallback_analysis(resume_text, job_description)
+
+def get_cache_key(resume_text, job_description):
+    """Generate cache key from resume and job description"""
+    combined = resume_text[:500] + job_description[:300]
+    return hashlib.md5(combined.encode()).hexdigest()
+
+def extract_text_from_pdf(file_path):
+    """Extract text from PDF file"""
+    try:
+        reader = PdfReader(file_path)
+        text = ""
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        
+        if not text.strip():
+            return "Error: PDF appears to be empty or text could not be extracted"
+        
+        # Limit text size for performance
+        if len(text) > 8000:
+            text = text[:8000] + "\n[Text truncated for processing...]"
+            
+        return text
+    except Exception as e:
+        print(f"PDF Error: {traceback.format_exc()}")
+        return f"Error reading PDF: {str(e)}"
+
+def extract_text_from_docx(file_path):
+    """Extract text from DOCX file"""
+    try:
+        doc = Document(file_path)
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
+        
+        if not text.strip():
+            return "Error: Document appears to be empty"
+        
+        # Limit text size for performance
+        if len(text) > 8000:
+            text = text[:8000] + "\n[Text truncated for processing...]"
+            
+        return text
+    except Exception as e:
+        print(f"DOCX Error: {traceback.format_exc()}")
+        return f"Error reading DOCX: {str(e)}"
+
+def extract_text_from_txt(file_path):
+    """Extract text from TXT file"""
+    try:
+        # Try different encodings
+        encodings = ['utf-8', 'latin-1', 'windows-1252', 'cp1252']
+        
+        for encoding in encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding) as file:
+                    text = file.read()
+                    
+                if not text.strip():
+                    return "Error: Text file appears to be empty"
+                
+                # Limit text size for performance
+                if len(text) > 8000:
+                    text = text[:8000] + "\n[Text truncated for processing...]"
+                    
+                return text
+            except UnicodeDecodeError:
+                continue
+                
+        return "Error: Could not decode text file with common encodings"
+        
+    except Exception as e:
+        print(f"TXT Error: {traceback.format_exc()}")
+        return f"Error reading TXT: {str(e)}"
+
+def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
+    """Create a beautiful Excel report with the analysis"""
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Resume Analysis"
+    
+    # Define styles
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=12)
+    subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    subheader_font = Font(bold=True, size=11)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Set column widths
+    ws.column_dimensions['A'].width = 30
+    ws.column_dimensions['B'].width = 60
+    
+    row = 1
+    
+    # Title
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "RESUME ANALYSIS REPORT"
+    cell.font = Font(bold=True, size=16, color="FFFFFF")
+    cell.fill = PatternFill(start_color="203864", end_color="203864", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    row += 2
+    
+    # Candidate Information
+    ws[f'A{row}'] = "Candidate Name"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = analysis_data.get('candidate_name', 'N/A')
+    row += 1
+    
+    ws[f'A{row}'] = "Analysis Date"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row += 1
+    
+    if analysis_data.get('is_fallback'):
+        ws[f'A{row}'] = "Analysis Mode"
+        ws[f'A{row}'].font = subheader_font
+        ws[f'A{row}'].fill = subheader_fill
+        ws[f'B{row}'] = "Enhanced Analysis (AI Fallback)"
+        ws[f'B{row}'].font = Font(color="FF9900", bold=True)
+        row += 1
+        if analysis_data.get('extracted_info'):
+            ws[f'A{row}'] = "Data Source"
+            ws[f'A{row}'].font = subheader_font
+            ws[f'A{row}'].fill = subheader_fill
+            ws[f'B{row}'] = "Extracted from resume content"
+            row += 1
+    elif analysis_data.get('used_key'):
+        ws[f'A{row}'] = "AI Key Used"
+        ws[f'A{row}'].font = subheader_font
+        ws[f'A{row}'].fill = subheader_fill
+        ws[f'B{row}'] = analysis_data.get('used_key')
+        row += 1
+    
+    row += 1
+    
+    # Overall Score
+    ws[f'A{row}'] = "Overall Match Score"
+    ws[f'A{row}'].font = Font(bold=True, size=12)
+    ws[f'A{row}'].fill = header_fill
+    ws[f'A{row}'].font = Font(bold=True, size=12, color="FFFFFF")
+    ws[f'B{row}'] = f"{analysis_data.get('overall_score', 0)}/100"
+    score = analysis_data.get('overall_score', 0)
+    if score < 60:
+        score_color = "C00000"  # Red
+    elif score >= 80:
+        score_color = "70AD47"  # Green
+    else:
+        score_color = "FFC000"  # Yellow
+    ws[f'B{row}'].font = Font(bold=True, size=12, color=score_color)
+    row += 1
+    
+    ws[f'A{row}'] = "Recommendation"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = analysis_data.get('recommendation', 'N/A')
+    row += 2
+    
+    # Skills Matched Section
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "SKILLS MATCHED ✓"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    skills_matched = analysis_data.get('skills_matched', [])
+    if skills_matched:
+        for i, skill in enumerate(skills_matched, 1):
+            ws[f'A{row}'] = f"{i}."
+            ws[f'B{row}'] = skill
+            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
+            row += 1
+    else:
+        ws[f'A{row}'] = "No matched skills found"
+        row += 1
+    
+    row += 1
+    
+    # Skills Missing Section
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "SKILLS MISSING ✗"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    skills_missing = analysis_data.get('skills_missing', [])
+    if skills_missing:
+        for i, skill in enumerate(skills_missing, 1):
+            ws[f'A{row}'] = f"{i}."
+            ws[f'B{row}'] = skill
+            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
+            row += 1
+    else:
+        ws[f'A{row}'] = "All required skills are present!"
+        row += 1
+    
+    row += 1
+    
+    # Experience Summary
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "EXPERIENCE SUMMARY"
+    cell.font = header_font
+    cell.fill = header_fill
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = analysis_data.get('experience_summary', 'N/A')
+    cell.alignment = Alignment(wrap_text=True, vertical='top')
+    ws.row_dimensions[row].height = 80
+    row += 2
+    
+    # Education Summary
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "EDUCATION SUMMARY"
+    cell.font = header_font
+    cell.fill = header_fill
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = analysis_data.get('education_summary', 'N/A')
+    cell.alignment = Alignment(wrap_text=True, vertical='top')
+    ws.row_dimensions[row].height = 60
+    row += 2
+    
+    # Key Strengths
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "KEY STRENGTHS"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    for strength in analysis_data.get('key_strengths', []):
+        ws[f'A{row}'] = "•"
+        ws[f'B{row}'] = strength
+        ws[f'B{row}'].alignment = Alignment(wrap_text=True)
+        row += 1
+    
+    row += 1
+    
+    # Areas for Improvement
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "AREAS FOR IMPROVEMENT"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    for area in analysis_data.get('areas_for_improvement', []):
+        ws[f'A{row}'] = "•"
+        ws[f'B{row}'] = area
+        ws[f'B{row}'].alignment = Alignment(wrap_text=True)
+        row += 1
+    
+    # Apply borders to all cells
+    for row_cells in ws.iter_rows(min_row=1, max_row=row, min_col=1, max_col=2):
+        for cell in row_cells:
+            cell.border = border
+    
+    # Save the file using ABSOLUTE path
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    wb.save(filepath)
+    print(f"📄 Excel report saved to: {filepath}")
+    return filepath
 
 @app.route('/')
 def home():
@@ -411,16 +1153,16 @@ def home():
                 <span class="status-value">''' + str(len(api_keys)) + '''</span>
             </div>
             <div class="status-item">
-                <span class="status-label">Working Clients:</span>
-                <span class="status-value">''' + str(len(clients)) + '''</span>
+                <span class="status-label">Valid Clients:</span>
+                <span class="status-value">''' + str(len(valid_clients)) + '''</span>
             </div>
             <div class="status-item">
                 <span class="status-label">Cache Hits:</span>
                 <span class="status-value">''' + str(cache_hits) + '''</span>
             </div>
             <div class="status-item">
-                <span class="status-label">Upload Folder:</span>
-                <span class="status-value">''' + UPLOAD_FOLDER + '''</span>
+                <span class="status-label">Enhanced Fallback:</span>
+                <span class="status-value">✅ Active</span>
             </div>
         </div>
         
@@ -430,13 +1172,14 @@ def home():
             ''' + (''.join([f'''
             <div class="quota-item">
                 <strong>{c["name"]} ({c["key"][:8]}...):</strong>
-                <span class="{("warning" if c["quota_exceeded"] else "success")}">
-                    {'⚠️ Quota Exceeded' if c["quota_exceeded"] else '✅ Available'}
+                <span class="{("error" if not c.get("valid", True) else ("warning" if c["quota_exceeded"] else "success"))}">
+                    {'❌ Invalid' if not c.get("valid", True) else ('⚠️ Quota Exceeded' if c["quota_exceeded"] else '✅ Available')}
                 </span>
                 <br>
                 <small>Used: {c["requests_today"]}/{QUOTA_DAILY} today • Total: {c["total_requests"]} • Errors: {c["errors"]}</small>
             </div>''' for i, c in enumerate(clients)]) if clients else '<p class="warning">No API keys configured</p>') + '''
             <p><small>Auto-rotates between available keys when quota is exceeded.</small></p>
+            <p><small>Enhanced fallback extracts info from resumes when AI is unavailable.</small></p>
         </div>
         
         <div class="endpoints">
@@ -486,463 +1229,12 @@ def home():
         
         <div class="footer">
             <p>Powered by Flask & Google Gemini AI | Deployed on Render</p>
-            <p>Upload folder: ''' + str(os.path.exists(UPLOAD_FOLDER)) + '''</p>
+            <p>Enhanced Fallback Analysis: Extracts names, skills, and experience from resumes</p>
         </div>
     </div>
 </body>
 </html>
     '''
-
-def extract_text_from_pdf(file_path):
-    """Extract text from PDF file"""
-    try:
-        reader = PdfReader(file_path)
-        text = ""
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + "\n"
-        
-        if not text.strip():
-            return "Error: PDF appears to be empty or text could not be extracted"
-        
-        # Limit text size for performance
-        if len(text) > 8000:
-            text = text[:8000] + "\n[Text truncated for processing...]"
-            
-        return text
-    except Exception as e:
-        print(f"PDF Error: {traceback.format_exc()}")
-        return f"Error reading PDF: {str(e)}"
-
-def extract_text_from_docx(file_path):
-    """Extract text from DOCX file"""
-    try:
-        doc = Document(file_path)
-        text = "\n".join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
-        
-        if not text.strip():
-            return "Error: Document appears to be empty"
-        
-        # Limit text size for performance
-        if len(text) > 8000:
-            text = text[:8000] + "\n[Text truncated for processing...]"
-            
-        return text
-    except Exception as e:
-        print(f"DOCX Error: {traceback.format_exc()}")
-        return f"Error reading DOCX: {str(e)}"
-
-def extract_text_from_txt(file_path):
-    """Extract text from TXT file"""
-    try:
-        # Try different encodings
-        encodings = ['utf-8', 'latin-1', 'windows-1252', 'cp1252']
-        
-        for encoding in encodings:
-            try:
-                with open(file_path, 'r', encoding=encoding) as file:
-                    text = file.read()
-                    
-                if not text.strip():
-                    return "Error: Text file appears to be empty"
-                
-                # Limit text size for performance
-                if len(text) > 8000:
-                    text = text[:8000] + "\n[Text truncated for processing...]"
-                    
-                return text
-            except UnicodeDecodeError:
-                continue
-                
-        return "Error: Could not decode text file with common encodings"
-        
-    except Exception as e:
-        print(f"TXT Error: {traceback.format_exc()}")
-        return f"Error reading TXT: {str(e)}"
-
-def get_cache_key(resume_text, job_description):
-    """Generate cache key from resume and job description"""
-    combined = resume_text[:500] + job_description[:300]
-    return hashlib.md5(combined.encode()).hexdigest()
-
-def get_high_quality_fallback_analysis(resume_text="", job_description=""):
-    """Return a high-quality fallback analysis when AI fails"""
-    # Extract some basic info from resume if available
-    candidate_name = "Professional Candidate"
-    if "name" in resume_text.lower():
-        lines = resume_text.split('\n')
-        for line in lines[:10]:  # Check first 10 lines for name
-            if len(line.strip()) > 2 and len(line.strip().split()) >= 2:
-                candidate_name = line.strip()
-                break
-    
-    return {
-        "candidate_name": candidate_name,
-        "skills_matched": ["Problem Solving", "Communication Skills", "Team Collaboration", 
-                          "Analytical Thinking", "Project Management", "Technical Writing"],
-        "skills_missing": ["Advanced certifications could strengthen profile", 
-                          "Industry-specific tools experience", "Leadership training programs"],
-        "experience_summary": "Experienced professional with demonstrated competency in relevant domains. The resume indicates strong foundational skills and practical experience suitable for professional roles. Shows capability for growth and adaptation to new challenges.",
-        "education_summary": "Holds appropriate educational qualifications with focus on core competencies. Academic background provides solid foundation for professional development and career advancement in the chosen field.",
-        "overall_score": 78,
-        "recommendation": "Recommended for Interview Consideration",
-        "key_strengths": ["Strong foundational knowledge", "Good communication abilities", 
-                         "Problem-solving skills", "Team player", "Adaptable to change"],
-        "areas_for_improvement": ["Consider additional certifications", "Gain more industry-specific experience", 
-                                 "Develop leadership capabilities", "Expand technical skill set"],
-        "is_fallback": True,
-        "fallback_reason": "AI service quota exceeded - showing high-quality analysis",
-        "analysis_quality": "fallback",
-        "quota_reset_time": (datetime.now() + timedelta(hours=24)).isoformat()
-    }
-
-def analyze_resume_with_gemini(resume_text, job_description):
-    """Use Gemini AI to analyze resume against job description with key rotation"""
-    
-    client_info = get_available_client()
-    if not client_info:
-        print("⚠️  No available Gemini clients - using fallback")
-        fallback = get_high_quality_fallback_analysis(resume_text, job_description)
-        fallback['fallback_reason'] = "No AI clients available"
-        return fallback
-    
-    # Check quota
-    quota_ok, reason = check_quota(client_info)
-    if not quota_ok:
-        print(f"⚠️  Quota issue for {client_info['name']}: {reason}")
-        # Try to rotate to another client
-        rotated_client = rotate_client()
-        if rotated_client and rotated_client != client_info:
-            print(f"🔄 Rotating from {client_info['name']} to {rotated_client['name']}")
-            client_info = rotated_client
-            quota_ok, reason = check_quota(client_info)
-            if not quota_ok:
-                fallback = get_high_quality_fallback_analysis(resume_text, job_description)
-                fallback['fallback_reason'] = f"All keys exhausted: {reason}"
-                return fallback
-        else:
-            fallback = get_high_quality_fallback_analysis(resume_text, job_description)
-            fallback['fallback_reason'] = f"AI quota: {reason}"
-            return fallback
-    
-    client = client_info['client']
-    
-    # TRUNCATE text
-    resume_text = resume_text[:6000]
-    job_description = job_description[:2500]
-    
-    prompt = f"""RESUME ANALYSIS - PROVIDE DETAILED SUMMARIES:
-Analyze this resume against the job description and provide comprehensive insights.
-
-RESUME TEXT:
-{resume_text}
-
-JOB DESCRIPTION:
-{job_description}
-
-Return ONLY this JSON with detailed information:
-{{
-    "candidate_name": "Extract from resume or use 'Professional Candidate'",
-    "skills_matched": ["list 5-8 skills from resume matching job"],
-    "skills_missing": ["list 5-8 important skills from job not in resume"],
-    "experience_summary": "2-3 sentence summary of work experience",
-    "education_summary": "2-3 sentence summary of educational background", 
-    "overall_score": "0-100 based on match",
-    "recommendation": "Highly Recommended/Recommended/Consider for Interview",
-    "key_strengths": ["list 3-5 key strengths"],
-    "areas_for_improvement": ["list 3-5 areas for improvement"]
-}}
-
-Ensure summaries are detailed, professional, and comprehensive."""
-
-    def call_gemini():
-        try:
-            response = client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=prompt
-            )
-            return response
-        except Exception as e:
-            raise e
-    
-    try:
-        print(f"🤖 Sending to Gemini AI ({client_info['name']}: {client_info['key'][:8]}...)")
-        start_time = time.time()
-        
-        # Call with 30 second timeout
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(call_gemini)
-            response = future.result(timeout=30)
-        
-        elapsed_time = time.time() - start_time
-        print(f"✅ Gemini response in {elapsed_time:.2f} seconds")
-        
-        # Update client stats (successful request)
-        update_client_stats(client_info, success=True)
-        
-        result_text = response.text.strip()
-        
-        # Clean response
-        result_text = result_text.replace('```json', '').replace('```', '').strip()
-        
-        # Parse JSON
-        analysis = json.loads(result_text)
-        
-        # Ensure score is numeric
-        try:
-            analysis['overall_score'] = int(analysis.get('overall_score', 0))
-        except:
-            analysis['overall_score'] = 75
-        
-        # Ensure required fields
-        analysis['is_fallback'] = False
-        analysis['fallback_reason'] = None
-        analysis['analysis_quality'] = "ai"
-        analysis['quota_status'] = "available"
-        analysis['used_key'] = client_info['name']
-        
-        print(f"✅ AI Analysis completed for: {analysis.get('candidate_name', 'Unknown')}")
-        print(f"   Used: {client_info['name']}, Requests today: {client_info['requests_today']}/{QUOTA_DAILY}")
-        
-        return analysis
-        
-    except concurrent.futures.TimeoutError:
-        print("❌ Gemini API timeout after 30 seconds")
-        update_client_stats(client_info, success=False)
-        fallback = get_high_quality_fallback_analysis(resume_text, job_description)
-        fallback['fallback_reason'] = "AI timeout - using high-quality analysis"
-        return fallback
-        
-    except json.JSONDecodeError as e:
-        print(f"❌ JSON Parse Error: {e}")
-        update_client_stats(client_info, success=False)
-        fallback = get_high_quality_fallback_analysis(resume_text, job_description)
-        fallback['fallback_reason'] = "AI response format error - using high-quality analysis"
-        return fallback
-        
-    except Exception as e:
-        error_msg = str(e).lower()
-        print(f"❌ Gemini Error: {error_msg[:100]}")
-        
-        # Update client stats (failed request)
-        update_client_stats(client_info, success=False)
-        
-        # Check for quota errors
-        if any(keyword in error_msg for keyword in ['quota', '429', 'resource exhausted', 'per minute', 'per day']):
-            print(f"⚠️  Gemini quota exceeded - marking {client_info['name']}")
-            client_info['quota_exceeded'] = True
-            
-            # Try another key immediately
-            rotated_client = rotate_client()
-            if rotated_client and rotated_client != client_info:
-                print(f"🔄 Key exhausted. Rotating to {rotated_client['name']} for next request")
-            
-            fallback = get_high_quality_fallback_analysis(resume_text, job_description)
-            fallback['fallback_reason'] = f"AI quota exceeded on {client_info['name']} - using high-quality analysis"
-            return fallback
-        else:
-            fallback = get_high_quality_fallback_analysis(resume_text, job_description)
-            fallback['fallback_reason'] = f"AI error on {client_info['name']}: {error_msg[:50]}"
-            return fallback
-
-def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
-    """Create a beautiful Excel report with the analysis"""
-    
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Resume Analysis"
-    
-    # Define styles
-    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF", size=12)
-    subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-    subheader_font = Font(bold=True, size=11)
-    border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
-    # Set column widths
-    ws.column_dimensions['A'].width = 30
-    ws.column_dimensions['B'].width = 60
-    
-    row = 1
-    
-    # Title
-    ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}']
-    cell.value = "RESUME ANALYSIS REPORT"
-    cell.font = Font(bold=True, size=16, color="FFFFFF")
-    cell.fill = PatternFill(start_color="203864", end_color="203864", fill_type="solid")
-    cell.alignment = Alignment(horizontal='center', vertical='center')
-    row += 2
-    
-    # Candidate Information
-    ws[f'A{row}'] = "Candidate Name"
-    ws[f'A{row}'].font = subheader_font
-    ws[f'A{row}'].fill = subheader_fill
-    ws[f'B{row}'] = analysis_data.get('candidate_name', 'N/A')
-    row += 1
-    
-    ws[f'A{row}'] = "Analysis Date"
-    ws[f'A{row}'].font = subheader_font
-    ws[f'A{row}'].fill = subheader_fill
-    ws[f'B{row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    row += 1
-    
-    if analysis_data.get('is_fallback'):
-        ws[f'A{row}'] = "Analysis Mode"
-        ws[f'A{row}'].font = subheader_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'B{row}'] = "High-Quality Analysis (AI Fallback)"
-        ws[f'B{row}'].font = Font(color="FF9900", bold=True)
-        row += 1
-    elif analysis_data.get('used_key'):
-        ws[f'A{row}'] = "AI Key Used"
-        ws[f'A{row}'].font = subheader_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'B{row}'] = analysis_data.get('used_key')
-        row += 1
-    
-    row += 1
-    
-    # Overall Score
-    ws[f'A{row}'] = "Overall Match Score"
-    ws[f'A{row}'].font = Font(bold=True, size=12)
-    ws[f'A{row}'].fill = header_fill
-    ws[f'A{row}'].font = Font(bold=True, size=12, color="FFFFFF")
-    ws[f'B{row}'] = f"{analysis_data.get('overall_score', 0)}/100"
-    score_color = "C00000" if analysis_data.get('overall_score', 0) < 60 else "70AD47" if analysis_data.get('overall_score', 0) >= 80 else "FFC000"
-    ws[f'B{row}'].font = Font(bold=True, size=12, color=score_color)
-    row += 1
-    
-    ws[f'A{row}'] = "Recommendation"
-    ws[f'A{row}'].font = subheader_font
-    ws[f'A{row}'].fill = subheader_fill
-    ws[f'B{row}'] = analysis_data.get('recommendation', 'N/A')
-    row += 2
-    
-    # Skills Matched Section
-    ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}']
-    cell.value = "SKILLS MATCHED ✓"
-    cell.font = header_font
-    cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
-    cell.alignment = Alignment(horizontal='center')
-    row += 1
-    
-    skills_matched = analysis_data.get('skills_matched', [])
-    if skills_matched:
-        for i, skill in enumerate(skills_matched, 1):
-            ws[f'A{row}'] = f"{i}."
-            ws[f'B{row}'] = skill
-            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
-            row += 1
-    else:
-        ws[f'A{row}'] = "No matched skills found"
-        row += 1
-    
-    row += 1
-    
-    # Skills Missing Section
-    ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}']
-    cell.value = "SKILLS MISSING ✗"
-    cell.font = header_font
-    cell.fill = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
-    cell.alignment = Alignment(horizontal='center')
-    row += 1
-    
-    skills_missing = analysis_data.get('skills_missing', [])
-    if skills_missing:
-        for i, skill in enumerate(skills_missing, 1):
-            ws[f'A{row}'] = f"{i}."
-            ws[f'B{row}'] = skill
-            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
-            row += 1
-    else:
-        ws[f'A{row}'] = "All required skills are present!"
-        row += 1
-    
-    row += 1
-    
-    # Experience Summary
-    ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}']
-    cell.value = "EXPERIENCE SUMMARY"
-    cell.font = header_font
-    cell.fill = header_fill
-    cell.alignment = Alignment(horizontal='center')
-    row += 1
-    
-    ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}']
-    cell.value = analysis_data.get('experience_summary', 'N/A')
-    cell.alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[row].height = 80
-    row += 2
-    
-    # Education Summary
-    ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}']
-    cell.value = "EDUCATION SUMMARY"
-    cell.font = header_font
-    cell.fill = header_fill
-    cell.alignment = Alignment(horizontal='center')
-    row += 1
-    
-    ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}']
-    cell.value = analysis_data.get('education_summary', 'N/A')
-    cell.alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[row].height = 60
-    row += 2
-    
-    # Key Strengths
-    ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}']
-    cell.value = "KEY STRENGTHS"
-    cell.font = header_font
-    cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
-    cell.alignment = Alignment(horizontal='center')
-    row += 1
-    
-    for strength in analysis_data.get('key_strengths', []):
-        ws[f'A{row}'] = "•"
-        ws[f'B{row}'] = strength
-        ws[f'B{row}'].alignment = Alignment(wrap_text=True)
-        row += 1
-    
-    row += 1
-    
-    # Areas for Improvement
-    ws.merge_cells(f'A{row}:B{row}')
-    cell = ws[f'A{row}']
-    cell.value = "AREAS FOR IMPROVEMENT"
-    cell.font = header_font
-    cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
-    cell.alignment = Alignment(horizontal='center')
-    row += 1
-    
-    for area in analysis_data.get('areas_for_improvement', []):
-        ws[f'A{row}'] = "•"
-        ws[f'B{row}'] = area
-        ws[f'B{row}'].alignment = Alignment(wrap_text=True)
-        row += 1
-    
-    # Apply borders to all cells
-    for row_cells in ws.iter_rows(min_row=1, max_row=row, min_col=1, max_col=2):
-        for cell in row_cells:
-            cell.border = border
-    
-    # Save the file using ABSOLUTE path
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    wb.save(filepath)
-    print(f"📄 Excel report saved to: {filepath}")
-    return filepath
 
 @app.route('/analyze', methods=['POST'])
 def analyze_resume():
@@ -1007,6 +1299,10 @@ def analyze_resume():
         extraction_time = time.time() - extraction_start
         print(f"✅ Extracted {len(resume_text)} characters in {extraction_time:.2f}s")
         
+        # Extract name for logging
+        extracted_name = extract_name_from_resume(resume_text)
+        print(f"👤 Candidate name extracted: {extracted_name}")
+        
         # Check cache
         cache_key = get_cache_key(resume_text, job_description)
         global cache_hits, cache_misses
@@ -1017,16 +1313,23 @@ def analyze_resume():
             analysis = analysis_cache[cache_key]
         else:
             cache_misses += 1
-            print(f"🔍 Cache miss #{cache_misses} - analyzing with AI...")
+            print(f"🔍 Cache miss #{cache_misses} - analyzing...")
             
             # Analyze with Gemini AI or fallback
-            print("🤖 Starting AI analysis...")
+            print("🤖 Starting analysis...")
             ai_start = time.time()
-            analysis = analyze_resume_with_gemini(resume_text, job_description)
+            
+            if len(valid_clients) > 0:
+                analysis = analyze_resume_with_gemini(resume_text, job_description)
+            else:
+                print("⚠️  No valid AI clients - using enhanced fallback")
+                analysis = get_high_quality_fallback_analysis(resume_text, job_description)
+            
             ai_time = time.time() - ai_start
             
             print(f"✅ Analysis completed in {ai_time:.2f}s")
-            print(f"  Mode: {'AI' if not analysis.get('is_fallback') else 'Fallback'}")
+            print(f"  Mode: {'AI' if not analysis.get('is_fallback') else 'Enhanced Fallback'}")
+            print(f"  Candidate: {analysis.get('candidate_name', 'Unknown')}")
             print(f"  Score: {analysis.get('overall_score')}")
             if not analysis.get('is_fallback'):
                 print(f"  Used: {analysis.get('used_key', 'Unknown key')}")
@@ -1055,7 +1358,7 @@ def analyze_resume():
         
     except Exception as e:
         print(f"❌ Unexpected error: {traceback.format_exc()}")
-        # Return fallback analysis even on critical errors
+        # Return enhanced fallback analysis even on critical errors
         fallback = get_high_quality_fallback_analysis()
         fallback['fallback_reason'] = f"Server error: {str(e)[:100]}"
         return jsonify(fallback)
@@ -1093,82 +1396,72 @@ def download_report(filename):
 def quick_check():
     """Quick endpoint to check if Gemini is responsive"""
     try:
-        if not clients:
+        if not clients or len(valid_clients) == 0:
             return jsonify({
                 'available': False,
-                'reason': 'No API keys configured',
-                'fallback_available': True,
-                'suggestion': 'Configure GEMINI_API_KEY1, GEMINI_API_KEY2, etc. in environment variables'
+                'reason': 'No valid API keys configured',
+                'enhanced_fallback_available': True,
+                'fallback_features': [
+                    'Name extraction from resumes',
+                    'Skill extraction from text',
+                    'Experience analysis',
+                    'Education detection'
+                ],
+                'suggestion': 'Configure valid GEMINI_API_KEY1, GEMINI_API_KEY2, etc. in environment variables'
             })
         
         # Check if any client has available quota
         available_clients = []
         for client_info in clients:
-            quota_ok, reason = check_quota(client_info)
-            if quota_ok and not client_info['quota_exceeded']:
-                available_clients.append({
-                    'name': client_info['name'],
-                    'key': client_info['key'][:8] + '...',
-                    'requests_today': client_info['requests_today'],
-                    'quota_remaining': QUOTA_DAILY - client_info['requests_today'],
-                    'total_requests': client_info['total_requests']
-                })
+            if client_info.get('valid', True):
+                quota_ok, reason = check_quota(client_info)
+                if quota_ok and not client_info['quota_exceeded']:
+                    available_clients.append({
+                        'name': client_info['name'],
+                        'key': client_info['key'][:8] + '...',
+                        'requests_today': client_info['requests_today'],
+                        'quota_remaining': QUOTA_DAILY - client_info['requests_today'],
+                        'total_requests': client_info['total_requests']
+                    })
         
         if available_clients:
             return jsonify({
                 'available': True,
                 'clients_available': len(available_clients),
                 'available_clients': available_clients,
-                'fallback_available': True,
+                'enhanced_fallback_available': True,
                 'status': 'ready',
                 'total_keys': len(clients),
+                'valid_keys': len(valid_clients),
                 'strategy': 'Load balancing between multiple keys'
             })
         else:
-            # Try a quick test with first client
-            try:
-                client_info = clients[0]
-                client = client_info['client']
-                
-                # Very quick test
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(
-                        lambda: client.models.generate_content(
-                            model="gemini-1.5-flash",
-                            contents="Say 'ready'"
-                        )
-                    )
-                    response = future.result(timeout=5)
-                
-                return jsonify({
-                    'available': True,
-                    'clients_available': 1,
-                    'fallback_available': True,
-                    'status': 'ready',
-                    'quota_warning': True,
-                    'warning': 'Some keys may have quota limits',
-                    'total_keys': len(clients),
-                    'strategy': 'Auto-rotation when quota exceeded'
-                })
-                
-            except Exception as e:
-                return jsonify({
-                    'available': False,
-                    'reason': str(e)[:100],
-                    'fallback_available': True,
-                    'status': 'quota_exceeded',
-                    'suggestion': 'All API keys may have exceeded daily quota. Fallback analysis available.',
-                    'total_keys': len(clients)
-                })
+            # All keys have quota exceeded or are invalid
+            return jsonify({
+                'available': False,
+                'reason': 'All API keys have exceeded quota or are invalid',
+                'enhanced_fallback_available': True,
+                'fallback_features': [
+                    'Name extraction from resumes',
+                    'Skill extraction from text',
+                    'Experience analysis',
+                    'Education detection',
+                    'Personalized scoring'
+                ],
+                'status': 'quota_exceeded',
+                'suggestion': 'Enhanced fallback analysis will extract information directly from resumes',
+                'total_keys': len(clients),
+                'valid_keys': len(valid_clients)
+            })
                 
     except Exception as e:
         error_msg = str(e).lower()
         return jsonify({
             'available': False,
             'reason': error_msg[:100],
-            'fallback_available': True,
+            'enhanced_fallback_available': True,
             'status': 'error',
-            'suggestion': 'Fallback analysis is always available'
+            'suggestion': 'Enhanced fallback analysis is available and will extract information from resumes'
         })
 
 @app.route('/ping', methods=['GET'])
@@ -1178,9 +1471,10 @@ def ping():
         'status': 'pong',
         'timestamp': datetime.now().isoformat(),
         'service': 'resume-analyzer',
-        'ai_configured': len(clients) > 0,
+        'ai_configured': len(valid_clients) > 0,
         'total_keys': len(clients),
-        'working_keys': len([c for c in clients if not c['quota_exceeded']]),
+        'valid_keys': len(valid_clients),
+        'enhanced_fallback': True,
         'cache_stats': {
             'hits': cache_hits,
             'misses': cache_misses,
@@ -1195,11 +1489,22 @@ def health_check():
         'status': 'Backend is running!', 
         'timestamp': datetime.now().isoformat(),
         'total_api_keys': len(api_keys),
-        'working_clients': len(clients),
+        'valid_clients': len(valid_clients),
         'keys_config': {
             'format': 'Use GEMINI_API_KEY1, GEMINI_API_KEY2, etc.',
             'max_keys': 9,
-            'current_keys': len(api_keys)
+            'current_keys': len(api_keys),
+            'valid_keys': len(valid_clients)
+        },
+        'enhanced_fallback': {
+            'enabled': True,
+            'features': [
+                'Name extraction',
+                'Skill extraction',
+                'Experience analysis',
+                'Education detection',
+                'Personalized scoring'
+            ]
         },
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'upload_folder_path': UPLOAD_FOLDER,
@@ -1211,7 +1516,7 @@ def health_check():
         'quota_info': {
             'daily_limit': QUOTA_DAILY,
             'per_minute_limit': QUOTA_PER_MINUTE,
-            'strategy': 'Auto-rotation between keys'
+            'strategy': 'Auto-rotation between valid keys'
         }
     })
 
@@ -1230,6 +1535,7 @@ def get_stats():
         clients_stats.append({
             'name': client_info['name'],
             'key_preview': client_info['key'][:8] + '...',
+            'is_valid': client_info.get('valid', True),
             'requests_today': client_info['requests_today'],
             'quota_remaining': QUOTA_DAILY - client_info['requests_today'],
             'quota_exceeded': client_info['quota_exceeded'],
@@ -1238,18 +1544,20 @@ def get_stats():
             'last_reset': client_info['last_reset'].isoformat(),
             'hours_to_reset': round(hours_to_reset, 2),
             'requests_minute': client_info['requests_minute'],
-            'status': 'available' if (quota_ok and not client_info['quota_exceeded']) else 'exceeded'
+            'status': 'valid' if client_info.get('valid', True) else 'invalid'
         })
     
     # Calculate overall stats
-    total_requests = sum(c['requests_today'] for c in clients)
-    total_quota = QUOTA_DAILY * len(clients)
-    available_keys = len([c for c in clients_stats if c['status'] == 'available'])
+    total_requests = sum(c['requests_today'] for c in clients if c.get('valid', True))
+    valid_client_count = len([c for c in clients if c.get('valid', True)])
+    total_quota = QUOTA_DAILY * valid_client_count if valid_client_count > 0 else 0
+    available_keys = len([c for c in clients_stats if c['status'] == 'valid' and not c['quota_exceeded']])
     
     return jsonify({
         'timestamp': now.isoformat(),
         'overall': {
             'total_keys': len(clients),
+            'valid_keys': valid_client_count,
             'available_keys': available_keys,
             'total_requests_today': total_requests,
             'total_quota_today': total_quota,
@@ -1262,6 +1570,17 @@ def get_stats():
             'hit_ratio': cache_hits / (cache_hits + cache_misses) if (cache_hits + cache_misses) > 0 else 0,
             'size': len(analysis_cache)
         },
+        'enhanced_fallback': {
+            'enabled': True,
+            'extraction_features': [
+                'name_extraction',
+                'skill_extraction', 
+                'experience_analysis',
+                'education_detection',
+                'personalized_scoring'
+            ],
+            'status': 'active'
+        },
         'quota_config': {
             'daily_limit_per_key': QUOTA_DAILY,
             'per_minute_limit': QUOTA_PER_MINUTE,
@@ -1270,8 +1589,8 @@ def get_stats():
         'clients': clients_stats,
         'service_status': {
             'upload_folder': UPLOAD_FOLDER,
-            'strategy': 'Multi-key auto-rotation',
-            'rotation_logic': 'Load balancing between available keys, auto-switch on quota exceed'
+            'strategy': 'Multi-key auto-rotation with enhanced fallback',
+            'rotation_logic': 'Load balancing between valid keys, auto-switch on quota exceed'
         }
     })
 
@@ -1306,27 +1625,33 @@ if __name__ == '__main__':
     print(f"  Daily limit per key: {QUOTA_DAILY} requests")
     print(f"  Per minute limit: {QUOTA_PER_MINUTE} requests")
     print(f"  Total API keys loaded: {len(api_keys)}")
-    print(f"  Total clients initialized: {len(clients)}")
+    print(f"  Valid clients initialized: {len(valid_clients)}")
     
-    if clients:
-        print(f"\n🔑 API Keys Status:")
+    if len(valid_clients) > 0:
+        print(f"\n🔑 Valid API Keys:")
         for i, client_info in enumerate(clients):
-            status = "✅ Available" if not client_info['quota_exceeded'] else "⚠️ Quota Exceeded"
-            print(f"  {client_info['name']}: {client_info['key'][:8]}... {status}")
+            if client_info.get('valid', True):
+                status = "✅ Available" if not client_info['quota_exceeded'] else "⚠️ Quota Exceeded"
+                print(f"  {client_info['name']}: {client_info['key'][:8]}... {status}")
         
-        print(f"\n✨ Features:")
-        print(f"  • Auto-rotation between {len(clients)} keys")
+        print(f"\n✨ AI Features Enabled:")
+        print(f"  • Auto-rotation between {len(valid_clients)} valid keys")
         print(f"  • Load balancing (uses key with fewest requests)")
         print(f"  • Auto-switch when quota is exceeded")
-        print(f"  • Fallback mode when all keys exhausted")
-        print(f"  • Total daily quota: {QUOTA_DAILY * len(clients)} requests")
+        print(f"  • Total daily AI quota: {QUOTA_DAILY * len(valid_clients)} requests")
     else:
-        print("⚠️  WARNING: No working API keys found!")
-        print("   The service will run in fallback mode only.")
-        print("   To enable AI analysis, add keys as:")
-        print("   GEMINI_API_KEY1=your_key_1")
-        print("   GEMINI_API_KEY2=your_key_2")
-        print("   GEMINI_API_KEY3=your_key_3")
+        print("⚠️  WARNING: No valid API keys found!")
+        print("   The service will run in ENHANCED FALLBACK mode.")
+        print("   To enable AI analysis, add valid keys as:")
+        print("   GEMINI_API_KEY1=your_valid_key_1")
+        print("   GEMINI_API_KEY2=your_valid_key_2")
+    
+    print(f"\n🛡️ Enhanced Fallback Features:")
+    print(f"  • Name extraction from resumes")
+    print(f"  • Skill detection and matching")
+    print(f"  • Experience analysis")
+    print(f"  • Education detection")
+    print(f"  • Personalized scoring")
     
     print(f"\n📁 Upload folder: {UPLOAD_FOLDER}")
     print("="*50 + "\n")
