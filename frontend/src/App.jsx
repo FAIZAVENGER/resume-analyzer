@@ -101,18 +101,11 @@ function App() {
     for (let i = 0; i < retries; i++) {
       try {
         setAiStatus('checking');
-        setLoadingMessage(`Checking AI service... (Attempt ${i + 1}/${retries})`);
+        setLoadingMessage(`Checking OpenAI service... (Attempt ${i + 1}/${retries})`);
         
         const response = await axios.get(`${API_BASE_URL}/quick-check`, {
           timeout: 15000
         });
-        
-        if (response.data.enhanced_fallback_available) {
-          setServiceStatus(prev => ({
-            ...prev,
-            enhancedFallback: true
-          }));
-        }
         
         if (response.data.available) {
           setAiStatus('available');
@@ -120,9 +113,9 @@ function App() {
           setRetryCount(0);
           return true;
         } else {
-          if (response.data.status === 'quota_exceeded') {
+          if (response.data.status === 'quota_exceeded' || response.data.status === 'rate_limit') {
             setAiStatus('unavailable');
-            setLoadingMessage('AI quota exceeded. Using enhanced analysis...');
+            setLoadingMessage('OpenAI quota/rate limit reached. Using enhanced analysis...');
             return false;
           }
         }
@@ -132,7 +125,7 @@ function App() {
         }
         
       } catch (err) {
-        console.log(`AI check attempt ${i + 1} failed:`, err.message);
+        console.log(`OpenAI check attempt ${i + 1} failed:`, err.message);
         
         if (err.code === 'ECONNABORTED') {
           setLoadingMessage('Backend is waking up... This may take 30-60 seconds');
@@ -151,14 +144,23 @@ function App() {
 
   const checkQuotaStatus = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/stats`);
-      setQuotaInfo(response.data);
+      const response = await axios.get(`${API_BASE_URL}/health`);
+      setQuotaInfo({
+        overall: {
+          total_keys: response.data.api_key_configured ? 1 : 0,
+          valid_keys: response.data.client_initialized ? 1 : 0
+        },
+        enhanced_fallback: {
+          enabled: true,
+          extraction_features: ['Name Extraction', 'Skill Detection', 'Experience Analysis', 'Education Detection']
+        }
+      });
       
-      if (response.data.enhanced_fallback?.enabled) {
+      if (response.data.client_initialized) {
         setServiceStatus(prev => ({
           ...prev,
           enhancedFallback: true,
-          extractionFeatures: response.data.enhanced_fallback?.extraction_features || []
+          extractionFeatures: ['Name Extraction', 'Skill Detection', 'Experience Analysis', 'Education Detection']
         }));
       }
     } catch (error) {
@@ -238,7 +240,7 @@ function App() {
 
       // Update loading message based on service status
       if (aiStatus === 'available' && serviceStatus.validKeys > 0) {
-        setLoadingMessage('Using AI analysis...');
+        setLoadingMessage('Using OpenAI AI analysis...');
       } else {
         setLoadingMessage('Using enhanced analysis...');
       }
@@ -265,12 +267,7 @@ function App() {
       clearInterval(progressInterval);
       setProgress(95);
       
-      if (response.data.is_fallback) {
-        setLoadingMessage('Enhanced analysis complete!');
-        setAiStatus('unavailable');
-      } else {
-        setLoadingMessage('AI analysis complete!');
-      }
+      setLoadingMessage('AI analysis complete!');
 
       await new Promise(resolve => setTimeout(resolve, 800));
       
@@ -291,9 +288,9 @@ function App() {
       if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
         setError('Request timeout. The backend might be waking up. Please try again in 30 seconds.');
       } else if (err.response?.status === 429) {
-        setError('Daily AI limit reached. Enhanced analysis is still available.');
-      } else if (err.response?.data?.error?.includes('quota')) {
-        setError('AI service quota exceeded. Enhanced analysis will extract information from your resume.');
+        setError('Rate limit reached. Enhanced analysis is still available.');
+      } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
+        setError('OpenAI service quota/rate limit exceeded. Enhanced analysis will extract information from your resume.');
         setAiStatus('unavailable');
       } else {
         setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
@@ -331,13 +328,13 @@ function App() {
   const getAiStatusMessage = () => {
     switch(aiStatus) {
       case 'checking': return { 
-        text: 'Checking AI...', 
+        text: 'Checking OpenAI...', 
         color: '#ffd166', 
         icon: <BatteryCharging size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       case 'available': return { 
-        text: 'AI Ready', 
+        text: 'OpenAI Ready', 
         color: '#00ff9d', 
         icon: <Check size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
@@ -420,7 +417,7 @@ function App() {
                 <h1>AI Resume Analyzer</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
-                  <span className="gemini-badge">Gemini AI</span>
+                  <span className="openai-badge">OpenAI</span>
                   <span className="divider">•</span>
                   <span className="tagline">Intelligent Candidate Screening</span>
                 </div>
@@ -516,7 +513,7 @@ function App() {
             <div className="quota-panel-header">
               <div className="quota-title">
                 <BarChart size={20} />
-                <h3>AI Service Status</h3>
+                <h3>OpenAI Service Status</h3>
               </div>
               <button 
                 className="close-quota"
@@ -528,13 +525,13 @@ function App() {
             
             <div className="quota-summary">
               <div className="summary-item">
-                <div className="summary-label">Total Keys</div>
-                <div className="summary-value">{quotaInfo.overall?.total_keys || 0}</div>
+                <div className="summary-label">API Key Status</div>
+                <div className="summary-value">{quotaInfo.overall?.valid_keys > 0 ? '✅ Configured' : '❌ Missing'}</div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Valid Keys</div>
-                <div className={`summary-value ${(quotaInfo.overall?.valid_keys || 0) > 0 ? 'success' : 'warning'}`}>
-                  {quotaInfo.overall?.valid_keys || 0}
+                <div className="summary-label">Client Status</div>
+                <div className={`summary-value ${quotaInfo.overall?.valid_keys > 0 ? 'success' : 'warning'}`}>
+                  {quotaInfo.overall?.valid_keys > 0 ? '✅ Initialized' : '❌ Not Ready'}
                 </div>
               </div>
               <div className="summary-item">
@@ -545,51 +542,6 @@ function App() {
               </div>
             </div>
             
-            {quotaInfo.clients?.map((client, index) => (
-              <div key={index} className="quota-client-card">
-                <div className="client-header">
-                  <div className="client-name">
-                    <Crown size={14} />
-                    <span>{client.name}</span>
-                  </div>
-                  <div className={`client-status ${client.status === 'invalid' ? 'error' : client.quota_exceeded ? 'warning' : 'success'}`}>
-                    {client.status === 'invalid' ? '❌ Invalid' : 
-                     client.quota_exceeded ? '⚠️ Quota Exceeded' : '✅ Available'}
-                  </div>
-                </div>
-                
-                {client.status === 'valid' && (
-                  <>
-                    <div className="quota-progress-container">
-                      <div className="quota-progress-bar">
-                        <div 
-                          className="quota-progress-fill"
-                          style={{ 
-                            width: `${(client.requests_today / 60) * 100}%`,
-                            backgroundColor: client.quota_exceeded ? '#ff6b6b' : '#00ff9d'
-                          }}
-                        ></div>
-                      </div>
-                      <div className="quota-numbers">
-                        <span className="quota-used">{client.requests_today} used</span>
-                        <span className="quota-total">/ 60 daily</span>
-                      </div>
-                    </div>
-                    
-                    <div className="quota-footer">
-                      <div className="quota-reset-info">
-                        <Clock size={12} />
-                        <span>Resets in: {formatTimeRemaining(client.hours_to_reset * 60 || 0)}</span>
-                      </div>
-                      <div className="quota-remaining">
-                        {60 - client.requests_today} requests left
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-            
             {serviceStatus.enhancedFallback && (
               <div className="enhanced-fallback-card success">
                 <div className="fallback-header">
@@ -597,7 +549,7 @@ function App() {
                   <h4>Enhanced Fallback Active</h4>
                 </div>
                 <p className="fallback-description">
-                  Even without AI, we extract information directly from resumes:
+                  Even without OpenAI, we extract information directly from resumes:
                 </p>
                 <div className="fallback-features">
                   <div className="feature-badge">
@@ -620,15 +572,25 @@ function App() {
               </div>
             )}
             
-            {(quotaInfo.overall?.valid_keys || 0) === 0 && (
+            {quotaInfo.overall?.valid_keys === 0 && (
               <div className="quota-warning-banner warning">
                 <AlertTriangle size={18} />
                 <div className="warning-content">
-                  <strong>No valid API keys configured</strong>
-                  <p>Enhanced analysis is extracting information directly from resumes. Add valid API keys for AI analysis.</p>
+                  <strong>No valid OpenAI API key configured</strong>
+                  <p>Enhanced analysis is extracting information directly from resumes. Add valid OpenAI API key for AI analysis.</p>
                 </div>
               </div>
             )}
+            
+            <div className="quota-tips">
+              <h4>Usage Tips:</h4>
+              <ul>
+                <li>✅ OpenAI API key is required for AI-powered analysis</li>
+                <li>✅ Enhanced analysis works without OpenAI API key</li>
+                <li>✅ Get OpenAI API key from platform.openai.com</li>
+                <li>✅ Add key to .env file as OPENAI_API_KEY=your_key</li>
+              </ul>
+            </div>
           </div>
         )}
 
@@ -830,7 +792,7 @@ function App() {
                     <div className="button-text">
                       <span>Analyze Resume</span>
                       <span className="button-subtext">
-                        {aiStatus === 'available' ? 'AI-powered insights' : 'Enhanced analysis'}
+                        {aiStatus === 'available' ? 'OpenAI AI-powered insights' : 'Enhanced analysis'}
                       </span>
                     </div>
                   </div>
@@ -851,7 +813,7 @@ function App() {
               </div>
               <div className="tip">
                 <Info size={16} />
-                <span>Even without AI, we extract information directly from your resume content</span>
+                <span>Even without OpenAI, we extract information directly from your resume content</span>
               </div>
             </div>
           </div>
@@ -875,17 +837,10 @@ function App() {
                         day: 'numeric' 
                       })}
                     </span>
-                    {analysis.is_fallback ? (
-                      <span className="fallback-badge">
-                        <Sparkles size={12} />
-                        Enhanced Analysis
-                      </span>
-                    ) : (
-                      <span className="ai-badge">
-                        <Brain size={12} />
-                        AI-Powered
-                      </span>
-                    )}
+                    <span className="ai-badge">
+                      <Brain size={12} />
+                      OpenAI-Powered Analysis
+                    </span>
                   </div>
                 </div>
               </div>
@@ -915,41 +870,9 @@ function App() {
                   <p className="score-description">
                     Based on skill matching, experience relevance, and qualifications
                   </p>
-                  {analysis.extracted_info && (
-                    <p className="extracted-info-note">
-                      <Info size={12} />
-                      Analysis based on extracted resume content
-                    </p>
-                  )}
                 </div>
               </div>
             </div>
-
-            {/* Fallback Notice */}
-            {analysis.is_fallback && (
-              <div className="fallback-notice glass info">
-                <div className="notice-icon">
-                  <Sparkles size={24} />
-                </div>
-                <div className="fallback-notice-content">
-                  <h4>Enhanced Analysis Results</h4>
-                  <p>{analysis.fallback_reason || "Information extracted directly from your resume content."}</p>
-                  {analysis.analysis_quality === 'enhanced_fallback' && (
-                    <div className="extracted-features">
-                      <span className="feature-tag">
-                        <Check size={12} /> Name extracted from resume
-                      </span>
-                      <span className="feature-tag">
-                        <Check size={12} /> Skills detected
-                      </span>
-                      <span className="feature-tag">
-                        <Check size={12} /> Experience analyzed
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
 
             {/* Recommendation Card */}
             <div className="recommendation-card glass" style={{
@@ -961,15 +884,15 @@ function App() {
                 <div>
                   <h3>Analysis Recommendation</h3>
                   <p className="recommendation-subtitle">
-                    {analysis.is_fallback ? 'Enhanced Analysis' : 'AI-Powered Analysis'}
+                    OpenAI-Powered Analysis
                   </p>
                 </div>
               </div>
               <div className="recommendation-content">
                 <p className="recommendation-text">{analysis.recommendation}</p>
                 <div className="confidence-badge">
-                  {analysis.is_fallback ? <Sparkles size={16} /> : <Brain size={16} />}
-                  <span>{analysis.is_fallback ? 'Enhanced Analysis' : 'AI-Powered Analysis'}</span>
+                  <Brain size={16} />
+                  <span>OpenAI AI-Powered Analysis</span>
                 </div>
               </div>
             </div>
@@ -1193,7 +1116,7 @@ function App() {
           <div className="footer-links">
             <div className="footer-section">
               <h4>Features</h4>
-              <a href="#">Enhanced Analysis</a>
+              <a href="#">OpenAI Analysis</a>
               <a href="#">Skill Matching</a>
               <a href="#">PDF Reports</a>
               <a href="#">Real-time Insights</a>
@@ -1216,11 +1139,11 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Enhanced Analysis. All rights reserved.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + OpenAI. All rights reserved.</p>
           <div className="footer-stats">
             <span className="stat">
               <Zap size={12} />
-              Service: {aiStatus === 'available' ? 'AI Ready' : 'Enhanced Mode'}
+              Service: {aiStatus === 'available' ? 'OpenAI Ready' : 'Enhanced Mode'}
             </span>
             <span className="stat">
               <Shield size={12} />
