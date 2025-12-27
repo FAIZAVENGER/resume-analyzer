@@ -10,13 +10,34 @@ from pathlib import Path
 
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
-import pandas as pd
 from werkzeug.utils import secure_filename
 import pdfplumber
 from docx import Document
-import openai
-from openai import OpenAI
-import google.generativeai as genai
+
+# Import pandas only if available
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    print("⚠️ Pandas not available - Excel reports will not be generated")
+
+# Try to import AI libraries
+try:
+    import openai
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    print("⚠️ OpenAI not available")
+
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    print("⚠️ Google Gemini not available")
+
 from dotenv import load_dotenv
 
 # Configure logging
@@ -46,9 +67,9 @@ extraction_features = [
     "contact_info_extraction"
 ]
 
-# Try to initialize OpenAI
+# Try to initialize OpenAI if available
 openai_api_key = os.getenv('OPENAI_API_KEY')
-if openai_api_key:
+if openai_api_key and OPENAI_AVAILABLE:
     try:
         openai_client = OpenAI(api_key=openai_api_key)
         # Test the key
@@ -76,10 +97,12 @@ if openai_api_key:
             "status": "invalid",
             "error": str(e)
         })
+elif openai_api_key and not OPENAI_AVAILABLE:
+    logger.warning("⚠️ OpenAI API key found but library not installed")
 
-# Try to initialize Google Gemini
+# Try to initialize Google Gemini if available
 gemini_api_key = os.getenv('GEMINI_API_KEY')
-if gemini_api_key:
+if gemini_api_key and GEMINI_AVAILABLE:
     try:
         genai.configure(api_key=gemini_api_key)
         gemini_client = genai.GenerativeModel('gemini-pro')
@@ -104,11 +127,14 @@ if gemini_api_key:
             "status": "invalid",
             "error": str(e)
         })
+elif gemini_api_key and not GEMINI_AVAILABLE:
+    logger.warning("⚠️ Gemini API key found but library not installed")
 
 logger.info(f"📊 Service Summary:")
 logger.info(f"   AI Clients: {len([c for c in ai_clients if c['status'] == 'valid'])}/{len(ai_clients)} valid")
 logger.info(f"   Enhanced Fallback: {'✅ Enabled' if enhanced_fallback_enabled else '❌ Disabled'}")
 logger.info(f"   Extraction Features: {len(extraction_features)}")
+logger.info(f"   Pandas Available: {'✅ Yes' if PANDAS_AVAILABLE else '❌ No'}")
 
 def extract_text_from_file(file_path: str) -> str:
     """Extract text from various file formats with enhanced parsing."""
@@ -263,6 +289,8 @@ def analyze_with_ai(client_config: Dict, resume_text: str, job_description: str)
         elif "gemini" in model:
             response = client.generate_content(prompt)
             result_text = response.text
+        else:
+            raise ValueError(f"Unknown model: {model}")
         
         # Parse JSON from response
         try:
@@ -429,6 +457,10 @@ def create_recommendation(score: int, skills_result: Dict) -> str:
 
 def create_excel_report(analysis: Dict[str, Any], filename: str) -> str:
     """Create Excel report from analysis."""
+    if not PANDAS_AVAILABLE:
+        logger.warning("Pandas not available - skipping Excel report generation")
+        return None
+    
     try:
         # Create DataFrames for different sections
         data = {
@@ -469,31 +501,38 @@ def create_excel_report(analysis: Dict[str, Any], filename: str) -> str:
         
         # Create Excel writer
         report_path = UPLOAD_FOLDER / filename
-        with pd.ExcelWriter(report_path, engine='openpyxl') as writer:
-            df_summary.to_excel(writer, sheet_name='Summary', index=False)
-            df_matched.to_excel(writer, sheet_name='Skills Matched', index=False)
-            df_missing.to_excel(writer, sheet_name='Skills Missing', index=False)
-            df_insights.to_excel(writer, sheet_name='Insights', index=False)
-            
-            # Summary sheet
-            workbook = writer.book
-            summary_sheet = writer.sheets['Summary']
-            summary_sheet.column_dimensions['A'].width = 25
-            summary_sheet.column_dimensions['B'].width = 25
-            
-            # Add analysis details
-            summary_sheet['D1'] = 'Analysis Details'
-            summary_sheet['D2'] = f"Candidate: {analysis.get('candidate_name', 'N/A')}"
-            summary_sheet['D3'] = f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            summary_sheet['D4'] = f"Analysis Type: {'AI-Powered' if not analysis.get('is_fallback') else 'Enhanced Text Analysis'}"
-            summary_sheet['D5'] = 'Recommendation:'
-            summary_sheet['D6'] = analysis.get('recommendation', '')
         
-        return str(report_path)
+        # Use try-except for Excel writing
+        try:
+            with pd.ExcelWriter(report_path, engine='openpyxl') as writer:
+                df_summary.to_excel(writer, sheet_name='Summary', index=False)
+                df_matched.to_excel(writer, sheet_name='Skills Matched', index=False)
+                df_missing.to_excel(writer, sheet_name='Skills Missing', index=False)
+                df_insights.to_excel(writer, sheet_name='Insights', index=False)
+                
+                # Summary sheet
+                workbook = writer.book
+                summary_sheet = writer.sheets['Summary']
+                summary_sheet.column_dimensions['A'].width = 25
+                summary_sheet.column_dimensions['B'].width = 25
+                
+                # Add analysis details
+                summary_sheet['D1'] = 'Analysis Details'
+                summary_sheet['D2'] = f"Candidate: {analysis.get('candidate_name', 'N/A')}"
+                summary_sheet['D3'] = f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                summary_sheet['D4'] = f"Analysis Type: {'AI-Powered' if not analysis.get('is_fallback') else 'Enhanced Text Analysis'}"
+                summary_sheet['D5'] = 'Recommendation:'
+                summary_sheet['D6'] = analysis.get('recommendation', '')
+            
+            return str(report_path)
+            
+        except Exception as excel_error:
+            logger.error(f"Error writing Excel file: {excel_error}")
+            return None
         
     except Exception as e:
         logger.error(f"Error creating Excel report: {e}")
-        raise
+        return None
 
 @app.route('/ping', methods=['GET'])
 def ping():
@@ -505,7 +544,8 @@ def ping():
         "ai_clients": len(ai_clients),
         "valid_keys": valid_keys,
         "enhanced_fallback": enhanced_fallback_enabled,
-        "extraction_features": extraction_features if enhanced_fallback_enabled else []
+        "extraction_features": extraction_features if enhanced_fallback_enabled else [],
+        "pandas_available": PANDAS_AVAILABLE
     })
 
 @app.route('/quick-check', methods=['GET'])
@@ -555,7 +595,8 @@ def get_stats():
             "enhanced_fallback": {
                 "enabled": enhanced_fallback_enabled,
                 "extraction_features": extraction_features
-            }
+            },
+            "pandas_available": PANDAS_AVAILABLE
         },
         "clients": []
     }
@@ -655,15 +696,20 @@ def analyze_resume():
         if not analysis_result.get('candidate_name'):
             analysis_result['candidate_name'] = extract_candidate_name(resume_text)
         
-        # Create Excel report
-        excel_filename = f"analysis_{int(time.time())}.xlsx"
-        try:
-            create_excel_report(analysis_result, excel_filename)
-            analysis_result['excel_filename'] = excel_filename
-            analysis_result['excel_url'] = f"/download/{excel_filename}"
-        except Exception as e:
-            logger.error(f"Excel report creation failed: {e}")
-            # Continue without Excel report
+        # Create Excel report if pandas is available
+        if PANDAS_AVAILABLE:
+            excel_filename = f"analysis_{int(time.time())}.xlsx"
+            try:
+                report_path = create_excel_report(analysis_result, excel_filename)
+                if report_path:
+                    analysis_result['excel_filename'] = excel_filename
+                    analysis_result['excel_url'] = f"/download/{excel_filename}"
+                else:
+                    logger.warning("Excel report creation failed")
+            except Exception as e:
+                logger.error(f"Excel report creation failed: {e}")
+        else:
+            logger.info("Excel reports disabled (pandas not available)")
         
         # Clean up uploaded file
         try:
@@ -713,8 +759,11 @@ def cleanup_files():
             if file_path.is_file():
                 file_age = time.time() - file_path.stat().st_mtime
                 if file_age > 3600:  # Delete files older than 1 hour
-                    file_path.unlink()
-                    files_deleted += 1
+                    try:
+                        file_path.unlink()
+                        files_deleted += 1
+                    except:
+                        pass
         
         return jsonify({
             "message": f"Cleaned up {files_deleted} old files",
