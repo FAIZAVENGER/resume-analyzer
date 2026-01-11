@@ -7,11 +7,13 @@ import os
 import json
 import time
 import concurrent.futures
-from datetime import datetime
+from datetime import datetime, timedelta
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from dotenv import load_dotenv
 import traceback
+import threading
+import atexit
 
 # Load environment variables
 load_dotenv()
@@ -39,16 +41,113 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 print(f"📁 Upload folder: {UPLOAD_FOLDER}")
 
+# Warm-up state
+warmup_complete = False
+last_activity_time = datetime.now()
+keep_warm_thread = None
+warmup_lock = threading.Lock()
+
+def warmup_openai():
+    """Warm up OpenAI connection"""
+    global warmup_complete
+    
+    if client is None:
+        print("⚠️ Skipping OpenAI warm-up: Client not initialized")
+        return False
+    
+    try:
+        print("🔥 Warming up OpenAI connection...")
+        start_time = time.time()
+        
+        # Simple test request
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Just respond with 'ready'"}
+            ],
+            max_tokens=10,
+            temperature=0.1
+        )
+        
+        elapsed = time.time() - start_time
+        print(f"✅ OpenAI warmed up in {elapsed:.2f}s: {response.choices[0].message.content}")
+        
+        with warmup_lock:
+            warmup_complete = True
+            
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ Warm-up attempt failed: {str(e)}")
+        # Schedule retry in 10 seconds
+        threading.Timer(10.0, warmup_openai).start()
+        return False
+
+def keep_openai_warm():
+    """Periodically send requests to keep OpenAI connection alive"""
+    global last_activity_time
+    
+    while True:
+        time.sleep(60)  # Check every minute
+        
+        try:
+            # Check if we've been inactive for more than 2 minutes
+            inactive_time = datetime.now() - last_activity_time
+            
+            if client and inactive_time.total_seconds() > 120:  # 2 minutes
+                print("♨️ Keeping OpenAI warm...")
+                
+                try:
+                    # Send a minimal request
+                    client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": "ping"}],
+                        max_tokens=5,
+                        timeout=5
+                    )
+                    print("✅ Keep-alive ping successful")
+                except Exception as e:
+                    print(f"⚠️ Keep-alive ping failed: {str(e)}")
+                    
+        except Exception as e:
+            print(f"⚠️ Keep-warm thread error: {str(e)}")
+
+def update_activity():
+    """Update last activity timestamp"""
+    global last_activity_time
+    last_activity_time = datetime.now()
+
+# Start warm-up on app start
+if client:
+    print("🚀 Starting OpenAI warm-up...")
+    warmup_thread = threading.Thread(target=warmup_openai, daemon=True)
+    warmup_thread.start()
+    
+    # Start keep-warm thread
+    keep_warm_thread = threading.Thread(target=keep_openai_warm, daemon=True)
+    keep_warm_thread.start()
+    print("✅ Keep-warm thread started")
+
 @app.route('/')
 def home():
     """Root route - API landing page"""
-    return '''
+    global warmup_complete, last_activity_time
+    
+    update_activity()
+    
+    inactive_time = datetime.now() - last_activity_time
+    inactive_minutes = int(inactive_time.total_seconds() / 60)
+    
+    warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
+    
+    return f'''
     <!DOCTYPE html>
 <html>
 <head>
     <title>Resume Analyzer API</title>
     <style>
-        body {
+        body {{
             font-family: 'Arial', sans-serif;
             margin: 0;
             padding: 40px;
@@ -59,9 +158,9 @@ def home():
             flex-direction: column;
             align-items: center;
             justify-content: center;
-        }
+        }}
         
-        .container {
+        .container {{
             max-width: 800px;
             width: 100%;
             background: white;
@@ -69,73 +168,97 @@ def home():
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
             padding: 40px;
             text-align: center;
-        }
+        }}
         
-        h1 {
+        h1 {{
             color: #2c3e50;
             font-size: 2.5rem;
             margin-bottom: 10px;
             background: linear-gradient(90deg, #667eea, #764ba2);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-        }
+        }}
         
-        .subtitle {
+        .subtitle {{
             color: #7f8c8d;
             font-size: 1.1rem;
             margin-bottom: 30px;
-        }
+        }}
         
-        .status-card {
+        .status-card {{
             background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
             border-radius: 15px;
             padding: 20px;
             margin: 20px 0;
             border-left: 5px solid #667eea;
-        }
+        }}
         
-        .status-item {
+        .status-item {{
             display: flex;
             justify-content: space-between;
             margin: 10px 0;
             padding: 8px 0;
             border-bottom: 1px solid #e0e0e0;
-        }
+        }}
         
-        .status-label {
+        .status-label {{
             font-weight: 600;
             color: #2c3e50;
-        }
+        }}
         
-        .status-value {
+        .status-value {{
             color: #27ae60;
             font-weight: 600;
-        }
+        }}
         
-        .endpoints {
+        .warmup-status {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: #e3f2fd;
+            border-radius: 10px;
+            margin: 15px 0;
+            border-left: 4px solid #2196f3;
+        }}
+        
+        .warmup-dot {{
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: {'#4caf50' if warmup_complete else '#ff9800'};
+            animation: {'none' if warmup_complete else 'pulse 1.5s infinite'};
+        }}
+        
+        @keyframes pulse {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.5; }}
+        }}
+        
+        .endpoints {{
             text-align: left;
             margin: 30px 0;
             background: #f8f9fa;
             padding: 20px;
             border-radius: 15px;
             border: 2px solid #e9ecef;
-        }
+        }}
         
-        .endpoint {
+        .endpoint {{
             background: white;
             padding: 15px;
             margin: 10px 0;
             border-radius: 10px;
             border-left: 4px solid #667eea;
             transition: transform 0.3s;
-        }
+        }}
         
-        .endpoint:hover {
+        .endpoint:hover {{
             transform: translateX(10px);
             box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-        }
+        }}
         
-        .method {
+        .method {{
             display: inline-block;
             background: #667eea;
             color: white;
@@ -144,21 +267,21 @@ def home():
             font-weight: bold;
             margin-right: 10px;
             font-size: 0.9rem;
-        }
+        }}
         
-        .path {
+        .path {{
             font-family: 'Courier New', monospace;
             font-weight: bold;
             color: #2c3e50;
-        }
+        }}
         
-        .description {
+        .description {{
             color: #7f8c8d;
             margin-top: 5px;
             font-size: 0.95rem;
-        }
+        }}
         
-        .api-status {
+        .api-status {{
             display: inline-block;
             padding: 8px 20px;
             background: #27ae60;
@@ -166,13 +289,13 @@ def home():
             border-radius: 20px;
             font-weight: bold;
             margin: 20px 0;
-        }
+        }}
         
-        .buttons {
+        .buttons {{
             margin-top: 30px;
-        }
+        }}
         
-        .btn {
+        .btn {{
             display: inline-block;
             padding: 12px 30px;
             margin: 0 10px;
@@ -185,59 +308,81 @@ def home():
             border: none;
             cursor: pointer;
             font-size: 1rem;
-        }
+        }}
         
-        .btn:hover {
+        .btn:hover {{
             transform: translateY(-3px);
             box-shadow: 0 10px 20px rgba(0,0,0,0.2);
-        }
+        }}
         
-        .btn-secondary {
+        .btn-secondary {{
             background: linear-gradient(90deg, #11998e, #38ef7d);
-        }
+        }}
         
-        .footer {
+        .btn-warmup {{
+            background: linear-gradient(90deg, #ff9800, #ff5722);
+        }}
+        
+        .footer {{
             margin-top: 40px;
             color: #7f8c8d;
             font-size: 0.9rem;
-        }
+        }}
         
-        .error {
+        .error {{
             color: #e74c3c;
             font-weight: 600;
-        }
+        }}
         
-        .success {
+        .success {{
             color: #27ae60;
             font-weight: 600;
-        }
+        }}
+        
+        .warning {{
+            color: #ff9800;
+            font-weight: 600;
+        }}
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🤖 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis using OpenAI</p>
+        <p class="subtitle">AI-powered resume analysis using OpenAI • Always Active</p>
         
         <div class="api-status">
             ✅ API IS RUNNING
         </div>
         
+        <div class="warmup-status">
+            <div class="warmup-dot"></div>
+            <div>
+                <strong>OpenAI Status:</strong> {warmup_status}
+                <br>
+                <small>Last activity: {inactive_minutes} minute(s) ago</small>
+            </div>
+        </div>
+        
         <div class="status-card">
             <div class="status-item">
                 <span class="status-label">Service Status:</span>
-                <span class="status-value">Online</span>
+                <span class="status-value">Always Active ♨️</span>
             </div>
             <div class="status-item">
                 <span class="status-label">OpenAI API:</span>
-                ''' + (f'<span class="success">✅ Configured ({api_key[:10]}...)</span>' if api_key else '<span class="error">❌ NOT FOUND</span>') + '''
+                {'<span class="success">✅ Configured (' + api_key[:10] + '...)</span>' if api_key else '<span class="error">❌ NOT FOUND</span>'}
+            </div>
+            <div class="status-item">
+                <span class="status-label">OpenAI Status:</span>
+                {'<span class="success">✅ Warmed Up</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
             </div>
             <div class="status-item">
                 <span class="status-label">Client:</span>
-                ''' + ('<span class="success">✅ Initialized</span>' if client else '<span class="error">❌ NOT INITIALIZED</span>') + '''
+                {'<span class="success">✅ Initialized</span>' if client else '<span class="error">❌ NOT INITIALIZED</span>'}
             </div>
             <div class="status-item">
                 <span class="status-label">Upload Folder:</span>
-                <span class="status-value">''' + UPLOAD_FOLDER + '''</span>
+                <span class="status-value">{UPLOAD_FOLDER}</span>
             </div>
         </div>
         
@@ -258,6 +403,12 @@ def home():
             
             <div class="endpoint">
                 <span class="method">GET</span>
+                <span class="path">/warmup</span>
+                <p class="description">Force warm-up OpenAI connection</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
                 <span class="path">/health</span>
                 <p class="description">Check API health status and configuration</p>
             </div>
@@ -270,19 +421,20 @@ def home():
             
             <div class="endpoint">
                 <span class="method">GET</span>
-                <span class="path">/download/{filename}</span>
+                <span class="path">/download/{filename}</path>
                 <p class="description">Download generated Excel analysis reports</p>
             </div>
         </div>
         
         <div class="buttons">
             <a href="/health" class="btn">Check Health</a>
+            <a href="/warmup" class="btn btn-warmup">Warm Up OpenAI</a>
             <a href="/ping" class="btn btn-secondary">Ping Service</a>
         </div>
         
         <div class="footer">
-            <p>Powered by Flask & OpenAI | Deployed on Render</p>
-            <p>Upload folder: ''' + str(os.path.exists(UPLOAD_FOLDER)) + '''</p>
+            <p>Powered by Flask & OpenAI | Deployed on Render | Always Active Mode</p>
+            <p>OpenAI Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
         </div>
     </div>
 </body>
@@ -292,6 +444,7 @@ def home():
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file"""
     try:
+        update_activity()
         reader = PdfReader(file_path)
         text = ""
         for page in reader.pages:
@@ -314,6 +467,7 @@ def extract_text_from_pdf(file_path):
 def extract_text_from_docx(file_path):
     """Extract text from DOCX file"""
     try:
+        update_activity()
         doc = Document(file_path)
         text = "\n".join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
         
@@ -332,6 +486,7 @@ def extract_text_from_docx(file_path):
 def extract_text_from_txt(file_path):
     """Extract text from TXT file"""
     try:
+        update_activity()
         # Try different encodings
         encodings = ['utf-8', 'latin-1', 'windows-1252', 'cp1252']
         
@@ -359,6 +514,7 @@ def extract_text_from_txt(file_path):
 
 def fallback_response(reason):
     """Return a fallback response when AI fails"""
+    update_activity()
     return {
         "candidate_name": reason,
         "skills_matched": ["Try again in a moment"],
@@ -373,10 +529,17 @@ def fallback_response(reason):
 
 def analyze_resume_with_openai(resume_text, job_description):
     """Use OpenAI to analyze resume against job description"""
+    update_activity()
     
     if client is None:
         print("❌ OpenAI client not initialized.")
         return fallback_response("API Configuration Error")
+    
+    # Check if warm-up is complete
+    with warmup_lock:
+        if not warmup_complete:
+            print("⚠️ OpenAI not warmed up yet, warming now...")
+            warmup_openai()
     
     # TRUNCATE text
     resume_text = resume_text[:6000]
@@ -412,6 +575,7 @@ Ensure summaries are detailed, professional, and comprehensive."""
 
     def call_openai():
         try:
+            update_activity()
             response = client.chat.completions.create(
                 model="gpt-4o-mini",  # You can use "gpt-4", "gpt-4-turbo", or "gpt-3.5-turbo"
                 messages=[
@@ -518,6 +682,7 @@ Ensure summaries are detailed, professional, and comprehensive."""
 
 def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     """Create a beautiful Excel report with the analysis"""
+    update_activity()
     
     wb = Workbook()
     ws = wb.active
@@ -700,7 +865,8 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
 
 @app.route('/analyze', methods=['POST'])
 def analyze_resume():
-    """Main endpoint to analyze resume - OPTIMIZED VERSION"""
+    """Main endpoint to analyze resume"""
+    update_activity()
     
     try:
         print("\n" + "="*50)
@@ -770,6 +936,10 @@ def analyze_resume():
             print("❌ OpenAI client not initialized")
             return jsonify({'error': 'OpenAI client not properly initialized'}), 500
         
+        # Check OpenAI warm-up status
+        warmup_status = "Warmed up" if warmup_complete else "Warming up..."
+        print(f"🤖 OpenAI Status: {warmup_status}")
+        
         # Analyze with OpenAI
         print("🤖 Starting AI analysis...")
         ai_start = time.time()
@@ -795,6 +965,8 @@ def analyze_resume():
         
         # Return analysis with download link
         analysis['excel_filename'] = os.path.basename(excel_path)
+        analysis['openai_status'] = warmup_status
+        analysis['response_time'] = f"{ai_time:.2f}s"
         
         total_time = time.time() - start_time
         print(f"✅ Request completed in {total_time:.2f} seconds")
@@ -809,6 +981,8 @@ def analyze_resume():
 @app.route('/download/<filename>', methods=['GET'])
 def download_report(filename):
     """Download the Excel report"""
+    update_activity()
+    
     try:
         print(f"📥 Download request for: {filename}")
         
@@ -835,12 +1009,56 @@ def download_report(filename):
         print(f"❌ Download error: {traceback.format_exc()}")
         return jsonify({'error': f'Download failed: {str(e)}'}), 500
 
+@app.route('/warmup', methods=['GET'])
+def force_warmup():
+    """Force warm-up OpenAI connection"""
+    update_activity()
+    
+    try:
+        if client is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'OpenAI client not initialized',
+                'warmup_complete': False
+            })
+        
+        result = warmup_openai()
+        
+        return jsonify({
+            'status': 'success' if result else 'error',
+            'message': 'OpenAI warmed up successfully' if result else 'Warm-up failed',
+            'warmup_complete': warmup_complete,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'warmup_complete': False
+        })
+
 @app.route('/quick-check', methods=['GET'])
 def quick_check():
     """Quick endpoint to check if OpenAI is responsive"""
+    update_activity()
+    
     try:
         if client is None:
-            return jsonify({'available': False, 'reason': 'Client not initialized'})
+            return jsonify({
+                'available': False, 
+                'reason': 'Client not initialized',
+                'warmup_complete': warmup_complete
+            })
+        
+        # Check warm-up status
+        if not warmup_complete:
+            return jsonify({
+                'available': False,
+                'reason': 'OpenAI is warming up',
+                'warmup_complete': False,
+                'suggestion': 'Try again in a few seconds or use /warmup endpoint'
+            })
         
         # Very quick test with thread timeout
         start_time = time.time()
@@ -853,7 +1071,8 @@ def quick_check():
                         {"role": "system", "content": "You are a helpful assistant."},
                         {"role": "user", "content": "Respond with just 'ready'"}
                     ],
-                    max_tokens=10
+                    max_tokens=10,
+                    timeout=5
                 )
                 return response
             except Exception as e:
@@ -863,7 +1082,7 @@ def quick_check():
             # Use thread with timeout
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(openai_check)
-                response = future.result(timeout=10)  # 10 second timeout
+                response = future.result(timeout=8)  # 8 second timeout
             
             response_time = time.time() - start_time
             
@@ -872,6 +1091,7 @@ def quick_check():
                     'available': True,
                     'response_time': f'{response_time:.2f}s',
                     'status': 'ready',
+                    'warmup_complete': True,
                     'quota_status': 'ok'
                 })
             else:
@@ -879,14 +1099,16 @@ def quick_check():
                     'available': True,
                     'response_time': f'{response_time:.2f}s',
                     'status': 'responding',
+                    'warmup_complete': True,
                     'quota_status': 'ok'
                 })
                 
         except concurrent.futures.TimeoutError:
             return jsonify({
                 'available': False,
-                'reason': 'Request timed out after 10 seconds',
+                'reason': 'Request timed out after 8 seconds',
                 'status': 'timeout',
+                'warmup_complete': warmup_complete,
                 'suggestion': 'AI service is taking too long. Please try again.'
             })
             
@@ -909,36 +1131,51 @@ def quick_check():
             'available': False,
             'reason': error_msg[:100],
             'status': status,
+            'warmup_complete': warmup_complete,
             'suggestion': suggestion
         })
 
 @app.route('/ping', methods=['GET'])
 def ping():
     """Simple ping to keep service awake"""
+    update_activity()
+    
     return jsonify({
         'status': 'pong',
         'timestamp': datetime.now().isoformat(),
         'service': 'resume-analyzer',
-        'ai_configured': client is not None
+        'openai_warmup': warmup_complete,
+        'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
+        'message': 'Service is alive and warm!' if warmup_complete else 'Service is alive, warming up OpenAI...'
     })
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
+    update_activity()
+    
+    inactive_time = datetime.now() - last_activity_time
+    inactive_minutes = int(inactive_time.total_seconds() / 60)
+    
     return jsonify({
         'status': 'Backend is running!', 
         'timestamp': datetime.now().isoformat(),
         'api_key_configured': bool(api_key),
         'client_initialized': client is not None,
+        'openai_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'upload_folder_path': UPLOAD_FOLDER,
-        'uptime': 'active',
-        'version': '1.0.0'
+        'inactive_minutes': inactive_minutes,
+        'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
+        'version': '1.0.0',
+        'features': ['always_active', 'openai_warmup', 'keep_alive']
     })
 
 @app.route('/list-models', methods=['GET'])
 def list_models():
     """List all available models"""
+    update_activity()
+    
     try:
         if not client:
             return jsonify({'error': 'Client not initialized'})
@@ -962,6 +1199,8 @@ if __name__ == '__main__':
     print(f"🔑 API Key: {'✅ Configured' if api_key else '❌ NOT FOUND'}")
     print(f"🤖 OpenAI Client: {'✅ Initialized' if client else '❌ NOT INITIALIZED'}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
+    print("✅ Always Active Mode: Enabled")
+    print("✅ OpenAI Keep-Warm: Enabled")
     print("="*50 + "\n")
     
     if not api_key:
