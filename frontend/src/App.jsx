@@ -8,7 +8,8 @@ import {
   AlertTriangle, BatteryCharging, Brain, Rocket,
   RefreshCw, Check, X, ExternalLink, BarChart,
   Battery, Crown, Users, Coffee, ShieldCheck,
-  Lock, DownloadCloud, Edit3, FileDown, Info
+  Lock, DownloadCloud, Edit3, FileDown, Info,
+  Wifi, WifiOff, Activity, Thermometer
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -23,24 +24,27 @@ function App() {
   const [progress, setProgress] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [aiStatus, setAiStatus] = useState('idle');
+  const [backendStatus, setBackendStatus] = useState('checking');
+  const [openaiWarmup, setOpenaiWarmup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
   const [quotaInfo, setQuotaInfo] = useState(null);
-  const [quotaResetTime, setQuotaResetTime] = useState(null);
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
   const [serviceStatus, setServiceStatus] = useState({
     enhancedFallback: true,
     validKeys: 0,
     totalKeys: 0
   });
-
+  
   // UPDATED: Use your Render backend URL
   const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
   
   const keepAliveInterval = useRef(null);
+  const backendWakeInterval = useRef(null);
+  const warmupCheckInterval = useRef(null);
 
-  // Check AI status on mount and keep service awake
+  // Initialize service on mount
   useEffect(() => {
     initializeService();
     
@@ -49,123 +53,192 @@ function App() {
       if (keepAliveInterval.current) {
         clearInterval(keepAliveInterval.current);
       }
+      if (backendWakeInterval.current) {
+        clearInterval(backendWakeInterval.current);
+      }
+      if (warmupCheckInterval.current) {
+        clearInterval(warmupCheckInterval.current);
+      }
     };
   }, []);
 
   const initializeService = async () => {
     try {
       setIsWarmingUp(true);
+      setBackendStatus('waking');
       setAiStatus('checking');
       
-      // First, ping the backend to wake it up
-      setLoadingMessage('Initializing service...');
-      const pingResponse = await axios.get(`${API_BASE_URL}/ping`, {
-        timeout: 15000
-      }).catch(() => {
-        console.log('Initial ping failed - backend might be sleeping');
-        return null;
-      });
+      // Start backend wake-up sequence
+      await wakeUpBackend();
       
-      if (pingResponse?.data) {
+      // Check backend health
+      const healthResponse = await axios.get(`${API_BASE_URL}/health`, {
+        timeout: 10000
+      }).catch(() => null);
+      
+      if (healthResponse?.data) {
         setServiceStatus({
-          enhancedFallback: pingResponse.data.enhanced_fallback || true,
-          validKeys: pingResponse.data.valid_keys || 0,
-          totalKeys: pingResponse.data.total_keys || 0
+          enhancedFallback: healthResponse.data.client_initialized || false,
+          validKeys: healthResponse.data.client_initialized ? 1 : 0,
+          totalKeys: healthResponse.data.api_key_configured ? 1 : 0
         });
+        
+        setOpenaiWarmup(healthResponse.data.openai_warmup_complete || false);
+        setBackendStatus('ready');
       }
       
-      // Wait a moment for backend to fully wake up
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Force OpenAI warm-up
+      await forceOpenAIWarmup();
       
-      // Check AI status
-      await checkAIAvailability();
-      
-      // Check quota status
-      await checkQuotaStatus();
-      
-      // Set up keep-alive every 4 minutes
-      keepAliveInterval.current = setInterval(() => {
-        axios.get(`${API_BASE_URL}/ping`, { timeout: 5000 })
-          .then(() => console.log('Keep-alive ping successful'))
-          .catch(() => console.log('Keep-alive ping failed'));
-      }, 4 * 60 * 1000);
+      // Set up periodic checks
+      setupPeriodicChecks();
       
     } catch (err) {
       console.log('Service initialization error:', err.message);
+      setBackendStatus('sleeping');
+      
+      // Retry after 5 seconds
+      setTimeout(() => initializeService(), 5000);
     } finally {
       setIsWarmingUp(false);
     }
   };
 
-  const checkAIAvailability = async (retries = 2) => {
-    for (let i = 0; i < retries; i++) {
-      try {
-        setAiStatus('checking');
-        setLoadingMessage(`Checking OpenAI service... (Attempt ${i + 1}/${retries})`);
-        
-        const response = await axios.get(`${API_BASE_URL}/quick-check`, {
-          timeout: 15000
-        });
-        
-        if (response.data.available) {
-          setAiStatus('available');
-          setLoadingMessage('');
-          setRetryCount(0);
-          return true;
-        } else {
-          if (response.data.status === 'quota_exceeded' || response.data.status === 'rate_limit') {
-            setAiStatus('unavailable');
-            setLoadingMessage('OpenAI quota/rate limit reached. Using enhanced analysis...');
-            return false;
-          }
-        }
-        
-        if (i < retries - 1) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-        
-      } catch (err) {
-        console.log(`OpenAI check attempt ${i + 1} failed:`, err.message);
-        
-        if (err.code === 'ECONNABORTED') {
-          setLoadingMessage('Backend is waking up... This may take 30-60 seconds');
-        }
-        
-        if (i < retries - 1) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-      }
+  const wakeUpBackend = async () => {
+    try {
+      console.log('🔔 Waking up backend service...');
+      setLoadingMessage('Waking up backend service...');
+      
+      // Send multiple pings to ensure backend wakes up
+      const pingPromises = [
+        axios.get(`${API_BASE_URL}/ping`, { timeout: 8000 }),
+        axios.get(`${API_BASE_URL}/health`, { timeout: 10000 })
+      ];
+      
+      await Promise.allSettled(pingPromises);
+      
+      console.log('✅ Backend is responding');
+      setBackendStatus('ready');
+      setLoadingMessage('');
+      
+    } catch (error) {
+      console.log('⚠️ Backend is waking up...');
+      setBackendStatus('waking');
+      
+      // Send a longer timeout request to fully wake it
+      setTimeout(() => {
+        axios.get(`${API_BASE_URL}/ping`, { timeout: 15000 })
+          .then(() => {
+            setBackendStatus('ready');
+            console.log('✅ Backend fully awake');
+          })
+          .catch(() => {
+            setBackendStatus('sleeping');
+            console.log('❌ Backend still sleeping');
+          });
+      }, 3000);
     }
-    
-    setAiStatus('unavailable');
-    setRetryCount(prev => prev + 1);
-    return false;
   };
 
-  const checkQuotaStatus = async () => {
+  const forceOpenAIWarmup = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/health`);
-      setQuotaInfo({
-        overall: {
-          total_keys: response.data.api_key_configured ? 1 : 0,
-          valid_keys: response.data.client_initialized ? 1 : 0
-        },
-        enhanced_fallback: {
-          enabled: true,
-          extraction_features: ['Name Extraction', 'Skill Detection', 'Experience Analysis', 'Education Detection']
-        }
+      setAiStatus('warming');
+      setLoadingMessage('Warming up OpenAI...');
+      
+      const response = await axios.get(`${API_BASE_URL}/warmup`, {
+        timeout: 15000
       });
       
-      if (response.data.client_initialized) {
-        setServiceStatus(prev => ({
-          ...prev,
-          enhancedFallback: true,
-          extractionFeatures: ['Name Extraction', 'Skill Detection', 'Experience Analysis', 'Education Detection']
-        }));
+      if (response.data.warmup_complete) {
+        setAiStatus('available');
+        setOpenaiWarmup(true);
+        console.log('✅ OpenAI warmed up successfully');
+      } else {
+        setAiStatus('warming');
+        console.log('⚠️ OpenAI still warming up');
+        
+        // Check status again in 5 seconds
+        setTimeout(() => checkOpenAIStatus(), 5000);
       }
+      
+      setLoadingMessage('');
+      
     } catch (error) {
-      console.log('Failed to get quota status:', error);
+      console.log('⚠️ OpenAI warm-up failed:', error.message);
+      setAiStatus('unavailable');
+      
+      // Check status in background
+      setTimeout(() => checkOpenAIStatus(), 3000);
     }
+  };
+
+  const checkOpenAIStatus = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/quick-check`, {
+        timeout: 10000
+      });
+      
+      if (response.data.available) {
+        setAiStatus('available');
+        setOpenaiWarmup(true);
+      } else if (response.data.warmup_complete) {
+        setAiStatus('available');
+        setOpenaiWarmup(true);
+      } else {
+        setAiStatus('warming');
+        setOpenaiWarmup(false);
+      }
+      
+    } catch (error) {
+      console.log('OpenAI status check failed:', error.message);
+      setAiStatus('unavailable');
+    }
+  };
+
+  const checkBackendHealth = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/health`, {
+        timeout: 8000
+      });
+      
+      setBackendStatus('ready');
+      setOpenaiWarmup(response.data.openai_warmup_complete || false);
+      
+      // Update AI status based on warmup
+      if (response.data.openai_warmup_complete) {
+        setAiStatus('available');
+      } else {
+        setAiStatus('warming');
+      }
+      
+    } catch (error) {
+      console.log('Backend health check failed:', error.message);
+      setBackendStatus('sleeping');
+    }
+  };
+
+  const setupPeriodicChecks = () => {
+    // Keep backend alive every 3 minutes
+    backendWakeInterval.current = setInterval(() => {
+      axios.get(`${API_BASE_URL}/ping`, { timeout: 5000 })
+        .then(() => console.log('Keep-alive ping successful'))
+        .catch(() => console.log('Keep-alive ping failed'));
+    }, 3 * 60 * 1000);
+    
+    // Check backend health every minute
+    warmupCheckInterval.current = setInterval(() => {
+      checkBackendHealth();
+    }, 60 * 1000);
+    
+    // Check OpenAI status every 30 seconds when warming
+    const statusCheckInterval = setInterval(() => {
+      if (aiStatus === 'warming' || aiStatus === 'checking') {
+        checkOpenAIStatus();
+      }
+    }, 30000);
+    
+    // Clean up this interval when component unmounts
+    keepAliveInterval.current = statusCheckInterval;
   };
 
   const handleDrag = (e) => {
@@ -217,6 +290,13 @@ function App() {
       return;
     }
 
+    // Check backend status before starting
+    if (backendStatus !== 'ready') {
+      setError('Backend is warming up. Please wait a moment...');
+      await wakeUpBackend();
+      return;
+    }
+
     setLoading(true);
     setError('');
     setAnalysis(null);
@@ -239,10 +319,10 @@ function App() {
       }, 500);
 
       // Update loading message based on service status
-      if (aiStatus === 'available' && serviceStatus.validKeys > 0) {
-        setLoadingMessage('Using OpenAI AI analysis...');
+      if (aiStatus === 'available' && openaiWarmup) {
+        setLoadingMessage('OpenAI AI analysis (Always Active)...');
       } else {
-        setLoadingMessage('Using enhanced analysis...');
+        setLoadingMessage('Enhanced analysis (Warming up AI)...');
       }
       setProgress(20);
 
@@ -274,8 +354,8 @@ function App() {
       setAnalysis(response.data);
       setProgress(100);
 
-      // Update quota status
-      await checkQuotaStatus();
+      // Update status
+      await checkBackendHealth();
 
       setTimeout(() => {
         setProgress(0);
@@ -287,6 +367,8 @@ function App() {
       
       if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
         setError('Request timeout. The backend might be waking up. Please try again in 30 seconds.');
+        setBackendStatus('sleeping');
+        wakeUpBackend();
       } else if (err.response?.status === 429) {
         setError('Rate limit reached. Enhanced analysis is still available.');
       } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
@@ -325,6 +407,35 @@ function App() {
     return 'Needs Improvement 📈';
   };
 
+  const getBackendStatusMessage = () => {
+    switch(backendStatus) {
+      case 'ready': return { 
+        text: 'Backend Active', 
+        color: '#00ff9d', 
+        icon: <Wifi size={16} />,
+        bgColor: 'rgba(0, 255, 157, 0.1)'
+      };
+      case 'waking': return { 
+        text: 'Backend Waking', 
+        color: '#ffd166', 
+        icon: <Activity size={16} />,
+        bgColor: 'rgba(255, 209, 102, 0.1)'
+      };
+      case 'sleeping': return { 
+        text: 'Backend Sleeping', 
+        color: '#ff6b6b', 
+        icon: <WifiOff size={16} />,
+        bgColor: 'rgba(255, 107, 107, 0.1)'
+      };
+      default: return { 
+        text: 'Checking...', 
+        color: '#94a3b8', 
+        icon: <Loader size={16} className="spinner" />,
+        bgColor: 'rgba(148, 163, 184, 0.1)'
+      };
+    }
+  };
+
   const getAiStatusMessage = () => {
     switch(aiStatus) {
       case 'checking': return { 
@@ -332,6 +443,12 @@ function App() {
         color: '#ffd166', 
         icon: <BatteryCharging size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
+      };
+      case 'warming': return { 
+        text: 'OpenAI Warming', 
+        color: '#ff9800', 
+        icon: <Thermometer size={16} />,
+        bgColor: 'rgba(255, 152, 0, 0.1)'
       };
       case 'available': return { 
         text: 'OpenAI Ready', 
@@ -354,6 +471,7 @@ function App() {
     }
   };
 
+  const backendStatusInfo = getBackendStatusMessage();
   const aiStatusInfo = getAiStatusMessage();
 
   const handleLeadsocClick = (e) => {
@@ -366,6 +484,20 @@ function App() {
     }, 100);
   };
 
+  const handleForceWarmup = async () => {
+    setIsWarmingUp(true);
+    setLoadingMessage('Forcing OpenAI warm-up...');
+    
+    try {
+      await forceOpenAIWarmup();
+      setLoadingMessage('');
+    } catch (error) {
+      console.log('Force warm-up failed:', error);
+    } finally {
+      setIsWarmingUp(false);
+    }
+  };
+
   const formatTimeRemaining = (minutes) => {
     if (minutes > 60) {
       const hours = Math.floor(minutes / 60);
@@ -373,28 +505,6 @@ function App() {
       return `${hours}h ${mins}m`;
     }
     return `${minutes}m`;
-  };
-
-  const getEnhancedFallbackMessage = () => {
-    if (!serviceStatus.enhancedFallback) return null;
-    
-    return (
-      <div className="enhanced-fallback-info glass">
-        <div className="info-header">
-          <Sparkles size={20} />
-          <h4>Enhanced Fallback Active</h4>
-        </div>
-        <p className="info-description">
-          Even without AI, we extract information directly from your resume:
-        </p>
-        <ul className="feature-list">
-          <li><Check size={14} /> Extract candidate name from resume</li>
-          <li><Check size={14} /> Detect skills and experience</li>
-          <li><Check size={14} /> Analyze education background</li>
-          <li><Check size={14} /> Provide personalized scoring</li>
-        </ul>
-      </div>
-    );
   };
 
   return (
@@ -419,7 +529,7 @@ function App() {
                   <span className="powered-by">Powered by</span>
                   <span className="openai-badge">OpenAI</span>
                   <span className="divider">•</span>
-                  <span className="tagline">Intelligent Candidate Screening</span>
+                  <span className="tagline">Always Active • Intelligent Screening</span>
                 </div>
               </div>
             </div>
@@ -452,18 +562,21 @@ function App() {
           </div>
           
           <div className="header-features">
-            <div className="feature">
-              <ShieldCheck size={16} />
-              <span>Secure Analysis</span>
+            {/* Backend Status */}
+            <div 
+              className="feature backend-status-indicator" 
+              style={{ 
+                backgroundColor: backendStatusInfo.bgColor,
+                borderColor: `${backendStatusInfo.color}30`,
+                color: backendStatusInfo.color
+              }}
+            >
+              {backendStatusInfo.icon}
+              <span>{backendStatusInfo.text}</span>
+              {backendStatus === 'waking' && <Loader size={12} className="pulse-spinner" />}
             </div>
-            <div className="feature">
-              <Zap size={16} />
-              <span>Real-time Results</span>
-            </div>
-            <div className="feature">
-              <Globe size={16} />
-              <span>Multi-format Support</span>
-            </div>
+            
+            {/* AI Status */}
             <div 
               className="feature ai-status-indicator" 
               style={{ 
@@ -474,7 +587,7 @@ function App() {
             >
               {aiStatusInfo.icon}
               <span>{aiStatusInfo.text}</span>
-              {isWarmingUp && <Loader size={12} className="pulse-spinner" />}
+              {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
             </div>
             
             {/* Enhanced Fallback Indicator */}
@@ -485,14 +598,30 @@ function App() {
               </div>
             )}
             
+            {/* Warm-up Button */}
+            {aiStatus !== 'available' && (
+              <button 
+                className="feature warmup-button"
+                onClick={handleForceWarmup}
+                disabled={isWarmingUp}
+              >
+                {isWarmingUp ? (
+                  <Loader size={16} className="spinner" />
+                ) : (
+                  <Thermometer size={16} />
+                )}
+                <span>Warm Up AI</span>
+              </button>
+            )}
+            
             {/* Quota Status Toggle */}
             <button 
               className="feature quota-toggle"
               onClick={() => setShowQuotaPanel(!showQuotaPanel)}
-              title="Show quota status"
+              title="Show service status"
             >
               <BarChart size={16} />
-              <span>Quota Status</span>
+              <span>Service Status</span>
             </button>
           </div>
         </div>
@@ -507,13 +636,13 @@ function App() {
       </header>
 
       <main className="main-content">
-        {/* Quota Status Panel */}
-        {showQuotaPanel && quotaInfo && (
+        {/* Status Panel */}
+        {showQuotaPanel && (
           <div className="quota-status-panel glass">
             <div className="quota-panel-header">
               <div className="quota-title">
-                <BarChart size={20} />
-                <h3>OpenAI Service Status</h3>
+                <Activity size={20} />
+                <h3>Service Status</h3>
               </div>
               <button 
                 className="close-quota"
@@ -525,93 +654,121 @@ function App() {
             
             <div className="quota-summary">
               <div className="summary-item">
-                <div className="summary-label">API Key Status</div>
-                <div className="summary-value">{quotaInfo.overall?.valid_keys > 0 ? '✅ Configured' : '❌ Missing'}</div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Client Status</div>
-                <div className={`summary-value ${quotaInfo.overall?.valid_keys > 0 ? 'success' : 'warning'}`}>
-                  {quotaInfo.overall?.valid_keys > 0 ? '✅ Initialized' : '❌ Not Ready'}
+                <div className="summary-label">Backend Status</div>
+                <div className={`summary-value ${backendStatus === 'ready' ? 'success' : backendStatus === 'waking' ? 'warning' : 'error'}`}>
+                  {backendStatus === 'ready' ? '✅ Active' : 
+                   backendStatus === 'waking' ? '🔥 Waking Up' : 
+                   '💤 Sleeping'}
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Enhanced Fallback</div>
+                <div className="summary-label">OpenAI Status</div>
+                <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
+                  {aiStatus === 'available' ? '✅ Ready' : 
+                   aiStatus === 'warming' ? '🔥 Warming' : 
+                   '⚠️ Enhanced Mode'}
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Always Active</div>
                 <div className="summary-value success">
-                  ✅ Active
+                  ✅ Enabled
                 </div>
               </div>
             </div>
             
-            {serviceStatus.enhancedFallback && (
-              <div className="enhanced-fallback-card success">
-                <div className="fallback-header">
-                  <Sparkles size={20} />
-                  <h4>Enhanced Fallback Active</h4>
-                </div>
-                <p className="fallback-description">
-                  Even without OpenAI, we extract information directly from resumes:
-                </p>
-                <div className="fallback-features">
-                  <div className="feature-badge">
-                    <Check size={14} />
-                    <span>Name Extraction</span>
-                  </div>
-                  <div className="feature-badge">
-                    <Check size={14} />
-                    <span>Skill Detection</span>
-                  </div>
-                  <div className="feature-badge">
-                    <Check size={14} />
-                    <span>Experience Analysis</span>
-                  </div>
-                  <div className="feature-badge">
-                    <Check size={14} />
-                    <span>Education Detection</span>
-                  </div>
-                </div>
-              </div>
-            )}
+            <div className="action-buttons-panel">
+              <button 
+                className="action-button refresh"
+                onClick={checkBackendHealth}
+              >
+                <RefreshCw size={16} />
+                Refresh Status
+              </button>
+              <button 
+                className="action-button warmup"
+                onClick={handleForceWarmup}
+                disabled={isWarmingUp}
+              >
+                {isWarmingUp ? (
+                  <Loader size={16} className="spinner" />
+                ) : (
+                  <Thermometer size={16} />
+                )}
+                Force Warm-up
+              </button>
+              <button 
+                className="action-button ping"
+                onClick={wakeUpBackend}
+              >
+                <Activity size={16} />
+                Wake Backend
+              </button>
+            </div>
             
-            {quotaInfo.overall?.valid_keys === 0 && (
-              <div className="quota-warning-banner warning">
-                <AlertTriangle size={18} />
-                <div className="warning-content">
-                  <strong>No valid OpenAI API key configured</strong>
-                  <p>Enhanced analysis is extracting information directly from resumes. Add valid OpenAI API key for AI analysis.</p>
-                </div>
+            <div className="status-info">
+              <div className="info-item">
+                <span className="info-label">Service Mode:</span>
+                <span className="info-value">Always Active (Keeps OpenAI warm)</span>
               </div>
-            )}
-            
-            <div className="quota-tips">
-              <h4>Usage Tips:</h4>
-              <ul>
-                <li>✅ OpenAI API key is required for AI-powered analysis</li>
-                <li>✅ Enhanced analysis works without OpenAI API key</li>
-                <li>✅ Get OpenAI API key from platform.openai.com</li>
-                <li>✅ Add key to .env file as OPENAI_API_KEY=your_key</li>
-              </ul>
+              <div className="info-item">
+                <span className="info-label">Auto Warm-up:</span>
+                <span className="info-value">Every 60 seconds when inactive</span>
+              </div>
+              <div className="info-item">
+                <span className="info-label">Keep-alive:</span>
+                <span className="info-value">Pings every 3 minutes</span>
+              </div>
             </div>
           </div>
         )}
 
-        {/* Enhanced Fallback Info */}
-        {!analysis && serviceStatus.enhancedFallback && (
-          <div className="top-notice-bar glass">
-            <div className="notice-content">
-              <Sparkles size={18} />
-              <div>
-                <strong>Enhanced Analysis Mode Active</strong>
-                <p>We extract information directly from your resume for accurate analysis</p>
+        {/* Status Banner */}
+        <div className="top-notice-bar glass">
+          <div className="notice-content">
+            <div className="status-indicators">
+              <div className={`status-indicator ${backendStatus === 'ready' ? 'active' : 'inactive'}`}>
+                <div className="indicator-dot"></div>
+                <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}</span>
+              </div>
+              <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
+                <div className="indicator-dot"></div>
+                <span>OpenAI: {aiStatus === 'available' ? 'Ready' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
               </div>
             </div>
+            
+            {backendStatus !== 'ready' && (
+              <div className="wakeup-message">
+                <AlertCircle size={16} />
+                <span>Backend is waking up. Analysis may be slower for the first request.</span>
+              </div>
+            )}
+            
+            {aiStatus === 'warming' && (
+              <div className="wakeup-message">
+                <Thermometer size={16} />
+                <span>OpenAI is warming up. This ensures fast responses.</span>
+              </div>
+            )}
           </div>
-        )}
+        </div>
 
         {!analysis ? (
           <div className="upload-section">
             <div className="section-header">
               <h2>Start Your Analysis</h2>
               <p>Upload your resume and job description to get detailed insights</p>
+              <div className="service-status">
+                <span className="status-badge backend">
+                  {backendStatusInfo.icon} {backendStatusInfo.text}
+                </span>
+                <span className="status-badge ai">
+                  {aiStatusInfo.icon} {aiStatusInfo.text}
+                </span>
+                <span className="status-badge always-active">
+                  <Activity size={14} /> Always Active
+                </span>
+              </div>
             </div>
             
             <div className="upload-grid">
@@ -680,7 +837,7 @@ function App() {
                     <div className="stat-icon">
                       <Clock size={14} />
                     </div>
-                    <span>Analysis in seconds</span>
+                    <span>Fast analysis with warm AI</span>
                   </div>
                   <div className="stat">
                     <div className="stat-icon">
@@ -690,9 +847,9 @@ function App() {
                   </div>
                   <div className="stat">
                     <div className="stat-icon">
-                      <Sparkles size={14} />
+                      <Activity size={14} />
                     </div>
-                    <span>Enhanced extraction</span>
+                    <span>Always Active backend</span>
                   </div>
                 </div>
               </div>
@@ -733,6 +890,15 @@ function App() {
               <div className="error-message glass">
                 <AlertCircle size={20} />
                 <span>{error}</span>
+                {error.includes('warming up') && (
+                  <button 
+                    className="error-action-button"
+                    onClick={wakeUpBackend}
+                  >
+                    <Activity size={16} />
+                    Wake Backend
+                  </button>
+                )}
               </div>
             )}
 
@@ -752,25 +918,24 @@ function App() {
                   <div className="loading-text">
                     <span className="loading-message">{loadingMessage}</span>
                     <span className="loading-subtext">
-                      {progress < 30 ? 'Initializing...' : 
-                       progress < 60 ? 'Processing document...' : 
-                       progress < 85 ? 'Analyzing content...' : 
-                       'Finalizing results...'}
+                      {aiStatus === 'available' ? 'Using warmed OpenAI AI...' : 
+                       aiStatus === 'warming' ? 'OpenAI is warming up...' : 
+                       'Using enhanced analysis...'}
                     </span>
                   </div>
                   
                   <div className="progress-stats">
                     <span>{Math.round(progress)}%</span>
                     <span>•</span>
-                    <span>Estimated time: {progress > 80 ? '10s' : progress > 50 ? '30s' : '45s'}</span>
+                    <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
+                    <span>•</span>
+                    <span>OpenAI: {aiStatus === 'available' ? 'Ready' : 'Warming...'}</span>
                   </div>
                   
-                  {aiStatus === 'unavailable' && (
-                    <div className="loading-note info">
-                      <Info size={14} />
-                      <span>Using enhanced analysis (extracts info from your resume)</span>
-                    </div>
-                  )}
+                  <div className="loading-note info">
+                    <Info size={14} />
+                    <span>Always Active mode keeps OpenAI warm for faster responses</span>
+                  </div>
                 </div>
               </div>
             )}
@@ -778,12 +943,17 @@ function App() {
             <button
               className="analyze-button"
               onClick={handleAnalyze}
-              disabled={loading || !resumeFile || !jobDescription.trim()}
+              disabled={loading || !resumeFile || !jobDescription.trim() || backendStatus === 'sleeping'}
             >
               {loading ? (
                 <div className="button-loading-content">
                   <Loader className="spinner" />
                   <span>Analyzing...</span>
+                </div>
+              ) : backendStatus === 'sleeping' ? (
+                <div className="button-waking-content">
+                  <Activity className="spinner" />
+                  <span>Waking Backend...</span>
                 </div>
               ) : (
                 <>
@@ -792,7 +962,9 @@ function App() {
                     <div className="button-text">
                       <span>Analyze Resume</span>
                       <span className="button-subtext">
-                        {aiStatus === 'available' ? 'OpenAI AI-powered insights' : 'Enhanced analysis'}
+                        {aiStatus === 'available' ? 'OpenAI Ready (Always Active)' : 
+                         aiStatus === 'warming' ? 'OpenAI Warming Up...' : 
+                         'Enhanced Analysis'}
                       </span>
                     </div>
                   </div>
@@ -805,15 +977,15 @@ function App() {
             <div className="tips-section">
               <div className="tip">
                 <Sparkles size={16} />
-                <span>Make sure your name is clearly visible at the top of your resume</span>
+                <span>Always Active mode keeps OpenAI warm for instant responses</span>
               </div>
               <div className="tip">
-                <Shield size={16} />
-                <span>Your resume is processed securely and not stored permanently</span>
+                <Thermometer size={16} />
+                <span>OpenAI automatically warms up when idle for 2 minutes</span>
               </div>
               <div className="tip">
-                <Info size={16} />
-                <span>Even without OpenAI, we extract information directly from your resume content</span>
+                <Activity size={16} />
+                <span>Backend stays awake with automatic pings every 3 minutes</span>
               </div>
             </div>
           </div>
@@ -839,7 +1011,7 @@ function App() {
                     </span>
                     <span className="ai-badge">
                       <Brain size={12} />
-                      OpenAI-Powered Analysis
+                      {analysis.openai_status === 'Warmed up' ? 'OpenAI-Powered (Always Active)' : 'Enhanced Analysis'}
                     </span>
                   </div>
                 </div>
@@ -870,6 +1042,12 @@ function App() {
                   <p className="score-description">
                     Based on skill matching, experience relevance, and qualifications
                   </p>
+                  <div className="score-meta">
+                    <span className="meta-item">
+                      <Activity size={12} />
+                      Response: {analysis.response_time || 'Fast'}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -884,7 +1062,7 @@ function App() {
                 <div>
                   <h3>Analysis Recommendation</h3>
                   <p className="recommendation-subtitle">
-                    OpenAI-Powered Analysis
+                    {analysis.openai_status === 'Warmed up' ? 'OpenAI-Powered Analysis (Always Active)' : 'Enhanced Analysis'}
                   </p>
                 </div>
               </div>
@@ -892,7 +1070,7 @@ function App() {
                 <p className="recommendation-text">{analysis.recommendation}</p>
                 <div className="confidence-badge">
                   <Brain size={16} />
-                  <span>OpenAI AI-Powered Analysis</span>
+                  <span>{analysis.openai_status === 'Warmed up' ? 'Always Active AI' : 'Enhanced Analysis'}</span>
                 </div>
               </div>
             </div>
@@ -1109,49 +1287,49 @@ function App() {
               <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Transform your job application process with intelligent insights
+              Always Active mode keeps OpenAI warm for instant responses
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
               <h4>Features</h4>
-              <a href="#">OpenAI Analysis</a>
+              <a href="#">Always Active AI</a>
+              <a href="#">OpenAI Warm-up</a>
               <a href="#">Skill Matching</a>
               <a href="#">PDF Reports</a>
-              <a href="#">Real-time Insights</a>
             </div>
             <div className="footer-section">
-              <h4>Resources</h4>
-              <a href="#">Documentation</a>
-              <a href="#">API Access</a>
-              <a href="#">Help Center</a>
-              <a href="#">Privacy Policy</a>
+              <h4>Service</h4>
+              <a href="#">Auto Warm-up</a>
+              <a href="#">Keep-alive</a>
+              <a href="#">Health Checks</a>
+              <a href="#">Status Monitor</a>
             </div>
             <div className="footer-section">
               <h4>Contact</h4>
               <a href="#">Support</a>
               <a href="#">Feedback</a>
               <a href="#">Partnerships</a>
-              <a href="#">Twitter</a>
+              <a href="#">Documentation</a>
             </div>
           </div>
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + OpenAI. All rights reserved.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + OpenAI. Always Active Mode.</p>
           <div className="footer-stats">
             <span className="stat">
+              <Activity size={12} />
+              Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
+            </span>
+            <span className="stat">
+              <Thermometer size={12} />
+              OpenAI: {aiStatus === 'available' ? 'Warmed' : 'Warming'}
+            </span>
+            <span className="stat">
               <Zap size={12} />
-              Service: {aiStatus === 'available' ? 'OpenAI Ready' : 'Enhanced Mode'}
-            </span>
-            <span className="stat">
-              <Shield size={12} />
-              100% Secure
-            </span>
-            <span className="stat">
-              <Sparkles size={12} />
-              Enhanced Fallback: ✅ Active
+              Always Active: ✅ Enabled
             </span>
           </div>
         </div>
