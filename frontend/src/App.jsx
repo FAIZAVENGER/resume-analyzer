@@ -9,28 +9,35 @@ import {
   RefreshCw, Check, X, ExternalLink, BarChart,
   Battery, Crown, Users, Coffee, ShieldCheck,
   Lock, DownloadCloud, Edit3, FileDown, Info,
-  Wifi, WifiOff, Activity, Thermometer
+  Wifi, WifiOff, Activity, Thermometer, ListOrdered,
+  BarChart4, Filter
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
 
 function App() {
   const [resumeFile, setResumeFile] = useState(null);
+  const [resumeFiles, setResumeFiles] = useState([]);
   const [jobDescription, setJobDescription] = useState('');
   const [loading, setLoading] = useState(false);
+  const [batchLoading, setBatchLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
+  const [batchAnalysis, setBatchAnalysis] = useState(null);
   const [error, setError] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [batchProgress, setBatchProgress] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [aiStatus, setAiStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState('checking');
-  const [openaiWarmup, setOpenaiWarmup] = useState(false);
+  const [openrouterWarmup, setOpenrouterWarmup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
   const [quotaInfo, setQuotaInfo] = useState(null);
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
+  const [batchMode, setBatchMode] = useState(false);
+  const [modelInfo, setModelInfo] = useState(null);
   const [serviceStatus, setServiceStatus] = useState({
     enhancedFallback: true,
     validKeys: 0,
@@ -83,12 +90,13 @@ function App() {
           totalKeys: healthResponse.data.api_key_configured ? 1 : 0
         });
         
-        setOpenaiWarmup(healthResponse.data.openai_warmup_complete || false);
+        setOpenrouterWarmup(healthResponse.data.openrouter_warmup_complete || false);
+        setModelInfo(healthResponse.data.model);
         setBackendStatus('ready');
       }
       
-      // Force OpenAI warm-up
-      await forceOpenAIWarmup();
+      // Force OpenRouter warm-up
+      await forceOpenRouterWarmup();
       
       // Set up periodic checks
       setupPeriodicChecks();
@@ -140,10 +148,10 @@ function App() {
     }
   };
 
-  const forceOpenAIWarmup = async () => {
+  const forceOpenRouterWarmup = async () => {
     try {
       setAiStatus('warming');
-      setLoadingMessage('Warming up OpenAI...');
+      setLoadingMessage('Warming up OpenRouter...');
       
       const response = await axios.get(`${API_BASE_URL}/warmup`, {
         timeout: 15000
@@ -151,28 +159,28 @@ function App() {
       
       if (response.data.warmup_complete) {
         setAiStatus('available');
-        setOpenaiWarmup(true);
-        console.log('✅ OpenAI warmed up successfully');
+        setOpenrouterWarmup(true);
+        console.log('✅ OpenRouter warmed up successfully');
       } else {
         setAiStatus('warming');
-        console.log('⚠️ OpenAI still warming up');
+        console.log('⚠️ OpenRouter still warming up');
         
         // Check status again in 5 seconds
-        setTimeout(() => checkOpenAIStatus(), 5000);
+        setTimeout(() => checkOpenRouterStatus(), 5000);
       }
       
       setLoadingMessage('');
       
     } catch (error) {
-      console.log('⚠️ OpenAI warm-up failed:', error.message);
+      console.log('⚠️ OpenRouter warm-up failed:', error.message);
       setAiStatus('unavailable');
       
       // Check status in background
-      setTimeout(() => checkOpenAIStatus(), 3000);
+      setTimeout(() => checkOpenRouterStatus(), 3000);
     }
   };
 
-  const checkOpenAIStatus = async () => {
+  const checkOpenRouterStatus = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/quick-check`, {
         timeout: 10000
@@ -180,17 +188,20 @@ function App() {
       
       if (response.data.available) {
         setAiStatus('available');
-        setOpenaiWarmup(true);
+        setOpenrouterWarmup(true);
+        if (response.data.model) {
+          setModelInfo(response.data.model);
+        }
       } else if (response.data.warmup_complete) {
         setAiStatus('available');
-        setOpenaiWarmup(true);
+        setOpenrouterWarmup(true);
       } else {
         setAiStatus('warming');
-        setOpenaiWarmup(false);
+        setOpenrouterWarmup(false);
       }
       
     } catch (error) {
-      console.log('OpenAI status check failed:', error.message);
+      console.log('OpenRouter status check failed:', error.message);
       setAiStatus('unavailable');
     }
   };
@@ -202,10 +213,13 @@ function App() {
       });
       
       setBackendStatus('ready');
-      setOpenaiWarmup(response.data.openai_warmup_complete || false);
+      setOpenrouterWarmup(response.data.openrouter_warmup_complete || false);
+      if (response.data.model) {
+        setModelInfo(response.data.model);
+      }
       
       // Update AI status based on warmup
-      if (response.data.openai_warmup_complete) {
+      if (response.data.openrouter_warmup_complete) {
         setAiStatus('available');
       } else {
         setAiStatus('warming');
@@ -230,10 +244,10 @@ function App() {
       checkBackendHealth();
     }, 60 * 1000);
     
-    // Check OpenAI status every 30 seconds when warming
+    // Check OpenRouter status every 30 seconds when warming
     const statusCheckInterval = setInterval(() => {
       if (aiStatus === 'warming' || aiStatus === 'checking') {
-        checkOpenAIStatus();
+        checkOpenRouterStatus();
       }
     }, 30000);
     
@@ -260,8 +274,12 @@ function App() {
       const file = e.dataTransfer.files[0];
       if (file.type.match(/pdf|msword|wordprocessingml|text/) || 
           file.name.match(/\.(pdf|doc|docx|txt)$/i)) {
-        setResumeFile(file);
-        setError('');
+        if (batchMode) {
+          handleBatchFileChange({ target: { files: [file] } });
+        } else {
+          setResumeFile(file);
+          setError('');
+        }
       } else {
         setError('Please upload a valid file type (PDF, DOC, DOCX, TXT)');
       }
@@ -278,6 +296,54 @@ function App() {
       setResumeFile(file);
       setError('');
     }
+  };
+
+  const handleBatchFileChange = (e) => {
+    const files = Array.from(e.target.files);
+    
+    // Check each file
+    const validFiles = [];
+    const errors = [];
+    
+    files.forEach(file => {
+      if (file.size > 10 * 1024 * 1024) {
+        errors.push(`${file.name}: File size too large (max 10MB)`);
+      } else if (!file.name.match(/\.(pdf|doc|docx|txt)$/i)) {
+        errors.push(`${file.name}: Invalid file type (PDF, DOC, DOCX, TXT only)`);
+      } else {
+        validFiles.push(file);
+      }
+    });
+    
+    if (errors.length > 0) {
+      setError(errors.join('. '));
+    }
+    
+    if (validFiles.length > 0) {
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 20)); // Max 20 files
+      setError('');
+    }
+  };
+
+  const handleBatchDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files);
+      handleBatchFileChange({ target: { files } });
+    }
+  };
+
+  const removeResumeFile = (index) => {
+    setResumeFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const clearBatchFiles = () => {
+    setResumeFiles([]);
+    setBatchAnalysis(null);
+    setError('');
   };
 
   const handleAnalyze = async () => {
@@ -300,6 +366,7 @@ function App() {
     setLoading(true);
     setError('');
     setAnalysis(null);
+    setBatchAnalysis(null);
     setProgress(0);
     setLoadingMessage('Starting analysis...');
 
@@ -319,8 +386,8 @@ function App() {
       }, 500);
 
       // Update loading message based on service status
-      if (aiStatus === 'available' && openaiWarmup) {
-        setLoadingMessage('OpenAI AI analysis (Always Active)...');
+      if (aiStatus === 'available' && openrouterWarmup) {
+        setLoadingMessage('OpenRouter AI analysis (Always Active)...');
       } else {
         setLoadingMessage('Enhanced analysis (Warming up AI)...');
       }
@@ -372,7 +439,7 @@ function App() {
       } else if (err.response?.status === 429) {
         setError('Rate limit reached. Enhanced analysis is still available.');
       } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
-        setError('OpenAI service quota/rate limit exceeded. Enhanced analysis will extract information from your resume.');
+        setError('OpenRouter service quota/rate limit exceeded. Enhanced analysis will extract information from your resume.');
         setAiStatus('unavailable');
       } else {
         setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
@@ -385,11 +452,112 @@ function App() {
     }
   };
 
+  const handleBatchAnalyze = async () => {
+    if (resumeFiles.length === 0) {
+      setError('Please upload at least one resume file');
+      return;
+    }
+    if (!jobDescription.trim()) {
+      setError('Please enter a job description');
+      return;
+    }
+
+    if (backendStatus !== 'ready') {
+      setError('Backend is warming up. Please wait a moment...');
+      await wakeUpBackend();
+      return;
+    }
+
+    setBatchLoading(true);
+    setError('');
+    setAnalysis(null);
+    setBatchAnalysis(null);
+    setBatchProgress(0);
+    setLoadingMessage(`Starting batch analysis of ${resumeFiles.length} resumes...`);
+
+    const formData = new FormData();
+    formData.append('jobDescription', jobDescription);
+    
+    // Add all resume files
+    resumeFiles.forEach((file, index) => {
+      formData.append('resumes', file);
+    });
+
+    let progressInterval;
+
+    try {
+      // Start progress simulation
+      progressInterval = setInterval(() => {
+        setBatchProgress(prev => {
+          if (prev >= 85) return 85;
+          return prev + Math.random() * 2;
+        });
+      }, 500);
+
+      setLoadingMessage('Uploading files...');
+      setBatchProgress(10);
+
+      const response = await axios.post(`${API_BASE_URL}/analyze-batch`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: 180000, // 3 minutes for batch processing
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setBatchProgress(10 + percentCompleted * 0.3);
+            setLoadingMessage(`Uploading ${resumeFiles.length} files...`);
+          }
+        }
+      });
+
+      clearInterval(progressInterval);
+      setBatchProgress(95);
+      setLoadingMessage('Batch analysis complete!');
+
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setBatchAnalysis(response.data);
+      setBatchProgress(100);
+
+      setTimeout(() => {
+        setBatchProgress(0);
+        setLoadingMessage('');
+      }, 1000);
+
+    } catch (err) {
+      if (progressInterval) clearInterval(progressInterval);
+      
+      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        setError('Batch analysis timeout. The backend might be waking up. Please try again.');
+        setBackendStatus('sleeping');
+        wakeUpBackend();
+      } else if (err.response?.status === 429) {
+        setError('Rate limit reached. Please try again later.');
+      } else {
+        setError(err.response?.data?.error || 'An error occurred during batch analysis.');
+      }
+      
+      setBatchProgress(0);
+      setLoadingMessage('');
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
   const handleDownload = () => {
     if (analysis?.excel_filename) {
       window.open(`${API_BASE_URL}/download/${analysis.excel_filename}`, '_blank');
     } else {
       setError('No analysis report available for download.');
+    }
+  };
+
+  const handleBatchDownload = () => {
+    if (batchAnalysis?.batch_excel_filename) {
+      window.open(`${API_BASE_URL}/download/${batchAnalysis.batch_excel_filename}`, '_blank');
+    } else {
+      setError('No batch analysis report available for download.');
     }
   };
 
@@ -439,19 +607,19 @@ function App() {
   const getAiStatusMessage = () => {
     switch(aiStatus) {
       case 'checking': return { 
-        text: 'Checking OpenAI...', 
+        text: 'Checking OpenRouter...', 
         color: '#ffd166', 
         icon: <BatteryCharging size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       case 'warming': return { 
-        text: 'OpenAI Warming', 
+        text: 'OpenRouter Warming', 
         color: '#ff9800', 
         icon: <Thermometer size={16} />,
         bgColor: 'rgba(255, 152, 0, 0.1)'
       };
       case 'available': return { 
-        text: 'OpenAI Ready', 
+        text: 'OpenRouter Ready', 
         color: '#00ff9d', 
         icon: <Check size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
@@ -486,10 +654,10 @@ function App() {
 
   const handleForceWarmup = async () => {
     setIsWarmingUp(true);
-    setLoadingMessage('Forcing OpenAI warm-up...');
+    setLoadingMessage('Forcing OpenRouter warm-up...');
     
     try {
-      await forceOpenAIWarmup();
+      await forceOpenRouterWarmup();
       setLoadingMessage('');
     } catch (error) {
       console.log('Force warm-up failed:', error);
@@ -505,6 +673,21 @@ function App() {
       return `${hours}h ${mins}m`;
     }
     return `${minutes}m`;
+  };
+
+  const getModelDisplayName = (modelId) => {
+    if (!modelId) return 'Unknown Model';
+    const modelMap = {
+      'meta-llama/llama-3.2-3b-instruct:free': 'Llama 3.2 3B (Free)',
+      'mistralai/mistral-7b-instruct:free': 'Mistral 7B (Free)',
+      'google/gemma-2-2b-it:free': 'Gemma 2 2B (Free)',
+      'meta-llama/llama-3.1-8b-instruct:free': 'Llama 3.1 8B (Free)',
+      'openai/gpt-4o-mini': 'GPT-4o Mini',
+      'anthropic/claude-3.5-sonnet': 'Claude 3.5 Sonnet',
+      'google/gemini-pro': 'Gemini Pro',
+      'meta-llama/llama-3.3-70b-instruct:free': 'Llama 3.3 70B (Free)'
+    };
+    return modelMap[modelId] || modelId;
   };
 
   return (
@@ -527,9 +710,9 @@ function App() {
                 <h1>AI Resume Analyzer</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
-                  <span className="openai-badge">OpenAI</span>
+                  <span className="openai-badge">OpenRouter</span>
                   <span className="divider">•</span>
-                  <span className="tagline">Always Active • Intelligent Screening</span>
+                  <span className="tagline">Always Active • Batch Processing</span>
                 </div>
               </div>
             </div>
@@ -589,6 +772,14 @@ function App() {
               <span>{aiStatusInfo.text}</span>
               {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
             </div>
+            
+            {/* Model Info */}
+            {modelInfo && (
+              <div className="feature model-info">
+                <Brain size={16} />
+                <span>{getModelDisplayName(modelInfo)}</span>
+              </div>
+            )}
             
             {/* Enhanced Fallback Indicator */}
             {serviceStatus.enhancedFallback && (
@@ -662,11 +853,17 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">OpenAI Status</div>
+                <div className="summary-label">OpenRouter Status</div>
                 <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
                   {aiStatus === 'available' ? '✅ Ready' : 
                    aiStatus === 'warming' ? '🔥 Warming' : 
                    '⚠️ Enhanced Mode'}
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">AI Model</div>
+                <div className="summary-value">
+                  {getModelDisplayName(modelInfo)}
                 </div>
               </div>
               <div className="summary-item">
@@ -709,7 +906,11 @@ function App() {
             <div className="status-info">
               <div className="info-item">
                 <span className="info-label">Service Mode:</span>
-                <span className="info-value">Always Active (Keeps OpenAI warm)</span>
+                <span className="info-value">Always Active (Keeps OpenRouter warm)</span>
+              </div>
+              <div className="info-item">
+                <span className="info-label">AI Provider:</span>
+                <span className="info-value">OpenRouter (Multiple Models)</span>
               </div>
               <div className="info-item">
                 <span className="info-label">Auto Warm-up:</span>
@@ -733,8 +934,14 @@ function App() {
               </div>
               <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
                 <div className="indicator-dot"></div>
-                <span>OpenAI: {aiStatus === 'available' ? 'Ready' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
+                <span>OpenRouter: {aiStatus === 'available' ? 'Ready' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
               </div>
+              {modelInfo && (
+                <div className="status-indicator active">
+                  <div className="indicator-dot" style={{ background: '#6366f1' }}></div>
+                  <span>Model: {getModelDisplayName(modelInfo)}</span>
+                </div>
+              )}
             </div>
             
             {backendStatus !== 'ready' && (
@@ -747,17 +954,17 @@ function App() {
             {aiStatus === 'warming' && (
               <div className="wakeup-message">
                 <Thermometer size={16} />
-                <span>OpenAI is warming up. This ensures fast responses.</span>
+                <span>OpenRouter is warming up. This ensures fast responses.</span>
               </div>
             )}
           </div>
         </div>
 
-        {!analysis ? (
+        {!analysis && !batchAnalysis ? (
           <div className="upload-section">
             <div className="section-header">
               <h2>Start Your Analysis</h2>
-              <p>Upload your resume and job description to get detailed insights</p>
+              <p>Upload resume(s) and job description to get detailed insights</p>
               <div className="service-status">
                 <span className="status-badge backend">
                   {backendStatusInfo.icon} {backendStatusInfo.text}
@@ -768,82 +975,217 @@ function App() {
                 <span className="status-badge always-active">
                   <Activity size={14} /> Always Active
                 </span>
+                {modelInfo && (
+                  <span className="status-badge model">
+                    <Brain size={14} /> {getModelDisplayName(modelInfo)}
+                  </span>
+                )}
+              </div>
+              
+              {/* Batch Mode Toggle */}
+              <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+                <button
+                  className={`mode-toggle ${!batchMode ? 'active' : ''}`}
+                  onClick={() => {
+                    setBatchMode(false);
+                    setResumeFiles([]);
+                  }}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    background: !batchMode ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '12px',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}
+                >
+                  <User size={16} /> Single Resume
+                </button>
+                <button
+                  className={`mode-toggle ${batchMode ? 'active' : ''}`}
+                  onClick={() => {
+                    setBatchMode(true);
+                    setResumeFile(null);
+                  }}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    background: batchMode ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '12px',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}
+                >
+                  <Users size={16} /> Multiple Resumes (Batch)
+                </button>
               </div>
             </div>
             
             <div className="upload-grid">
+              {/* Left Column - File Upload */}
               <div className="upload-card glass">
                 <div className="card-decoration"></div>
                 <div className="card-header">
                   <div className="header-icon-wrapper">
-                    <FileText className="header-icon" />
+                    {batchMode ? <Users className="header-icon" /> : <FileText className="header-icon" />}
                   </div>
                   <div>
-                    <h2>Upload Resume</h2>
-                    <p className="card-subtitle">Supported: PDF, DOC, DOCX, TXT (Max 10MB)</p>
+                    <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
+                    <p className="card-subtitle">
+                      {batchMode 
+                        ? 'Upload multiple resumes (Max 20, 10MB each)' 
+                        : 'Supported: PDF, DOC, DOCX, TXT (Max 10MB)'}
+                    </p>
                   </div>
                 </div>
                 
-                <div 
-                  className={`upload-area ${dragActive ? 'drag-active' : ''} ${resumeFile ? 'has-file' : ''}`}
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                >
-                  <input
-                    type="file"
-                    id="resume-upload"
-                    accept=".pdf,.doc,.docx,.txt"
-                    onChange={handleFileChange}
-                    className="file-input"
-                  />
-                  <label htmlFor="resume-upload" className="file-label">
-                    <div className="upload-icon-wrapper">
-                      {resumeFile ? (
-                        <div className="file-preview">
-                          <FileText size={40} />
-                          <div className="file-preview-info">
-                            <span className="file-name">{resumeFile.name}</span>
-                            <span className="file-size">
-                              {(resumeFile.size / 1024 / 1024).toFixed(2)} MB
-                            </span>
+                {!batchMode ? (
+                  // Single file upload
+                  <div 
+                    className={`upload-area ${dragActive ? 'drag-active' : ''} ${resumeFile ? 'has-file' : ''}`}
+                    onDragEnter={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDragOver={handleDrag}
+                    onDrop={handleDrop}
+                  >
+                    <input
+                      type="file"
+                      id="resume-upload"
+                      accept=".pdf,.doc,.docx,.txt"
+                      onChange={handleFileChange}
+                      className="file-input"
+                    />
+                    <label htmlFor="resume-upload" className="file-label">
+                      <div className="upload-icon-wrapper">
+                        {resumeFile ? (
+                          <div className="file-preview">
+                            <FileText size={40} />
+                            <div className="file-preview-info">
+                              <span className="file-name">{resumeFile.name}</span>
+                              <span className="file-size">
+                                {(resumeFile.size / 1024 / 1024).toFixed(2)} MB
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <>
-                          <Upload className="upload-icon" />
-                          <span className="upload-text">
-                            Drag & drop or click to browse
-                          </span>
-                          <span className="upload-hint">Max file size: 10MB</span>
-                        </>
-                      )}
-                    </div>
-                  </label>
-                  
-                  {resumeFile && (
-                    <button 
-                      className="change-file-btn"
-                      onClick={() => setResumeFile(null)}
-                    >
-                      Change File
-                    </button>
-                  )}
-                </div>
+                        ) : (
+                          <>
+                            <Upload className="upload-icon" />
+                            <span className="upload-text">
+                              Drag & drop or click to browse
+                            </span>
+                            <span className="upload-hint">Max file size: 10MB</span>
+                          </>
+                        )}
+                      </div>
+                    </label>
+                    
+                    {resumeFile && (
+                      <button 
+                        className="change-file-btn"
+                        onClick={() => setResumeFile(null)}
+                      >
+                        Change File
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  // Batch file upload
+                  <div 
+                    className={`upload-area ${dragActive ? 'drag-active' : ''} ${resumeFiles.length > 0 ? 'has-file' : ''}`}
+                    onDragEnter={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDragOver={handleDrag}
+                    onDrop={handleBatchDrop}
+                  >
+                    <input
+                      type="file"
+                      id="batch-resume-upload"
+                      accept=".pdf,.doc,.docx,.txt"
+                      onChange={handleBatchFileChange}
+                      className="file-input"
+                      multiple
+                    />
+                    <label htmlFor="batch-resume-upload" className="file-label">
+                      <div className="upload-icon-wrapper">
+                        {resumeFiles.length > 0 ? (
+                          <div style={{ width: '100%' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                              <Users size={40} />
+                              <div style={{ textAlign: 'left' }}>
+                                <span className="file-name">{resumeFiles.length} resume(s) selected</span>
+                                <span className="file-size">
+                                  Total: {(resumeFiles.reduce((acc, file) => acc + file.size, 0) / 1024 / 1024).toFixed(2)} MB
+                                </span>
+                              </div>
+                            </div>
+                            
+                            <div className="batch-file-list">
+                              {resumeFiles.map((file, index) => (
+                                <div key={index} className="batch-file-item">
+                                  <div className="batch-file-info">
+                                    <FileText size={14} />
+                                    <span className="batch-file-name">{file.name}</span>
+                                    <span className="batch-file-size">
+                                      {(file.size / 1024).toFixed(1)}KB
+                                    </span>
+                                  </div>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removeResumeFile(index);
+                                    }}
+                                    className="remove-file-btn"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <Upload className="upload-icon" />
+                            <span className="upload-text">
+                              Drag & drop multiple files or click to browse
+                            </span>
+                            <span className="upload-hint">Max 20 files, 10MB each</span>
+                          </>
+                        )}
+                      </div>
+                    </label>
+                    
+                    {resumeFiles.length > 0 && (
+                      <button 
+                        className="change-file-btn"
+                        onClick={clearBatchFiles}
+                        style={{ background: '#ff6b6b' }}
+                      >
+                        Clear All Files
+                      </button>
+                    )}
+                  </div>
+                )}
                 
                 <div className="upload-stats">
                   <div className="stat">
                     <div className="stat-icon">
                       <Clock size={14} />
                     </div>
-                    <span>Fast analysis with warm AI</span>
+                    <span>{batchMode ? 'Batch analysis' : 'Fast analysis'} with warm AI</span>
                   </div>
                   <div className="stat">
                     <div className="stat-icon">
-                      <Shield size={14} />
+                      <Brain size={14} />
                     </div>
-                    <span>Private & secure</span>
+                    <span>OpenRouter AI</span>
                   </div>
                   <div className="stat">
                     <div className="stat-icon">
@@ -854,6 +1196,7 @@ function App() {
                 </div>
               </div>
 
+              {/* Right Column - Job Description */}
               <div className="job-description-card glass">
                 <div className="card-decoration"></div>
                 <div className="card-header">
@@ -903,38 +1246,44 @@ function App() {
             )}
 
             {/* Loading Progress Bar */}
-            {loading && (
+            {(loading || batchLoading) && (
               <div className="loading-section glass">
                 <div className="loading-container">
                   <div className="loading-header">
                     <Loader className="spinner" />
-                    <h3>Analysis in Progress</h3>
+                    <h3>{batchMode ? 'Batch Analysis in Progress' : 'Analysis in Progress'}</h3>
                   </div>
                   
                   <div className="progress-container">
-                    <div className="progress-bar" style={{ width: `${progress}%` }}></div>
+                    <div className="progress-bar" style={{ width: `${batchMode ? batchProgress : progress}%` }}></div>
                   </div>
                   
                   <div className="loading-text">
                     <span className="loading-message">{loadingMessage}</span>
                     <span className="loading-subtext">
-                      {aiStatus === 'available' ? 'Using warmed OpenAI AI...' : 
-                       aiStatus === 'warming' ? 'OpenAI is warming up...' : 
-                       'Using enhanced analysis...'}
+                      {batchMode 
+                        ? `Processing ${resumeFiles.length} resume(s) with ${getModelDisplayName(modelInfo)}...` 
+                        : `Using ${getModelDisplayName(modelInfo)}...`}
                     </span>
                   </div>
                   
                   <div className="progress-stats">
-                    <span>{Math.round(progress)}%</span>
+                    <span>{Math.round(batchMode ? batchProgress : progress)}%</span>
                     <span>•</span>
                     <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
                     <span>•</span>
-                    <span>OpenAI: {aiStatus === 'available' ? 'Ready' : 'Warming...'}</span>
+                    <span>OpenRouter: {aiStatus === 'available' ? 'Ready' : 'Warming...'}</span>
+                    {modelInfo && (
+                      <>
+                        <span>•</span>
+                        <span>Model: {getModelDisplayName(modelInfo)}</span>
+                      </>
+                    )}
                   </div>
                   
                   <div className="loading-note info">
                     <Info size={14} />
-                    <span>Always Active mode keeps OpenAI warm for faster responses</span>
+                    <span>Always Active mode keeps OpenRouter warm for faster responses</span>
                   </div>
                 </div>
               </div>
@@ -942,13 +1291,16 @@ function App() {
 
             <button
               className="analyze-button"
-              onClick={handleAnalyze}
-              disabled={loading || !resumeFile || !jobDescription.trim() || backendStatus === 'sleeping'}
+              onClick={batchMode ? handleBatchAnalyze : handleAnalyze}
+              disabled={loading || batchLoading || 
+                       (batchMode ? resumeFiles.length === 0 : !resumeFile) || 
+                       !jobDescription.trim() || 
+                       backendStatus === 'sleeping'}
             >
-              {loading ? (
+              {(loading || batchLoading) ? (
                 <div className="button-loading-content">
                   <Loader className="spinner" />
-                  <span>Analyzing...</span>
+                  <span>{batchMode ? 'Analyzing Batch...' : 'Analyzing...'}</span>
                 </div>
               ) : backendStatus === 'sleeping' ? (
                 <div className="button-waking-content">
@@ -960,11 +1312,11 @@ function App() {
                   <div className="button-content">
                     <Zap size={20} />
                     <div className="button-text">
-                      <span>Analyze Resume</span>
+                      <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                       <span className="button-subtext">
-                        {aiStatus === 'available' ? 'OpenAI Ready (Always Active)' : 
-                         aiStatus === 'warming' ? 'OpenAI Warming Up...' : 
-                         'Enhanced Analysis'}
+                        {batchMode 
+                          ? `${resumeFiles.length} resume(s) • ${getModelDisplayName(modelInfo)}` 
+                          : `${getModelDisplayName(modelInfo)} • Always Active`}
                       </span>
                     </div>
                   </div>
@@ -975,21 +1327,293 @@ function App() {
 
             {/* Tips Section */}
             <div className="tips-section">
-              <div className="tip">
-                <Sparkles size={16} />
-                <span>Always Active mode keeps OpenAI warm for instant responses</span>
+              {batchMode ? (
+                <>
+                  <div className="tip">
+                    <Sparkles size={16} />
+                    <span>Upload up to 20 resumes for batch processing</span>
+                  </div>
+                  <div className="tip">
+                    <TrendingUp size={16} />
+                    <span>Candidates will be ranked by ATS score from highest to lowest</span>
+                  </div>
+                  <div className="tip">
+                    <Download size={16} />
+                    <span>Download comprehensive Excel report with all candidate data</span>
+                  </div>
+                  <div className="tip">
+                    <Brain size={16} />
+                    <span>Using: {getModelDisplayName(modelInfo)}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="tip">
+                    <Sparkles size={16} />
+                    <span>Always Active mode keeps OpenRouter warm for instant responses</span>
+                  </div>
+                  <div className="tip">
+                    <Thermometer size={16} />
+                    <span>OpenRouter automatically warms up when idle for 2 minutes</span>
+                  </div>
+                  <div className="tip">
+                    <Activity size={16} />
+                    <span>Backend stays awake with automatic pings every 3 minutes</span>
+                  </div>
+                  <div className="tip">
+                    <Brain size={16} />
+                    <span>Using: {getModelDisplayName(modelInfo)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        ) : batchAnalysis ? (
+          // BATCH RESULTS DISPLAY
+          <div className="results-section">
+            <div className="analysis-header" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                <h2 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>
+                  📊 Batch Analysis Results
+                </h2>
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <button
+                    className="download-button"
+                    style={{ minWidth: 'auto', padding: '0.75rem 1.5rem' }}
+                    onClick={handleBatchDownload}
+                  >
+                    <DownloadCloud size={18} />
+                    Download Full Report
+                  </button>
+                  <button
+                    className="reset-button"
+                    style={{ minWidth: 'auto', padding: '0.75rem 1.5rem' }}
+                    onClick={() => {
+                      setBatchAnalysis(null);
+                      setResumeFiles([]);
+                      setBatchMode(true);
+                      setError('');
+                    }}
+                  >
+                    <RefreshCw size={18} />
+                    New Batch
+                  </button>
+                </div>
               </div>
-              <div className="tip">
-                <Thermometer size={16} />
-                <span>OpenAI automatically warms up when idle for 2 minutes</span>
+              
+              <div className="batch-stats">
+                <div className="stat-badge stat-success">
+                  <Check size={16} />
+                  <span>{batchAnalysis.successfully_analyzed} Successful</span>
+                </div>
+                {batchAnalysis.failed_files > 0 && (
+                  <div className="stat-badge stat-error">
+                    <X size={16} />
+                    <span>{batchAnalysis.failed_files} Failed</span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)' }}>
+                  <Users size={16} />
+                  <span>Processed {batchAnalysis.total_files} resumes</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)' }}>
+                  <Brain size={16} />
+                  <span>{getModelDisplayName(batchAnalysis.model_used)}</span>
+                </div>
               </div>
-              <div className="tip">
-                <Activity size={16} />
-                <span>Backend stays awake with automatic pings every 3 minutes</span>
+              
+              {batchAnalysis.errors.length > 0 && (
+                <div style={{ 
+                  marginTop: '1rem',
+                  background: 'rgba(255, 107, 107, 0.1)',
+                  padding: '1rem',
+                  borderRadius: '12px',
+                  border: '1px solid rgba(255, 107, 107, 0.3)',
+                  width: '100%'
+                }}>
+                  <h4 style={{ color: '#ff6b6b', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <AlertCircle size={16} />
+                    Errors ({batchAnalysis.errors.length})
+                  </h4>
+                  <ul style={{ listStyle: 'none', fontSize: '0.9rem' }}>
+                    {batchAnalysis.errors.map((error, idx) => (
+                      <li key={idx} style={{ marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
+                        • {error.filename}: {error.error}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            {/* Batch Results Grid */}
+            <div className="section-title">
+              <h2>Candidate Rankings</h2>
+              <p>Sorted by ATS Score (Highest to Lowest)</p>
+            </div>
+            
+            <div className="batch-results-grid">
+              {batchAnalysis.analyses.map((candidate, index) => (
+                <div key={index} className="batch-candidate-card glass">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                        <div className="rank-badge">
+                          #{candidate.rank}
+                        </div>
+                        <h3 style={{ fontSize: '1.3rem', color: 'var(--text-primary)' }}>
+                          {candidate.candidate_name}
+                        </h3>
+                      </div>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
+                        {candidate.filename} • {candidate.file_size}
+                      </div>
+                    </div>
+                    
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ 
+                        fontSize: '2.5rem', 
+                        fontWeight: 800,
+                        color: getScoreColor(candidate.overall_score),
+                        lineHeight: 1
+                      }}>
+                        {candidate.overall_score}
+                      </div>
+                      <div style={{ 
+                        fontSize: '0.85rem', 
+                        color: 'var(--text-secondary)',
+                        marginTop: '0.25rem'
+                      }}>
+                        ATS Score
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div style={{ margin: '1rem 0' }}>
+                    <div style={{ 
+                      display: 'inline-block',
+                      padding: '0.25rem 0.75rem',
+                      background: getScoreColor(candidate.overall_score) + '20',
+                      color: getScoreColor(candidate.overall_score),
+                      borderRadius: '12px',
+                      fontSize: '0.9rem',
+                      fontWeight: 600,
+                      border: `1px solid ${getScoreColor(candidate.overall_score)}40`
+                    }}>
+                      {candidate.recommendation}
+                    </div>
+                  </div>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
+                    <div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                        ✅ Matched Skills ({candidate.skills_matched?.length || 0})
+                      </div>
+                      <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                        {candidate.skills_matched?.slice(0, 3).map((skill, idx) => (
+                          <div key={idx} style={{ marginBottom: '0.25rem' }}>• {skill}</div>
+                        ))}
+                        {candidate.skills_matched?.length > 3 && (
+                          <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                            +{candidate.skills_matched.length - 3} more
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                        ❌ Missing Skills ({candidate.skills_missing?.length || 0})
+                      </div>
+                      <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                        {candidate.skills_missing?.slice(0, 3).map((skill, idx) => (
+                          <div key={idx} style={{ marginBottom: '0.25rem' }}>• {skill}</div>
+                        ))}
+                        {candidate.skills_missing?.length > 3 && (
+                          <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                            +{candidate.skills_missing.length - 3} more
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div style={{ 
+                    marginTop: '1rem', 
+                    paddingTop: '1rem', 
+                    borderTop: '1px solid var(--border)',
+                    fontSize: '0.85rem',
+                    color: 'var(--text-secondary)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ maxWidth: '70%' }}>Experience: {candidate.experience_summary?.substring(0, 60)}...</span>
+                      <button
+                        onClick={() => {
+                          setAnalysis(candidate);
+                          setBatchAnalysis(null);
+                        }}
+                        style={{
+                          background: 'transparent',
+                          border: '1px solid var(--primary)',
+                          color: 'var(--primary)',
+                          padding: '0.25rem 0.75rem',
+                          borderRadius: '8px',
+                          fontSize: '0.8rem',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        View Details
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Action Section */}
+            <div className="action-section glass">
+              <div className="action-content">
+                <h3>Batch Analysis Complete</h3>
+                <p>Download comprehensive Excel report with all candidate details</p>
+              </div>
+              <div className="action-buttons">
+                <button 
+                  className="download-button" 
+                  onClick={handleBatchDownload}
+                >
+                  <div className="button-glow"></div>
+                  <DownloadCloud size={20} />
+                  <span>Download Excel Report</span>
+                  <span className="button-badge">Detailed</span>
+                </button>
+                <button className="reset-button" onClick={() => {
+                  setBatchAnalysis(null);
+                  setResumeFiles([]);
+                  setBatchMode(true);
+                  setJobDescription('');
+                  setError('');
+                  initializeService();
+                }}>
+                  <RefreshCw size={20} />
+                  <span>New Batch Analysis</span>
+                </button>
+                <button className="share-button" onClick={() => {
+                  setBatchAnalysis(null);
+                  setBatchMode(false);
+                  setResumeFile(null);
+                  setResumeFiles([]);
+                  setJobDescription('');
+                  setError('');
+                }}>
+                  <User size={20} />
+                  <span>Single Resume Mode</span>
+                </button>
               </div>
             </div>
           </div>
         ) : (
+          // SINGLE RESULT DISPLAY
           <div className="results-section">
             {/* Analysis Header */}
             <div className="analysis-header">
@@ -1011,7 +1635,7 @@ function App() {
                     </span>
                     <span className="ai-badge">
                       <Brain size={12} />
-                      {analysis.openai_status === 'Warmed up' ? 'OpenAI-Powered (Always Active)' : 'Enhanced Analysis'}
+                      {analysis.ai_status === 'Warmed up' ? `${getModelDisplayName(analysis.model_used)} (Always Active)` : 'Enhanced Analysis'}
                     </span>
                   </div>
                 </div>
@@ -1047,6 +1671,10 @@ function App() {
                       <Activity size={12} />
                       Response: {analysis.response_time || 'Fast'}
                     </span>
+                    <span className="meta-item">
+                      <Brain size={12} />
+                      Model: {getModelDisplayName(analysis.model_used)}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1062,7 +1690,7 @@ function App() {
                 <div>
                   <h3>Analysis Recommendation</h3>
                   <p className="recommendation-subtitle">
-                    {analysis.openai_status === 'Warmed up' ? 'OpenAI-Powered Analysis (Always Active)' : 'Enhanced Analysis'}
+                    {analysis.ai_status === 'Warmed up' ? `${getModelDisplayName(analysis.model_used)} (Always Active)` : 'Enhanced Analysis'}
                   </p>
                 </div>
               </div>
@@ -1070,7 +1698,7 @@ function App() {
                 <p className="recommendation-text">{analysis.recommendation}</p>
                 <div className="confidence-badge">
                   <Brain size={16} />
-                  <span>{analysis.openai_status === 'Warmed up' ? 'Always Active AI' : 'Enhanced Analysis'}</span>
+                  <span>{analysis.ai_status === 'Warmed up' ? 'OpenRouter AI' : 'Enhanced Analysis'}</span>
                 </div>
               </div>
             </div>
@@ -1270,7 +1898,17 @@ function App() {
                   initializeService();
                 }}>
                   <RefreshCw size={20} />
-                  <span>Analyze Another</span>
+                  <span>New Analysis</span>
+                </button>
+                <button className="share-button" onClick={() => {
+                  setAnalysis(null);
+                  setBatchMode(true);
+                  setResumeFiles([]);
+                  setJobDescription('');
+                  setError('');
+                }}>
+                  <Users size={20} />
+                  <span>Batch Mode</span>
                 </button>
               </div>
             </div>
@@ -1287,7 +1925,7 @@ function App() {
               <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Always Active mode keeps OpenAI warm for instant responses
+              Always Active mode keeps OpenRouter warm for instant responses
             </p>
           </div>
           
@@ -1295,9 +1933,9 @@ function App() {
             <div className="footer-section">
               <h4>Features</h4>
               <a href="#">Always Active AI</a>
-              <a href="#">OpenAI Warm-up</a>
-              <a href="#">Skill Matching</a>
-              <a href="#">PDF Reports</a>
+              <a href="#">OpenRouter Warm-up</a>
+              <a href="#">Batch Processing</a>
+              <a href="#">Excel Reports</a>
             </div>
             <div className="footer-section">
               <h4>Service</h4>
@@ -1317,7 +1955,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + OpenAI. Always Active Mode.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + OpenRouter. Always Active Mode.</p>
           <div className="footer-stats">
             <span className="stat">
               <Activity size={12} />
@@ -1325,11 +1963,11 @@ function App() {
             </span>
             <span className="stat">
               <Thermometer size={12} />
-              OpenAI: {aiStatus === 'available' ? 'Warmed' : 'Warming'}
+              OpenRouter: {aiStatus === 'available' ? 'Warmed' : 'Warming'}
             </span>
             <span className="stat">
-              <Zap size={12} />
-              Always Active: ✅ Enabled
+              <Brain size={12} />
+              Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
             </span>
           </div>
         </div>
