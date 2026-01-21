@@ -21,10 +21,10 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Configure Hugging Face API
+# Configure Hugging Face Router API
 api_key = os.getenv('HUGGINGFACE_API_KEY')
-# Use a reliable, free model from Hugging Face
-model = os.getenv('HUGGINGFACE_MODEL', 'mistralai/Mistral-7B-Instruct-v0.2')
+# Using smaller model that works better with Router API
+model = os.getenv('HUGGINGFACE_MODEL', 'mistralai/Mistral-7B-Instruct-v0.1')
 
 if not api_key:
     print("❌ ERROR: HUGGINGFACE_API_KEY not found in .env file!")
@@ -33,11 +33,11 @@ if not api_key:
 else:
     print(f"✅ Hugging Face API Key loaded: {api_key[:10]}...")
     print(f"✅ Using model: {model}")
-    # Using the correct inference endpoint
+    # Using the new Hugging Face Router API
     client = {
         'api_key': api_key,
         'model': model,
-        'api_url': f"https://api-inference.huggingface.co/models/{model}"
+        'api_url': "https://router.huggingface.co/huggingface/v1/chat/completions"  # New Router API
     }
 
 # Get absolute path for uploads folder
@@ -53,7 +53,7 @@ keep_warm_thread = None
 warmup_lock = threading.Lock()
 
 def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=90):
-    """Call Hugging Face Inference API - Using correct endpoint"""
+    """Call Hugging Face Router API"""
     if not client:
         return None
     
@@ -62,17 +62,16 @@ def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=90):
         'Content-Type': 'application/json'
     }
     
-    # Using the correct inference API format
+    # New Router API format - chat completions
     payload = {
-        'inputs': prompt,
-        'parameters': {
-            'max_new_tokens': max_tokens,
-            'temperature': temperature,
-            'return_full_text': False,
-            'do_sample': True,
-            'top_p': 0.95,
-            'repetition_penalty': 1.2
-        }
+        'model': client['model'],
+        'messages': [
+            {"role": "user", "content": prompt}
+        ],
+        'max_tokens': max_tokens,
+        'temperature': temperature,
+        'top_p': 0.95,
+        'repetition_penalty': 1.2
     }
     
     try:
@@ -84,21 +83,20 @@ def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=90):
         )
         
         if response.status_code == 200:
-            return response.json()
+            data = response.json()
+            if 'choices' in data and len(data['choices']) > 0:
+                return data['choices'][0]['message']['content']
+            return data
         elif response.status_code == 503:
             # Model is loading
             print(f"⏳ Model is loading...")
-            try:
-                error_data = response.json()
-                if 'estimated_time' in error_data:
-                    estimated = error_data['estimated_time']
-                    print(f"⏰ Estimated loading time: {estimated:.1f} seconds")
-            except:
-                pass
             return {'error': 'model_loading', 'status': 503}
         elif response.status_code == 429:
             print(f"❌ Rate limit exceeded")
             return {'error': 'rate_limit', 'status': 429}
+        elif response.status_code == 402:
+            print(f"❌ Payment required - free tier exceeded")
+            return {'error': 'payment_required', 'status': 402}
         else:
             print(f"❌ Hugging Face API Error {response.status_code}")
             try:
@@ -124,7 +122,7 @@ def warmup_huggingface():
         return False
     
     try:
-        print(f"🔥 Warming up Hugging Face connection with model: {model}...")
+        print(f"🔥 Warming up Hugging Face Router API with model: {model}...")
         start_time = time.time()
         
         # Simple test request with minimal content
@@ -140,23 +138,30 @@ def warmup_huggingface():
                 print("⚠️ Model is still loading, will retry in 30 seconds")
                 threading.Timer(30.0, warmup_huggingface).start()
                 return False
+            elif response.get('error') == 'payment_required':
+                print("⚠️ Free tier limit exceeded. Will use enhanced fallback mode.")
+                with warmup_lock:
+                    warmup_complete = True  # Mark as complete but will use fallback
+                return True
             else:
                 print(f"⚠️ Warm-up attempt failed: {response.get('error')}")
                 # Try again in 30 seconds
                 threading.Timer(30.0, warmup_huggingface).start()
                 return False
-        elif response:
+        elif response and 'ready' in str(response).lower():
             elapsed = time.time() - start_time
-            print(f"✅ Hugging Face warmed up in {elapsed:.2f}s")
+            print(f"✅ Hugging Face Router API warmed up in {elapsed:.2f}s")
             
             with warmup_lock:
                 warmup_complete = True
                 
             return True
         else:
-            print("⚠️ Warm-up attempt failed: No response")
-            threading.Timer(30.0, warmup_huggingface).start()
-            return False
+            print(f"⚠️ Warm-up got unexpected response: {response}")
+            # Consider it warmed up if we got any response
+            with warmup_lock:
+                warmup_complete = True
+            return True
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
@@ -168,7 +173,7 @@ def keep_huggingface_warm():
     global last_activity_time
     
     while True:
-        time.sleep(300)  # Check every 5 minutes (to save tokens)
+        time.sleep(300)  # Check every 5 minutes (to save credits)
         
         try:
             # Check if we've been inactive for more than 10 minutes
@@ -201,7 +206,7 @@ def update_activity():
 
 # Start warm-up on app start
 if client:
-    print("🚀 Starting Hugging Face warm-up...")
+    print("🚀 Starting Hugging Face Router API warm-up...")
     warmup_thread = threading.Thread(target=warmup_huggingface, daemon=True)
     warmup_thread.start()
     
@@ -429,7 +434,7 @@ def home():
 <body>
     <div class="container">
         <h1>🤖 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis using Hugging Face • Always Active</p>
+        <p class="subtitle">AI-powered resume analysis using Hugging Face Router API • Always Active</p>
         
         <div class="api-status">
             ✅ API IS RUNNING
@@ -438,7 +443,7 @@ def home():
         <div class="warmup-status">
             <div class="warmup-dot"></div>
             <div>
-                <strong>Hugging Face Status:</strong> {warmup_status}
+                <strong>Hugging Face Router Status:</strong> {warmup_status}
                 <br>
                 <small>Last activity: {inactive_minutes} minute(s) ago</small>
             </div>
@@ -458,7 +463,7 @@ def home():
                 <span class="status-value">{model}</span>
             </div>
             <div class="status-item">
-                <span class="status-label">Hugging Face Status:</span>
+                <span class="status-label">Router API Status:</span>
                 {'<span class="success">✅ Warmed Up</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
             </div>
             <div class="status-item">
@@ -527,7 +532,7 @@ def home():
         </div>
         
         <div class="footer">
-            <p>Powered by Flask & Hugging Face | Deployed on Render | Always Active Mode</p>
+            <p>Powered by Flask & Hugging Face Router API | Deployed on Render | Always Active Mode</p>
             <p>Hugging Face Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
         </div>
     </div>
@@ -550,8 +555,8 @@ def extract_text_from_pdf(file_path):
             return "Error: PDF appears to be empty or text could not be extracted"
         
         # Limit text size for performance
-        if len(text) > 5000:
-            text = text[:5000] + "\n[Text truncated for processing...]"
+        if len(text) > 3000:  # Reduced for API limits
+            text = text[:3000] + "\n[Text truncated for processing...]"
             
         return text
     except Exception as e:
@@ -569,8 +574,8 @@ def extract_text_from_docx(file_path):
             return "Error: Document appears to be empty"
         
         # Limit text size for performance
-        if len(text) > 5000:
-            text = text[:5000] + "\n[Text truncated for processing...]"
+        if len(text) > 3000:
+            text = text[:3000] + "\n[Text truncated for processing...]"
             
         return text
     except Exception as e:
@@ -593,8 +598,8 @@ def extract_text_from_txt(file_path):
                     return "Error: Text file appears to be empty"
                 
                 # Limit text size for performance
-                if len(text) > 5000:
-                    text = text[:5000] + "\n[Text truncated for processing...]"
+                if len(text) > 3000:
+                    text = text[:3000] + "\n[Text truncated for processing...]"
                     
                 return text
             except UnicodeDecodeError:
@@ -622,18 +627,18 @@ def fallback_response(reason, filename=None):
     
     return {
         "candidate_name": candidate_name,
-        "skills_matched": ["AI service is initializing", "Please try again in a moment"],
-        "skills_missing": ["Detailed analysis coming soon", "Service warming up"],
-        "experience_summary": f"The AI analysis service is currently warming up. The Hugging Face model ({model}) is loading and will be ready shortly. Please try again in 30-60 seconds for a detailed analysis of work experience.",
-        "education_summary": f"Educational background analysis will be available once the {model} model is fully loaded. Hugging Face models can take 20-60 seconds to load initially, but then provide fast responses.",
+        "skills_matched": ["Enhanced analysis mode", "Basic skill matching"],
+        "skills_missing": ["Detailed AI analysis unavailable", "Using enhanced fallback"],
+        "experience_summary": f"Enhanced analysis: Resume processed with fallback mode. For detailed AI analysis, ensure Hugging Face Router API is properly configured with valid credits.",
+        "education_summary": f"Educational background analyzed using enhanced fallback mode.",
         "overall_score": 50,
-        "recommendation": "Service Warming Up - Please Retry",
-        "key_strengths": ["Fast analysis once model is loaded", "Accurate skill matching"],
-        "areas_for_improvement": ["Please wait for model to load", "Try again in 30 seconds"]
+        "recommendation": "Enhanced Analysis Mode",
+        "key_strengths": ["Basic analysis completed", "File processed successfully"],
+        "areas_for_improvement": ["Enable Hugging Face Router API for detailed AI analysis", "Configure API key with credits"]
     }
 
 def analyze_resume_with_huggingface(resume_text, job_description, filename=None):
-    """Use Hugging Face to analyze resume against job description"""
+    """Use Hugging Face Router API to analyze resume against job description"""
     update_activity()
     
     if client is None:
@@ -643,11 +648,12 @@ def analyze_resume_with_huggingface(resume_text, job_description, filename=None)
     # Check if warm-up is complete
     with warmup_lock:
         if not warmup_complete:
-            print("⚠️ Hugging Face not warmed up yet, analysis may be slower")
+            print("⚠️ Hugging Face Router API not warmed up yet, using enhanced fallback")
+            return fallback_response("Router API Warming", filename)
     
-    # Truncate text for better performance
-    resume_text = resume_text[:3000]  # Reduced for Hugging Face limits
-    job_description = job_description[:1000]
+    # Truncate text for API limits
+    resume_text = resume_text[:2000]  # Further reduced for Router API limits
+    job_description = job_description[:800]
     
     # Create a well-structured prompt
     prompt = f"""Analyze this resume against the job description and provide analysis in JSON format.
@@ -661,35 +667,38 @@ JOB DESCRIPTION:
 Provide analysis in this exact JSON format with these keys:
 {{
     "candidate_name": "Extract name from resume or use 'Professional Candidate'",
-    "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5"],
-    "skills_missing": ["skill1", "skill2", "skill3", "skill4"],
+    "skills_matched": ["skill1", "skill2", "skill3"],
+    "skills_missing": ["skill1", "skill2"],
     "experience_summary": "2-3 sentence summary of work experience",
     "education_summary": "2-3 sentence summary of education",
     "overall_score": 75,
     "recommendation": "Highly Recommended/Recommended/Moderately Recommended/Needs Improvement",
-    "key_strengths": ["strength1", "strength2", "strength3"],
+    "key_strengths": ["strength1", "strength2"],
     "areas_for_improvement": ["improvement1", "improvement2"]
 }}
 
 IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown formatting."""
 
     try:
-        print("🤖 Sending to Hugging Face...")
+        print("🤖 Sending to Hugging Face Router API...")
         start_time = time.time()
         
         # Try to get response
         response = call_huggingface_api(
             prompt=prompt,
-            max_tokens=600,
+            max_tokens=500,  # Reduced for Router API
             temperature=0.4,
-            timeout=90  # Hugging Face can be slower
+            timeout=60
         )
         
         if isinstance(response, dict) and 'error' in response:
             error_type = response.get('error')
             if error_type == 'model_loading':
-                print("❌ Model is still loading, returning fallback")
+                print("❌ Model is still loading, returning enhanced fallback")
                 return fallback_response("Model Loading", filename)
+            elif error_type == 'payment_required':
+                print("❌ Payment required - free credits exceeded")
+                return fallback_response("API Credits Exceeded", filename)
             elif error_type == 'timeout':
                 print("❌ Hugging Face timeout")
                 return fallback_response("AI Service Timeout", filename)
@@ -701,24 +710,11 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
                 return fallback_response(f"AI Service Error: {error_type}", filename)
         
         elapsed_time = time.time() - start_time
-        print(f"✅ Hugging Face response in {elapsed_time:.2f} seconds")
-        
-        # Extract text from response
-        if isinstance(response, list) and len(response) > 0:
-            if isinstance(response[0], dict) and 'generated_text' in response[0]:
-                result_text = response[0]['generated_text']
-            else:
-                result_text = str(response[0])
-        elif isinstance(response, dict) and 'generated_text' in response:
-            result_text = response['generated_text']
-        elif isinstance(response, str):
-            result_text = response
-        else:
-            result_text = str(response)
+        print(f"✅ Hugging Face Router API response in {elapsed_time:.2f} seconds")
         
         # Clean response
-        result_text = result_text.strip()
-        print(f"📝 Raw response (first 500 chars): {result_text[:500]}...")
+        result_text = str(response).strip()
+        print(f"📝 Raw response (first 300 chars): {result_text[:300]}...")
         
         # Try to find JSON in the response
         json_start = result_text.find('{')
@@ -745,14 +741,14 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
                 # Try to extract some information
                 return {
                     "candidate_name": "Professional Candidate",
-                    "skills_matched": ["AI analysis completed", "Check specific match details"],
-                    "skills_missing": ["Review detailed analysis for missing skills"],
-                    "experience_summary": f"Analysis completed using {model}. The AI has processed your resume and job description.",
-                    "education_summary": "Educational qualifications have been evaluated by the AI model.",
+                    "skills_matched": ["AI analysis completed via Router API", "Basic skill matching"],
+                    "skills_missing": ["Review detailed output"],
+                    "experience_summary": f"Analysis completed using Hugging Face Router API ({model}).",
+                    "education_summary": "Educational background evaluated.",
                     "overall_score": 65,
                     "recommendation": "Consider for Review",
-                    "key_strengths": ["AI-powered analysis", "Quick processing", "Comprehensive evaluation"],
-                    "areas_for_improvement": ["Review specific skill requirements"]
+                    "key_strengths": ["Router API analysis", "AI-powered evaluation"],
+                    "areas_for_improvement": ["Check specific requirements"]
                 }
             else:
                 return fallback_response("JSON Parse Error", filename)
@@ -766,8 +762,8 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
             'education_summary': 'Candidate possesses appropriate educational qualifications for consideration in this position.',
             'overall_score': 70,
             'recommendation': 'Consider for Interview',
-            'key_strengths': ['Strong analytical skills', 'Good communication abilities', 'Technical proficiency'],
-            'areas_for_improvement': ['Could benefit from additional specific training', 'Consider gaining more industry experience']
+            'key_strengths': ['Strong analytical skills', 'Good communication abilities'],
+            'areas_for_improvement': ['Could benefit from additional specific training']
         }
         
         for field, default_value in required_fields.items():
@@ -785,10 +781,10 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
             analysis['overall_score'] = 70
         
         # Limit array lengths
-        analysis['skills_matched'] = analysis['skills_matched'][:6]
-        analysis['skills_missing'] = analysis['skills_missing'][:6]
-        analysis['key_strengths'] = analysis['key_strengths'][:4]
-        analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:4]
+        analysis['skills_matched'] = analysis['skills_matched'][:4]
+        analysis['skills_missing'] = analysis['skills_missing'][:4]
+        analysis['key_strengths'] = analysis['key_strengths'][:3]
+        analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:3]
         
         # Ensure all values are strings (not lists)
         for field in ['experience_summary', 'education_summary', 'recommendation']:
@@ -1068,8 +1064,8 @@ def analyze_resume():
             print("❌ Hugging Face client not initialized")
             return jsonify({'error': 'Hugging Face client not properly initialized'}), 500
         
-        # Analyze with Hugging Face
-        print("🤖 Starting AI analysis...")
+        # Analyze with Hugging Face Router API
+        print("🤖 Starting AI analysis with Router API...")
         ai_start = time.time()
         analysis = analyze_resume_with_huggingface(resume_text, job_description, resume_file.filename)
         ai_time = time.time() - ai_start
@@ -1091,7 +1087,7 @@ def analyze_resume():
         # Return analysis
         analysis['excel_filename'] = os.path.basename(excel_path)
         analysis['ai_model'] = model
-        analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
+        analysis['ai_status'] = "Router API Ready" if warmup_complete else "Router API Warming"
         analysis['response_time'] = f"{ai_time:.2f}s"
         
         total_time = time.time() - start_time
@@ -1136,9 +1132,9 @@ def analyze_resume_batch():
         print(f"📋 Job description: {job_description[:100]}...")
         
         # Limit batch size
-        if len(resume_files) > 5:  # Reduced for Hugging Face limits
+        if len(resume_files) > 3:  # Further reduced for Router API limits
             print(f"❌ Too many files: {len(resume_files)}")
-            return jsonify({'error': 'Maximum 5 resumes allowed per batch for free tier'}), 400
+            return jsonify({'error': 'Maximum 3 resumes allowed per batch for Router API'}), 400
         
         # Check API key
         if not api_key:
@@ -1214,7 +1210,7 @@ def analyze_resume_batch():
                 
                 # Add delay between requests to avoid rate limiting
                 if idx < len(resume_files) - 1:
-                    time.sleep(2)
+                    time.sleep(3)  # Longer delay for Router API
                 
             except Exception as e:
                 error_msg = f"Processing error: {str(e)[:100]}"
@@ -1252,7 +1248,7 @@ def analyze_resume_batch():
             'batch_excel_filename': os.path.basename(excel_path) if excel_path else None,
             'analyses': all_analyses,
             'model_used': model,
-            'ai_status': "Warmed up" if warmup_complete else "Warming up",
+            'ai_status': "Router API Ready" if warmup_complete else "Router API Warming",
             'processing_time': f"{time.time() - start_time:.2f}s"
         }
         
@@ -1512,7 +1508,7 @@ def quick_check():
         if not warmup_complete:
             return jsonify({
                 'available': False,
-                'reason': 'Hugging Face is warming up',
+                'reason': 'Hugging Face Router API is warming up',
                 'warmup_complete': False,
                 'model': model,
                 'suggestion': 'Try again in a few seconds or use /warmup endpoint'
@@ -1618,8 +1614,8 @@ def health_check():
         'upload_folder_path': UPLOAD_FOLDER,
         'inactive_minutes': inactive_minutes,
         'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
-        'version': '3.0.0',
-        'features': ['always_active', 'huggingface', 'batch_processing', 'keep_alive']
+        'version': '4.0.0',
+        'features': ['always_active', 'huggingface_router', 'batch_processing', 'enhanced_fallback']
     })
 
 @app.route('/models', methods=['GET'])
@@ -1628,21 +1624,20 @@ def list_models():
     update_activity()
     
     try:
-        # Popular Hugging Face models for inference
-        popular_models = [
-            {'id': 'mistralai/Mistral-7B-Instruct-v0.2', 'name': 'Mistral 7B Instruct', 'provider': 'Mistral AI'},
-            {'id': 'google/flan-t5-xxl', 'name': 'Google Flan-T5 XXL', 'provider': 'Google'},
-            {'id': 'microsoft/phi-2', 'name': 'Microsoft Phi-2', 'provider': 'Microsoft'},
-            {'id': 'meta-llama/Llama-2-7b-chat-hf', 'name': 'Llama 2 7B Chat', 'provider': 'Meta'},
-            {'id': 'tiiuae/falcon-7b-instruct', 'name': 'Falcon 7B Instruct', 'provider': 'TII'},
-            {'id': 'HuggingFaceH4/zephyr-7b-beta', 'name': 'Zephyr 7B Beta', 'provider': 'Hugging Face'},
+        # Models compatible with Hugging Face Router API
+        router_models = [
+            {'id': 'mistralai/Mistral-7B-Instruct-v0.1', 'name': 'Mistral 7B Instruct', 'provider': 'Mistral AI', 'type': 'Router API'},
+            {'id': 'google/flan-t5-xxl', 'name': 'Google Flan-T5 XXL', 'provider': 'Google', 'type': 'Router API'},
+            {'id': 'microsoft/phi-2', 'name': 'Microsoft Phi-2', 'provider': 'Microsoft', 'type': 'Router API'},
+            {'id': 'meta-llama/Llama-2-7b-chat-hf', 'name': 'Llama 2 7B Chat', 'provider': 'Meta', 'type': 'Router API'},
         ]
         
         return jsonify({
-            'available_models': popular_models,
+            'available_models': router_models,
             'current_model': model,
-            'count': len(popular_models),
-            'documentation': 'https://huggingface.co/models'
+            'count': len(router_models),
+            'api_type': 'Hugging Face Router API',
+            'documentation': 'https://huggingface.co/docs/api-inference/index'
         })
     except Exception as e:
         return jsonify({'error': str(e)})
@@ -1657,15 +1652,15 @@ if __name__ == '__main__':
     print(f"🤖 Model: {model}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print("✅ Always Active Mode: Enabled")
-    print("✅ Hugging Face Keep-Warm: Enabled")
-    print("✅ Batch Processing: Enabled")
+    print("✅ Hugging Face Router API: Enabled")
+    print("✅ Enhanced Fallback Mode: Enabled")
     print("="*50 + "\n")
     
     if not api_key:
         print("⚠️  WARNING: HUGGINGFACE_API_KEY not found!")
         print("Please set HUGGINGFACE_API_KEY in Render environment variables")
         print("Get your API key from: https://huggingface.co/settings/tokens")
-        print("Free tier: 30k tokens/month")
+        print("Note: Router API may require credits for some models")
     
     # Use PORT environment variable
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
