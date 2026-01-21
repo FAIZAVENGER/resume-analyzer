@@ -10,7 +10,7 @@ import {
   Battery, Crown, Users, Coffee, ShieldCheck,
   Lock, DownloadCloud, Edit3, FileDown, Info,
   Wifi, WifiOff, Activity, Thermometer, ListOrdered,
-  BarChart4, Filter
+  BarChart4, Filter, Cpu
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -30,7 +30,7 @@ function App() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [aiStatus, setAiStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState('checking');
-  const [openrouterWarmup, setOpenrouterWarmup] = useState(false);
+  const [huggingfaceWarmup, setHuggingfaceWarmup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -90,13 +90,13 @@ function App() {
           totalKeys: healthResponse.data.api_key_configured ? 1 : 0
         });
         
-        setOpenrouterWarmup(healthResponse.data.openrouter_warmup_complete || false);
+        setHuggingfaceWarmup(healthResponse.data.huggingface_warmup_complete || false);
         setModelInfo(healthResponse.data.model);
         setBackendStatus('ready');
       }
       
-      // Force OpenRouter warm-up
-      await forceOpenRouterWarmup();
+      // Force Hugging Face warm-up
+      await forceHuggingFaceWarmup();
       
       // Set up periodic checks
       setupPeriodicChecks();
@@ -148,10 +148,10 @@ function App() {
     }
   };
 
-  const forceOpenRouterWarmup = async () => {
+  const forceHuggingFaceWarmup = async () => {
     try {
       setAiStatus('warming');
-      setLoadingMessage('Warming up OpenRouter...');
+      setLoadingMessage('Warming up Hugging Face...');
       
       const response = await axios.get(`${API_BASE_URL}/warmup`, {
         timeout: 15000
@@ -159,28 +159,28 @@ function App() {
       
       if (response.data.warmup_complete) {
         setAiStatus('available');
-        setOpenrouterWarmup(true);
-        console.log('✅ OpenRouter warmed up successfully');
+        setHuggingfaceWarmup(true);
+        console.log('✅ Hugging Face warmed up successfully');
       } else {
         setAiStatus('warming');
-        console.log('⚠️ OpenRouter still warming up');
+        console.log('⚠️ Hugging Face still warming up');
         
         // Check status again in 5 seconds
-        setTimeout(() => checkOpenRouterStatus(), 5000);
+        setTimeout(() => checkHuggingFaceStatus(), 5000);
       }
       
       setLoadingMessage('');
       
     } catch (error) {
-      console.log('⚠️ OpenRouter warm-up failed:', error.message);
+      console.log('⚠️ Hugging Face warm-up failed:', error.message);
       setAiStatus('unavailable');
       
       // Check status in background
-      setTimeout(() => checkOpenRouterStatus(), 3000);
+      setTimeout(() => checkHuggingFaceStatus(), 3000);
     }
   };
 
-  const checkOpenRouterStatus = async () => {
+  const checkHuggingFaceStatus = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/quick-check`, {
         timeout: 10000
@@ -188,20 +188,20 @@ function App() {
       
       if (response.data.available) {
         setAiStatus('available');
-        setOpenrouterWarmup(true);
+        setHuggingfaceWarmup(true);
         if (response.data.model) {
           setModelInfo(response.data.model);
         }
       } else if (response.data.warmup_complete) {
         setAiStatus('available');
-        setOpenrouterWarmup(true);
+        setHuggingfaceWarmup(true);
       } else {
         setAiStatus('warming');
-        setOpenrouterWarmup(false);
+        setHuggingfaceWarmup(false);
       }
       
     } catch (error) {
-      console.log('OpenRouter status check failed:', error.message);
+      console.log('Hugging Face status check failed:', error.message);
       setAiStatus('unavailable');
     }
   };
@@ -213,13 +213,13 @@ function App() {
       });
       
       setBackendStatus('ready');
-      setOpenrouterWarmup(response.data.openrouter_warmup_complete || false);
+      setHuggingfaceWarmup(response.data.huggingface_warmup_complete || false);
       if (response.data.model) {
         setModelInfo(response.data.model);
       }
       
       // Update AI status based on warmup
-      if (response.data.openrouter_warmup_complete) {
+      if (response.data.huggingface_warmup_complete) {
         setAiStatus('available');
       } else {
         setAiStatus('warming');
@@ -244,10 +244,10 @@ function App() {
       checkBackendHealth();
     }, 60 * 1000);
     
-    // Check OpenRouter status every 30 seconds when warming
+    // Check Hugging Face status every 30 seconds when warming
     const statusCheckInterval = setInterval(() => {
       if (aiStatus === 'warming' || aiStatus === 'checking') {
-        checkOpenRouterStatus();
+        checkHuggingFaceStatus();
       }
     }, 30000);
     
@@ -386,8 +386,8 @@ function App() {
       }, 500);
 
       // Update loading message based on service status
-      if (aiStatus === 'available' && openrouterWarmup) {
-        setLoadingMessage('OpenRouter AI analysis (Always Active)...');
+      if (aiStatus === 'available' && huggingfaceWarmup) {
+        setLoadingMessage('Hugging Face AI analysis (Always Active)...');
       } else {
         setLoadingMessage('Enhanced analysis (Warming up AI)...');
       }
@@ -439,7 +439,7 @@ function App() {
       } else if (err.response?.status === 429) {
         setError('Rate limit reached. Enhanced analysis is still available.');
       } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
-        setError('OpenRouter service quota/rate limit exceeded. Enhanced analysis will extract information from your resume.');
+        setError('Hugging Face service quota/rate limit exceeded. Enhanced analysis will extract information from your resume.');
         setAiStatus('unavailable');
       } else {
         setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
@@ -607,19 +607,19 @@ function App() {
   const getAiStatusMessage = () => {
     switch(aiStatus) {
       case 'checking': return { 
-        text: 'Checking OpenRouter...', 
+        text: 'Checking Hugging Face...', 
         color: '#ffd166', 
-        icon: <BatteryCharging size={16} />,
+        icon: <Cpu size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       case 'warming': return { 
-        text: 'OpenRouter Warming', 
+        text: 'Hugging Face Warming', 
         color: '#ff9800', 
         icon: <Thermometer size={16} />,
         bgColor: 'rgba(255, 152, 0, 0.1)'
       };
       case 'available': return { 
-        text: 'OpenRouter Ready', 
+        text: 'Hugging Face Ready', 
         color: '#00ff9d', 
         icon: <Check size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
@@ -654,10 +654,10 @@ function App() {
 
   const handleForceWarmup = async () => {
     setIsWarmingUp(true);
-    setLoadingMessage('Forcing OpenRouter warm-up...');
+    setLoadingMessage('Forcing Hugging Face warm-up...');
     
     try {
-      await forceOpenRouterWarmup();
+      await forceHuggingFaceWarmup();
       setLoadingMessage('');
     } catch (error) {
       console.log('Force warm-up failed:', error);
@@ -676,18 +676,18 @@ function App() {
   };
 
   const getModelDisplayName = (modelId) => {
-    if (!modelId) return 'Unknown Model';
+    if (!modelId) return 'Hugging Face Model';
     const modelMap = {
-      'meta-llama/llama-3.2-3b-instruct:free': 'Llama 3.2 3B (Free)',
-      'mistralai/mistral-7b-instruct:free': 'Mistral 7B (Free)',
-      'google/gemma-2-2b-it:free': 'Gemma 2 2B (Free)',
-      'meta-llama/llama-3.1-8b-instruct:free': 'Llama 3.1 8B (Free)',
-      'openai/gpt-4o-mini': 'GPT-4o Mini',
-      'anthropic/claude-3.5-sonnet': 'Claude 3.5 Sonnet',
-      'google/gemini-pro': 'Gemini Pro',
-      'meta-llama/llama-3.3-70b-instruct:free': 'Llama 3.3 70B (Free)'
+      'mistralai/Mistral-7B-Instruct-v0.2': 'Mistral 7B Instruct',
+      'google/flan-t5-xxl': 'Google Flan-T5 XXL',
+      'microsoft/phi-2': 'Microsoft Phi-2',
+      'meta-llama/Llama-2-7b-chat-hf': 'Llama 2 7B Chat',
+      'tiiuae/falcon-7b-instruct': 'Falcon 7B Instruct',
+      'mistralai/Mixtral-8x7B-Instruct-v0.1': 'Mixtral 8x7B Instruct',
+      'HuggingFaceH4/zephyr-7b-beta': 'Zephyr 7B Beta',
+      'google/gemma-7b-it': 'Gemma 7B Instruct'
     };
-    return modelMap[modelId] || modelId;
+    return modelMap[modelId] || modelId.split('/').pop() || 'Hugging Face Model';
   };
 
   return (
@@ -710,7 +710,7 @@ function App() {
                 <h1>AI Resume Analyzer</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
-                  <span className="openai-badge">OpenRouter</span>
+                  <span className="huggingface-badge">🤗 Hugging Face</span>
                   <span className="divider">•</span>
                   <span className="tagline">Always Active • Batch Processing</span>
                 </div>
@@ -776,7 +776,7 @@ function App() {
             {/* Model Info */}
             {modelInfo && (
               <div className="feature model-info">
-                <Brain size={16} />
+                <Cpu size={16} />
                 <span>{getModelDisplayName(modelInfo)}</span>
               </div>
             )}
@@ -853,7 +853,7 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">OpenRouter Status</div>
+                <div className="summary-label">Hugging Face Status</div>
                 <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
                   {aiStatus === 'available' ? '✅ Ready' : 
                    aiStatus === 'warming' ? '🔥 Warming' : 
@@ -906,11 +906,11 @@ function App() {
             <div className="status-info">
               <div className="info-item">
                 <span className="info-label">Service Mode:</span>
-                <span className="info-value">Always Active (Keeps OpenRouter warm)</span>
+                <span className="info-value">Always Active (Keeps Hugging Face warm)</span>
               </div>
               <div className="info-item">
                 <span className="info-label">AI Provider:</span>
-                <span className="info-value">OpenRouter (Multiple Models)</span>
+                <span className="info-value">Hugging Face Inference API</span>
               </div>
               <div className="info-item">
                 <span className="info-label">Auto Warm-up:</span>
@@ -934,7 +934,7 @@ function App() {
               </div>
               <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
                 <div className="indicator-dot"></div>
-                <span>OpenRouter: {aiStatus === 'available' ? 'Ready' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
+                <span>Hugging Face: {aiStatus === 'available' ? 'Ready' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
               </div>
               {modelInfo && (
                 <div className="status-indicator active">
@@ -954,7 +954,7 @@ function App() {
             {aiStatus === 'warming' && (
               <div className="wakeup-message">
                 <Thermometer size={16} />
-                <span>OpenRouter is warming up. This ensures fast responses.</span>
+                <span>Hugging Face is warming up. This ensures fast responses.</span>
               </div>
             )}
           </div>
@@ -977,7 +977,7 @@ function App() {
                 </span>
                 {modelInfo && (
                   <span className="status-badge model">
-                    <Brain size={14} /> {getModelDisplayName(modelInfo)}
+                    <Cpu size={14} /> {getModelDisplayName(modelInfo)}
                   </span>
                 )}
               </div>
@@ -1183,9 +1183,9 @@ function App() {
                   </div>
                   <div className="stat">
                     <div className="stat-icon">
-                      <Brain size={14} />
+                      <Cpu size={14} />
                     </div>
-                    <span>OpenRouter AI</span>
+                    <span>Hugging Face AI</span>
                   </div>
                   <div className="stat">
                     <div className="stat-icon">
@@ -1272,7 +1272,7 @@ function App() {
                     <span>•</span>
                     <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
                     <span>•</span>
-                    <span>OpenRouter: {aiStatus === 'available' ? 'Ready' : 'Warming...'}</span>
+                    <span>Hugging Face: {aiStatus === 'available' ? 'Ready' : 'Warming...'}</span>
                     {modelInfo && (
                       <>
                         <span>•</span>
@@ -1283,7 +1283,7 @@ function App() {
                   
                   <div className="loading-note info">
                     <Info size={14} />
-                    <span>Always Active mode keeps OpenRouter warm for faster responses</span>
+                    <span>Always Active mode keeps Hugging Face warm for faster responses</span>
                   </div>
                 </div>
               </div>
@@ -1342,7 +1342,7 @@ function App() {
                     <span>Download comprehensive Excel report with all candidate data</span>
                   </div>
                   <div className="tip">
-                    <Brain size={16} />
+                    <Cpu size={16} />
                     <span>Using: {getModelDisplayName(modelInfo)}</span>
                   </div>
                 </>
@@ -1350,18 +1350,18 @@ function App() {
                 <>
                   <div className="tip">
                     <Sparkles size={16} />
-                    <span>Always Active mode keeps OpenRouter warm for instant responses</span>
+                    <span>Always Active mode keeps Hugging Face warm for instant responses</span>
                   </div>
                   <div className="tip">
                     <Thermometer size={16} />
-                    <span>OpenRouter automatically warms up when idle for 2 minutes</span>
+                    <span>Hugging Face automatically warms up when idle for 2 minutes</span>
                   </div>
                   <div className="tip">
                     <Activity size={16} />
                     <span>Backend stays awake with automatic pings every 3 minutes</span>
                   </div>
                   <div className="tip">
-                    <Brain size={16} />
+                    <Cpu size={16} />
                     <span>Using: {getModelDisplayName(modelInfo)}</span>
                   </div>
                 </>
@@ -1417,7 +1417,7 @@ function App() {
                   <span>Processed {batchAnalysis.total_files} resumes</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)' }}>
-                  <Brain size={16} />
+                  <Cpu size={16} />
                   <span>{getModelDisplayName(batchAnalysis.model_used)}</span>
                 </div>
               </div>
@@ -1634,8 +1634,8 @@ function App() {
                       })}
                     </span>
                     <span className="ai-badge">
-                      <Brain size={12} />
-                      {analysis.ai_status === 'Warmed up' ? `${getModelDisplayName(analysis.model_used)} (Always Active)` : 'Enhanced Analysis'}
+                      <Cpu size={12} />
+                      {analysis.ai_status === 'Warmed up' ? `${getModelDisplayName(analysis.ai_model)} (Always Active)` : 'Enhanced Analysis'}
                     </span>
                   </div>
                 </div>
@@ -1672,8 +1672,8 @@ function App() {
                       Response: {analysis.response_time || 'Fast'}
                     </span>
                     <span className="meta-item">
-                      <Brain size={12} />
-                      Model: {getModelDisplayName(analysis.model_used)}
+                      <Cpu size={12} />
+                      Model: {getModelDisplayName(analysis.ai_model)}
                     </span>
                   </div>
                 </div>
@@ -1690,15 +1690,15 @@ function App() {
                 <div>
                   <h3>Analysis Recommendation</h3>
                   <p className="recommendation-subtitle">
-                    {analysis.ai_status === 'Warmed up' ? `${getModelDisplayName(analysis.model_used)} (Always Active)` : 'Enhanced Analysis'}
+                    {analysis.ai_status === 'Warmed up' ? `${getModelDisplayName(analysis.ai_model)} (Always Active)` : 'Enhanced Analysis'}
                   </p>
                 </div>
               </div>
               <div className="recommendation-content">
                 <p className="recommendation-text">{analysis.recommendation}</p>
                 <div className="confidence-badge">
-                  <Brain size={16} />
-                  <span>{analysis.ai_status === 'Warmed up' ? 'OpenRouter AI' : 'Enhanced Analysis'}</span>
+                  <Cpu size={16} />
+                  <span>{analysis.ai_status === 'Warmed up' ? 'Hugging Face AI' : 'Enhanced Analysis'}</span>
                 </div>
               </div>
             </div>
@@ -1925,7 +1925,7 @@ function App() {
               <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Always Active mode keeps OpenRouter warm for instant responses
+              Always Active mode keeps Hugging Face warm for instant responses
             </p>
           </div>
           
@@ -1933,7 +1933,7 @@ function App() {
             <div className="footer-section">
               <h4>Features</h4>
               <a href="#">Always Active AI</a>
-              <a href="#">OpenRouter Warm-up</a>
+              <a href="#">Hugging Face Warm-up</a>
               <a href="#">Batch Processing</a>
               <a href="#">Excel Reports</a>
             </div>
@@ -1955,7 +1955,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + OpenRouter. Always Active Mode.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Hugging Face. Always Active Mode.</p>
           <div className="footer-stats">
             <span className="stat">
               <Activity size={12} />
@@ -1963,10 +1963,10 @@ function App() {
             </span>
             <span className="stat">
               <Thermometer size={12} />
-              OpenRouter: {aiStatus === 'available' ? 'Warmed' : 'Warming'}
+              Hugging Face: {aiStatus === 'available' ? 'Warmed' : 'Warming'}
             </span>
             <span className="stat">
-              <Brain size={12} />
+              <Cpu size={12} />
               Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
             </span>
           </div>
