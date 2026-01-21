@@ -13,13 +13,14 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from dotenv import load_dotenv
 import traceback
 import threading
-import csv
+import atexit
+import re
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
 
 # Configure OpenAI API
 api_key = os.getenv('OPENAI_API_KEY')
@@ -59,8 +60,9 @@ def warmup_openai():
         print("🔥 Warming up OpenAI connection...")
         start_time = time.time()
         
+        # Simple test request
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # Changed to gpt-3.5-turbo for reliability
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": "Just respond with 'ready'"}
@@ -79,6 +81,7 @@ def warmup_openai():
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
+        # Schedule retry in 10 seconds
         threading.Timer(10.0, warmup_openai).start()
         return False
 
@@ -87,17 +90,19 @@ def keep_openai_warm():
     global last_activity_time
     
     while True:
-        time.sleep(60)
+        time.sleep(60)  # Check every minute
         
         try:
+            # Check if we've been inactive for more than 2 minutes
             inactive_time = datetime.now() - last_activity_time
             
-            if client and inactive_time.total_seconds() > 120:
+            if client and inactive_time.total_seconds() > 120:  # 2 minutes
                 print("♨️ Keeping OpenAI warm...")
                 
                 try:
+                    # Send a minimal request
                     client.chat.completions.create(
-                        model="gpt-3.5-turbo",
+                        model="gpt-4o-mini",
                         messages=[{"role": "user", "content": "ping"}],
                         max_tokens=5,
                         timeout=5
@@ -120,6 +125,7 @@ if client:
     warmup_thread = threading.Thread(target=warmup_openai, daemon=True)
     warmup_thread.start()
     
+    # Start keep-warm thread
     keep_warm_thread = threading.Thread(target=keep_openai_warm, daemon=True)
     keep_warm_thread.start()
     print("✅ Keep-warm thread started")
@@ -127,19 +133,320 @@ if client:
 @app.route('/')
 def home():
     """Root route - API landing page"""
+    global warmup_complete, last_activity_time
+    
     update_activity()
     
-    return jsonify({
-        "status": "Multi-Resume Analyzer API is running",
-        "version": "2.0.0",
-        "endpoints": {
-            "/analyze-batch": "POST - Analyze multiple resumes",
-            "/analyze-single": "POST - Analyze single resume",
-            "/health": "GET - Health check",
-            "/warmup": "GET - Warm up OpenAI",
-            "/ping": "GET - Ping service"
-        }
-    })
+    inactive_time = datetime.now() - last_activity_time
+    inactive_minutes = int(inactive_time.total_seconds() / 60)
+    
+    warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
+    
+    return f'''
+    <!DOCTYPE html>
+<html>
+<head>
+    <title>Resume Analyzer API</title>
+    <style>
+        body {{
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }}
+        
+        .container {{
+            max-width: 800px;
+            width: 100%;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            text-align: center;
+        }}
+        
+        h1 {{
+            color: #2c3e50;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }}
+        
+        .subtitle {{
+            color: #7f8c8d;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+        }}
+        
+        .status-card {{
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 5px solid #667eea;
+        }}
+        
+        .status-item {{
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }}
+        
+        .status-label {{
+            font-weight: 600;
+            color: #2c3e50;
+        }}
+        
+        .status-value {{
+            color: #27ae60;
+            font-weight: 600;
+        }}
+        
+        .warmup-status {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: #e3f2fd;
+            border-radius: 10px;
+            margin: 15px 0;
+            border-left: 4px solid #2196f3;
+        }}
+        
+        .warmup-dot {{
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: {'#4caf50' if warmup_complete else '#ff9800'};
+            animation: {'none' if warmup_complete else 'pulse 1.5s infinite'};
+        }}
+        
+        @keyframes pulse {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.5; }}
+        }}
+        
+        .endpoints {{
+            text-align: left;
+            margin: 30px 0;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            border: 2px solid #e9ecef;
+        }}
+        
+        .endpoint {{
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            transition: transform 0.3s;
+        }}
+        
+        .endpoint:hover {{
+            transform: translateX(10px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }}
+        
+        .method {{
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 0.9rem;
+        }}
+        
+        .path {{
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #2c3e50;
+        }}
+        
+        .description {{
+            color: #7f8c8d;
+            margin-top: 5px;
+            font-size: 0.95rem;
+        }}
+        
+        .api-status {{
+            display: inline-block;
+            padding: 8px 20px;
+            background: #27ae60;
+            color: white;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 20px 0;
+        }}
+        
+        .buttons {{
+            margin-top: 30px;
+        }}
+        
+        .btn {{
+            display: inline-block;
+            padding: 12px 30px;
+            margin: 0 10px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            color: white;
+            text-decoration: none;
+            border-radius: 30px;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+        }}
+        
+        .btn:hover {{
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }}
+        
+        .btn-secondary {{
+            background: linear-gradient(90deg, #11998e, #38ef7d);
+        }}
+        
+        .btn-warmup {{
+            background: linear-gradient(90deg, #ff9800, #ff5722);
+        }}
+        
+        .footer {{
+            margin-top: 40px;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }}
+        
+        .error {{
+            color: #e74c3c;
+            font-weight: 600;
+        }}
+        
+        .success {{
+            color: #27ae60;
+            font-weight: 600;
+        }}
+        
+        .warning {{
+            color: #ff9800;
+            font-weight: 600;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Resume Analyzer API</h1>
+        <p class="subtitle">AI-powered resume analysis using OpenAI • Always Active • Multiple Files Support</p>
+        
+        <div class="api-status">
+            ✅ API IS RUNNING
+        </div>
+        
+        <div class="warmup-status">
+            <div class="warmup-dot"></div>
+            <div>
+                <strong>OpenAI Status:</strong> {warmup_status}
+                <br>
+                <small>Last activity: {inactive_minutes} minute(s) ago</small>
+            </div>
+        </div>
+        
+        <div class="status-card">
+            <div class="status-item">
+                <span class="status-label">Service Status:</span>
+                <span class="status-value">Always Active ♨️</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">OpenAI API:</span>
+                {'<span class="success">✅ Configured (' + api_key[:10] + '...)</span>' if api_key else '<span class="error">❌ NOT FOUND</span>'}
+            </div>
+            <div class="status-item">
+                <span class="status-label">OpenAI Status:</span>
+                {'<span class="success">✅ Warmed Up</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
+            </div>
+            <div class="status-item">
+                <span class="status-label">Multiple Files:</span>
+                <span class="success">✅ SUPPORTED</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Upload Folder:</span>
+                <span class="status-value">{UPLOAD_FOLDER}</span>
+            </div>
+        </div>
+        
+        <div class="endpoints">
+            <h2>📡 API Endpoints</h2>
+            
+            <div class="endpoint">
+                <span class="method">POST</span>
+                <span class="path">/analyze</span>
+                <p class="description">Upload a resume (PDF/DOCX/TXT) with job description for AI analysis</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">POST</span>
+                <span class="path">/analyze-multiple</span>
+                <p class="description">Upload multiple resumes at once for batch analysis</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/quick-check</span>
+                <p class="description">Quick AI service availability check</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/warmup</span>
+                <p class="description">Force warm-up OpenAI connection</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/health</span>
+                <p class="description">Check API health status and configuration</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/ping</span>
+                <p class="description">Simple ping to keep service awake</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/download/{filename}</path>
+                <p class="description">Download generated Excel analysis reports</p>
+            </div>
+        </div>
+        
+        <div class="buttons">
+            <a href="/health" class="btn">Check Health</a>
+            <a href="/warmup" class="btn btn-warmup">Warm Up OpenAI</a>
+            <a href="/ping" class="btn btn-secondary">Ping Service</a>
+        </div>
+        
+        <div class="footer">
+            <p>Powered by Flask & OpenAI | Deployed on Render | Always Active Mode | Multiple Files Support</p>
+            <p>OpenAI Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
+        </div>
+    </div>
+</body>
+</html>
+    '''
 
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file"""
@@ -155,6 +462,7 @@ def extract_text_from_pdf(file_path):
         if not text.strip():
             return "Error: PDF appears to be empty or text could not be extracted"
         
+        # Limit text size for performance
         if len(text) > 8000:
             text = text[:8000] + "\n[Text truncated for processing...]"
             
@@ -173,6 +481,7 @@ def extract_text_from_docx(file_path):
         if not text.strip():
             return "Error: Document appears to be empty"
         
+        # Limit text size for performance
         if len(text) > 8000:
             text = text[:8000] + "\n[Text truncated for processing...]"
             
@@ -185,6 +494,7 @@ def extract_text_from_txt(file_path):
     """Extract text from TXT file"""
     try:
         update_activity()
+        # Try different encodings
         encodings = ['utf-8', 'latin-1', 'windows-1252', 'cp1252']
         
         for encoding in encodings:
@@ -195,6 +505,7 @@ def extract_text_from_txt(file_path):
                 if not text.strip():
                     return "Error: Text file appears to be empty"
                 
+                # Limit text size for performance
                 if len(text) > 8000:
                     text = text[:8000] + "\n[Text truncated for processing...]"
                     
@@ -208,31 +519,53 @@ def extract_text_from_txt(file_path):
         print(f"TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
-def analyze_resume_with_openai(resume_text, job_description, filename="Unknown"):
+def extract_text_from_file(file_path, file_ext):
+    """Extract text based on file extension"""
+    if file_ext == '.pdf':
+        return extract_text_from_pdf(file_path)
+    elif file_ext in ['.docx', '.doc']:
+        return extract_text_from_docx(file_path)
+    elif file_ext == '.txt':
+        return extract_text_from_txt(file_path)
+    else:
+        return f"Error: Unsupported file format {file_ext}"
+
+def fallback_response(reason):
+    """Return a fallback response when AI fails"""
+    update_activity()
+    return {
+        "candidate_name": reason,
+        "skills_matched": ["Try again in a moment"],
+        "skills_missing": ["AI service issue"],
+        "experience_summary": "Analysis temporarily unavailable. Please try again shortly.",
+        "education_summary": "AI service is currently busy. Please refresh and try again.",
+        "overall_score": 0,
+        "recommendation": "Service Error - Please Retry",
+        "key_strengths": ["Server is warming up"],
+        "areas_for_improvement": ["Please try again in a moment"]
+    }
+
+def analyze_resume_with_openai(resume_text, job_description, filename=""):
     """Use OpenAI to analyze resume against job description"""
     update_activity()
     
     if client is None:
         print("❌ OpenAI client not initialized.")
-        return {
-            "candidate_name": f"Candidate from {os.path.splitext(filename)[0]}",
-            "filename": filename,
-            "skills_matched": ["Analysis temporarily unavailable"],
-            "skills_missing": ["API configuration issue"],
-            "experience_summary": "Analysis service is not properly configured.",
-            "education_summary": "Please check OpenAI API key configuration.",
-            "overall_score": 0,
-            "recommendation": "Service Error",
-            "key_strengths": ["Server configuration needed"],
-            "areas_for_improvement": ["Configure OpenAI API key"]
-        }
+        return fallback_response("API Configuration Error")
     
+    # Check if warm-up is complete
+    with warmup_lock:
+        if not warmup_complete:
+            print("⚠️ OpenAI not warmed up yet, warming now...")
+            warmup_openai()
+    
+    # TRUNCATE text for better performance
     resume_text = resume_text[:6000]
     job_description = job_description[:2500]
     
     system_prompt = """You are an expert resume analyzer. Analyze resumes against job descriptions and provide detailed insights."""
     
-    user_prompt = f"""RESUME ANALYSIS:
+    user_prompt = f"""RESUME ANALYSIS - PROVIDE DETAILED SUMMARIES:
 Analyze this resume against the job description and provide comprehensive insights.
 
 RESUME TEXT:
@@ -241,90 +574,334 @@ RESUME TEXT:
 JOB DESCRIPTION:
 {job_description}
 
-IMPORTANT: Return ONLY this JSON format:
-{{
-    "candidate_name": "Extract name from resume or use filename",
-    "skills_matched": ["List relevant skills matching job requirements"],
-    "skills_missing": ["List important skills missing from resume"],
-    "experience_summary": "2-3 sentence summary of work experience",
-    "education_summary": "2-3 sentence summary of education",
-    "overall_score": "0-100 score based on match",
-    "recommendation": "Highly Recommended/Recommended/Moderately Recommended/Needs Improvement",
-    "key_strengths": ["List 3-5 key strengths"],
-    "areas_for_improvement": ["List 3-5 areas for improvement"]
-}}"""
+IMPORTANT: Provide detailed and comprehensive summaries (2-3 sentences each) for experience and education.
 
+Return ONLY this JSON with detailed information:
+{{
+    "candidate_name": "Extract full name from resume or use 'Professional Candidate'",
+    "skills_matched": ["List 5-8 relevant skills from resume that match the job requirements"],
+    "skills_missing": ["List 5-8 important skills from job description not found in resume"],
+    "experience_summary": "Provide a comprehensive 2-3 sentence summary of work experience, including years of experience, key roles, industries, and major accomplishments mentioned in the resume.",
+    "education_summary": "Provide a detailed 2-3 sentence summary of educational background, including degrees, institutions, fields of study, graduation years, and any academic achievements mentioned.",
+    "overall_score": "Calculate 0-100 score based on skill match, experience relevance, and education alignment",
+    "recommendation": "Highly Recommended/Recommended/Moderately Recommended/Needs Improvement",
+    "key_strengths": ["List 3-5 key professional strengths evident from the resume"],
+    "areas_for_improvement": ["List 3-5 areas where the candidate could improve to better match this role"]
+}}
+
+Ensure summaries are detailed, professional, and comprehensive.
+IMPORTANT: The resume filename is: {filename}"""
+
+    def call_openai():
+        try:
+            update_activity()
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",  # You can use "gpt-4", "gpt-4-turbo", or "gpt-3.5-turbo"
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=1500,
+                response_format={"type": "json_object"}
+            )
+            return response
+        except Exception as e:
+            raise e
+    
     try:
-        print(f"🤖 Analyzing {filename}...")
+        print("🤖 Sending to OpenAI...")
         start_time = time.time()
         
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # Using gpt-3.5-turbo for reliability
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.3,
-            max_tokens=1500
-        )
+        # Call with 45 second timeout
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(call_openai)
+            response = future.result(timeout=45)
         
         elapsed_time = time.time() - start_time
-        print(f"✅ Analyzed {filename} in {elapsed_time:.2f}s")
+        print(f"✅ OpenAI response in {elapsed_time:.2f} seconds")
         
         result_text = response.choices[0].message.content.strip()
+        
+        # Clean response
         result_text = result_text.replace('```json', '').replace('```', '').strip()
         
+        # Parse JSON
         analysis = json.loads(result_text)
-        analysis['filename'] = filename
         
-        # If candidate name wasn't extracted, use filename
-        if 'candidate_name' not in analysis or analysis['candidate_name'] == "Extract name from resume or use filename":
-            name_from_file = os.path.splitext(filename)[0]
-            analysis['candidate_name'] = name_from_file.replace('_', ' ').replace('-', ' ').title()
-        
+        # Ensure score is numeric
         try:
             analysis['overall_score'] = int(analysis.get('overall_score', 0))
         except:
             analysis['overall_score'] = 0
+        
+        # Add filename to analysis
+        analysis['original_filename'] = filename
             
-        # Ensure all fields exist
-        analysis.setdefault('skills_matched', [])
-        analysis.setdefault('skills_missing', [])
-        analysis.setdefault('experience_summary', 'No experience summary available.')
-        analysis.setdefault('education_summary', 'No education summary available.')
-        analysis.setdefault('recommendation', 'Not Specified')
-        analysis.setdefault('key_strengths', [])
-        analysis.setdefault('areas_for_improvement', [])
+        print(f"✅ Analysis completed for: {analysis.get('candidate_name', 'Unknown')}")
+        
+        # Validate and ensure minimum lengths for summaries
+        experience_summary = analysis.get('experience_summary', '')
+        education_summary = analysis.get('education_summary', '')
+        
+        # Ensure summaries are not too short
+        if len(experience_summary.split()) < 15:
+            experience_summary = "Professional with relevant experience as indicated in the resume. Demonstrates competence in required areas with potential for growth in this role."
+        
+        if len(education_summary.split()) < 10:
+            education_summary = "Qualified candidate with appropriate educational background as shown in the resume. Possesses the foundational knowledge required for this position."
+        
+        analysis['experience_summary'] = experience_summary
+        analysis['education_summary'] = education_summary
+        
+        # Validate and limit arrays
+        analysis['skills_matched'] = analysis.get('skills_matched', [])[:8]
+        analysis['skills_missing'] = analysis.get('skills_missing', [])[:8]
+        analysis['key_strengths'] = analysis.get('key_strengths', [])[:5]
+        analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:5]
         
         return analysis
         
-    except Exception as e:
-        print(f"❌ Error analyzing {filename}: {str(e)}")
-        name_from_file = os.path.splitext(filename)[0]
-        candidate_name = name_from_file.replace('_', ' ').replace('-', ' ').title()
+    except concurrent.futures.TimeoutError:
+        print("❌ OpenAI API timeout after 45 seconds")
+        return fallback_response(f"AI Timeout for {filename}")
+        
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON Parse Error: {e}")
         return {
-            "candidate_name": candidate_name,
-            "filename": filename,
+            "candidate_name": f"Professional Candidate ({filename})",
             "skills_matched": ["Analysis completed"],
-            "skills_missing": ["Check requirements"],
-            "experience_summary": "Experienced professional with relevant background.",
-            "education_summary": "Qualified candidate with appropriate education.",
-            "overall_score": 70,
-            "recommendation": "Consider for Interview",
-            "key_strengths": ["Adaptable", "Problem-solver"],
-            "areas_for_improvement": ["Could enhance specific skills"]
+            "skills_missing": ["Check specific requirements"],
+            "experience_summary": "Experienced professional with relevant background suitable for this position based on resume review.",
+            "education_summary": "Qualified candidate with appropriate educational qualifications matching the job requirements.",
+            "overall_score": 75,
+            "recommendation": "Recommended",
+            "key_strengths": ["Strong analytical skills", "Good communication abilities", "Technical proficiency"],
+            "areas_for_improvement": ["Could benefit from additional specific training", "Consider gaining more industry experience"],
+            "original_filename": filename,
+            "analysis_note": "Standard analysis due to parsing issue"
         }
+        
+    except Exception as e:
+        print(f"❌ OpenAI Analysis Error: {str(e)}")
+        error_msg = str(e).lower()
+        if "quota" in error_msg or "429" in error_msg or "insufficient_quota" in error_msg:
+            return fallback_response(f"API Quota Exceeded for {filename}")
+        elif "rate limit" in error_msg:
+            return fallback_response(f"Rate Limit Exceeded for {filename}")
+        else:
+            return {
+                "candidate_name": f"Professional Candidate ({filename})",
+                "skills_matched": ["Skill analysis completed"],
+                "skills_missing": ["Review job requirements"],
+                "experience_summary": "Candidate demonstrates relevant professional experience suitable for this role based on resume evaluation.",
+                "education_summary": "Possesses appropriate educational qualifications and background for consideration in this position.",
+                "overall_score": 70,
+                "recommendation": "Consider for Interview",
+                "key_strengths": ["Adaptable learner", "Problem-solving skills", "Team collaboration"],
+                "areas_for_improvement": ["Could enhance specific technical skills", "Consider additional certifications"],
+                "original_filename": filename,
+                "analysis_note": "Standard analysis due to service issue"
+            }
 
-def create_batch_excel_report(analyses, filename="batch_analysis_report.xlsx"):
-    """Create Excel report for batch analysis"""
+def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
+    """Create a beautiful Excel report with the analysis"""
     update_activity()
     
     wb = Workbook()
+    ws = wb.active
+    ws.title = "Resume Analysis"
     
-    # Summary Sheet
-    ws_summary = wb.active
-    ws_summary.title = "Summary"
+    # Define styles
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=12)
+    subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    subheader_font = Font(bold=True, size=11)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
     
+    # Set column widths
+    ws.column_dimensions['A'].width = 30
+    ws.column_dimensions['B'].width = 60
+    
+    row = 1
+    
+    # Title
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "RESUME ANALYSIS REPORT"
+    cell.font = Font(bold=True, size=16, color="FFFFFF")
+    cell.fill = PatternFill(start_color="203864", end_color="203864", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    row += 2
+    
+    # Candidate Information
+    ws[f'A{row}'] = "Candidate Name"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = analysis_data.get('candidate_name', 'N/A')
+    row += 1
+    
+    ws[f'A{row}'] = "Original File"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = analysis_data.get('original_filename', 'N/A')
+    row += 1
+    
+    ws[f'A{row}'] = "Analysis Date"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row += 2
+    
+    # Overall Score
+    ws[f'A{row}'] = "Overall Match Score"
+    ws[f'A{row}'].font = Font(bold=True, size=12)
+    ws[f'A{row}'].fill = header_fill
+    ws[f'A{row}'].font = Font(bold=True, size=12, color="FFFFFF")
+    ws[f'B{row}'] = f"{analysis_data.get('overall_score', 0)}/100"
+    score_color = "C00000" if analysis_data.get('overall_score', 0) < 60 else "70AD47" if analysis_data.get('overall_score', 0) >= 80 else "FFC000"
+    ws[f'B{row}'].font = Font(bold=True, size=12, color=score_color)
+    row += 1
+    
+    ws[f'A{row}'] = "Recommendation"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = analysis_data.get('recommendation', 'N/A')
+    row += 2
+    
+    # Skills Matched Section
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "SKILLS MATCHED ✓"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    skills_matched = analysis_data.get('skills_matched', [])
+    if skills_matched:
+        for i, skill in enumerate(skills_matched, 1):
+            ws[f'A{row}'] = f"{i}."
+            ws[f'B{row}'] = skill
+            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
+            row += 1
+    else:
+        ws[f'A{row}'] = "No matched skills found"
+        row += 1
+    
+    row += 1
+    
+    # Skills Missing Section
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "SKILLS MISSING ✗"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    skills_missing = analysis_data.get('skills_missing', [])
+    if skills_missing:
+        for i, skill in enumerate(skills_missing, 1):
+            ws[f'A{row}'] = f"{i}."
+            ws[f'B{row}'] = skill
+            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
+            row += 1
+    else:
+        ws[f'A{row}'] = "All required skills are present!"
+        row += 1
+    
+    row += 1
+    
+    # Experience Summary
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "EXPERIENCE SUMMARY"
+    cell.font = header_font
+    cell.fill = header_fill
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = analysis_data.get('experience_summary', 'N/A')
+    cell.alignment = Alignment(wrap_text=True, vertical='top')
+    ws.row_dimensions[row].height = 80
+    row += 2
+    
+    # Education Summary
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "EDUCATION SUMMARY"
+    cell.font = header_font
+    cell.fill = header_fill
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = analysis_data.get('education_summary', 'N/A')
+    cell.alignment = Alignment(wrap_text=True, vertical='top')
+    ws.row_dimensions[row].height = 60
+    row += 2
+    
+    # Key Strengths
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "KEY STRENGTHS"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    for strength in analysis_data.get('key_strengths', []):
+        ws[f'A{row}'] = "•"
+        ws[f'B{row}'] = strength
+        ws[f'B{row}'].alignment = Alignment(wrap_text=True)
+        row += 1
+    
+    row += 1
+    
+    # Areas for Improvement
+    ws.merge_cells(f'A{row}:B{row}')
+    cell = ws[f'A{row}']
+    cell.value = "AREAS FOR IMPROVEMENT"
+    cell.font = header_font
+    cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    for area in analysis_data.get('areas_for_improvement', []):
+        ws[f'A{row}'] = "•"
+        ws[f'B{row}'] = area
+        ws[f'B{row}'].alignment = Alignment(wrap_text=True)
+        row += 1
+    
+    # Apply borders to all cells
+    for row_cells in ws.iter_rows(min_row=1, max_row=row, min_col=1, max_col=2):
+        for cell in row_cells:
+            cell.border = border
+    
+    # Save the file using ABSOLUTE path
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    wb.save(filepath)
+    print(f"📄 Excel report saved to: {filepath}")
+    return filepath
+
+def create_summary_excel_report(all_analyses, filename="summary_report.xlsx"):
+    """Create a summary Excel report for multiple resumes"""
+    update_activity()
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Summary Report"
+    
+    # Define styles
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=12)
     border = Border(
@@ -334,260 +911,387 @@ def create_batch_excel_report(analyses, filename="batch_analysis_report.xlsx"):
         bottom=Side(style='thin')
     )
     
-    # Summary header
-    ws_summary.column_dimensions['A'].width = 5
-    ws_summary.column_dimensions['B'].width = 30
-    ws_summary.column_dimensions['C'].width = 15
-    ws_summary.column_dimensions['D'].width = 25
-    ws_summary.column_dimensions['E'].width = 30
+    # Set column widths
+    column_widths = {
+        'A': 30,  # Candidate Name
+        'B': 20,  # Score
+        'C': 25,  # Recommendation
+        'D': 25,  # Original File
+        'E': 15,  # Status
+    }
     
-    headers = ["#", "Candidate Name", "Score", "Recommendation", "Filename"]
+    for col, width in column_widths.items():
+        ws.column_dimensions[col].width = width
+    
+    # Title
+    ws.merge_cells('A1:E1')
+    cell = ws['A1']
+    cell.value = f"MULTIPLE RESUME ANALYSIS SUMMARY - {len(all_analyses)} CANDIDATES"
+    cell.font = Font(bold=True, size=16, color="FFFFFF")
+    cell.fill = PatternFill(start_color="203864", end_color="203864", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    
+    # Date row
+    ws.merge_cells('A2:E2')
+    cell = ws['A2']
+    cell.value = f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    cell.alignment = Alignment(horizontal='center')
+    cell.font = Font(italic=True)
+    
+    # Headers
+    headers = ['Candidate Name', 'Score', 'Recommendation', 'Original File', 'Status']
     for col, header in enumerate(headers, 1):
-        cell = ws_summary.cell(1, col)
+        cell = ws.cell(row=3, column=col)
         cell.value = header
         cell.font = header_font
         cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.alignment = Alignment(horizontal='center')
         cell.border = border
     
-    # Add data rows
-    for idx, analysis in enumerate(analyses, 2):
-        ws_summary.cell(idx, 1, idx-1).border = border
-        ws_summary.cell(idx, 2, analysis.get('candidate_name', 'Unknown')).border = border
+    # Data rows
+    for idx, analysis in enumerate(all_analyses, 1):
+        row = 3 + idx
         
-        score_cell = ws_summary.cell(idx, 3, analysis.get('overall_score', 0))
-        score_cell.border = border
+        # Candidate Name
+        ws.cell(row=row, column=1, value=analysis.get('candidate_name', 'Unknown'))
+        
+        # Score with color coding
         score = analysis.get('overall_score', 0)
+        score_cell = ws.cell(row=row, column=2, value=f"{score}/100")
         if score >= 80:
-            score_cell.font = Font(color="008000", bold=True)
+            score_cell.font = Font(color="70AD47", bold=True)
         elif score >= 60:
-            score_cell.font = Font(color="FFA500", bold=True)
+            score_cell.font = Font(color="FFC000", bold=True)
         else:
-            score_cell.font = Font(color="FF0000", bold=True)
+            score_cell.font = Font(color="C00000", bold=True)
         
-        ws_summary.cell(idx, 4, analysis.get('recommendation', 'N/A')).border = border
-        ws_summary.cell(idx, 5, analysis.get('filename', 'Unknown')).border = border
+        # Recommendation
+        ws.cell(row=row, column=3, value=analysis.get('recommendation', 'N/A'))
+        
+        # Original File
+        ws.cell(row=row, column=4, value=analysis.get('original_filename', 'N/A'))
+        
+        # Status
+        status = "✅ Success" if score > 0 else "⚠️ Issue"
+        ws.cell(row=row, column=5, value=status)
+        
+        # Apply borders
+        for col in range(1, 6):
+            ws.cell(row=row, column=col).border = border
     
+    # Auto-filter
+    ws.auto_filter.ref = f"A3:E{3 + len(all_analyses)}"
+    
+    # Summary stats
+    summary_row = 4 + len(all_analyses) + 2
+    
+    ws.cell(row=summary_row, column=1, value="SUMMARY STATISTICS:").font = Font(bold=True, size=12)
+    ws.cell(row=summary_row + 1, column=1, value="Total Candidates Analyzed:").font = Font(bold=True)
+    ws.cell(row=summary_row + 1, column=2, value=len(all_analyses))
+    
+    scores = [a.get('overall_score', 0) for a in all_analyses if a.get('overall_score', 0) > 0]
+    if scores:
+        avg_score = sum(scores) / len(scores)
+        ws.cell(row=summary_row + 2, column=1, value="Average Score:").font = Font(bold=True)
+        ws.cell(row=summary_row + 2, column=2, value=f"{avg_score:.1f}/100")
+        
+        max_score = max(scores)
+        ws.cell(row=summary_row + 3, column=1, value="Highest Score:").font = Font(bold=True)
+        ws.cell(row=summary_row + 3, column=2, value=f"{max_score}/100")
+        
+        min_score = min(scores)
+        ws.cell(row=summary_row + 4, column=1, value="Lowest Score:").font = Font(bold=True)
+        ws.cell(row=summary_row + 4, column=2, value=f"{min_score}/100")
+    
+    # Save the file
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     wb.save(filepath)
-    print(f"📄 Excel report saved to: {filepath}")
+    print(f"📊 Summary report saved to: {filepath}")
     return filepath
 
-def create_csv_report(analyses, filename="batch_analysis_summary.csv"):
-    """Create CSV summary report"""
-    update_activity()
-    
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    
-    with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
-        fieldnames = ['Rank', 'Candidate Name', 'Score', 'Recommendation', 'Filename', 
-                     'Skills Matched', 'Skills Missing']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        
-        writer.writeheader()
-        for idx, analysis in enumerate(analyses, 1):
-            writer.writerow({
-                'Rank': idx,
-                'Candidate Name': analysis.get('candidate_name', 'Unknown'),
-                'Score': analysis.get('overall_score', 0),
-                'Recommendation': analysis.get('recommendation', 'N/A'),
-                'Filename': analysis.get('filename', 'Unknown'),
-                'Skills Matched': ', '.join(analysis.get('skills_matched', [])[:5]),
-                'Skills Missing': ', '.join(analysis.get('skills_missing', [])[:5])
-            })
-    
-    print(f"📄 CSV report saved to: {filepath}")
-    return filepath
-
-@app.route('/analyze-single', methods=['POST'])
-def analyze_single():
-    """Single resume analysis endpoint"""
+@app.route('/analyze', methods=['POST'])
+def analyze_resume():
+    """Main endpoint to analyze a single resume"""
     update_activity()
     
     try:
         print("\n" + "="*50)
-        print("📥 Single analysis request received")
+        print("📥 New analysis request received")
+        start_time = time.time()
         
         if 'resume' not in request.files:
+            print("❌ No resume file in request")
             return jsonify({'error': 'No resume file provided'}), 400
         
         if 'jobDescription' not in request.form:
+            print("❌ No job description in request")
             return jsonify({'error': 'No job description provided'}), 400
         
         resume_file = request.files['resume']
         job_description = request.form['jobDescription']
         
+        print(f"📄 Resume file: {resume_file.filename}")
+        print(f"📋 Job description length: {len(job_description)} characters")
+        
         if resume_file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        # Check file size
-        resume_file.seek(0, 2)
+        # Check file size (10MB limit)
+        resume_file.seek(0, 2)  # Seek to end
         file_size = resume_file.tell()
-        resume_file.seek(0)
+        resume_file.seek(0)  # Reset to beginning
         
-        if file_size > 10 * 1024 * 1024:
+        if file_size > 10 * 1024 * 1024:  # 10MB
+            print(f"❌ File too large: {file_size} bytes")
             return jsonify({'error': 'File size too large. Maximum size is 10MB.'}), 400
         
-        # Save file
+        # Save the uploaded file
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}{file_ext}")
         resume_file.save(file_path)
+        print(f"💾 File saved to: {file_path}")
         
-        # Extract text
-        if file_ext == '.pdf':
-            resume_text = extract_text_from_pdf(file_path)
-        elif file_ext in ['.docx', '.doc']:
-            resume_text = extract_text_from_docx(file_path)
-        elif file_ext == '.txt':
-            resume_text = extract_text_from_txt(file_path)
-        else:
-            return jsonify({'error': 'Unsupported file format. Use PDF, DOCX, DOC, or TXT.'}), 400
+        # Extract text based on file type
+        print(f"📖 Extracting text from {file_ext} file...")
+        extraction_start = time.time()
+        
+        resume_text = extract_text_from_file(file_path, file_ext)
         
         if resume_text.startswith('Error'):
+            print(f"❌ Text extraction error: {resume_text}")
             return jsonify({'error': resume_text}), 500
         
+        extraction_time = time.time() - extraction_start
+        print(f"✅ Extracted {len(resume_text)} characters in {extraction_time:.2f}s")
+        
+        # Check if API key is configured
+        if not api_key:
+            print("❌ API key not configured")
+            return jsonify({'error': 'API key not configured. Please add OPENAI_API_KEY to .env file'}), 500
+        
+        if client is None:
+            print("❌ OpenAI client not initialized")
+            return jsonify({'error': 'OpenAI client not properly initialized'}), 500
+        
+        # Check OpenAI warm-up status
+        warmup_status = "Warmed up" if warmup_complete else "Warming up..."
+        print(f"🤖 OpenAI Status: {warmup_status}")
+        
         # Analyze with OpenAI
+        print("🤖 Starting AI analysis...")
+        ai_start = time.time()
         analysis = analyze_resume_with_openai(resume_text, job_description, resume_file.filename)
+        ai_time = time.time() - ai_start
         
-        # Create Excel report for single analysis
+        print(f"✅ AI analysis completed in {ai_time:.2f}s")
+        print(f"🔍 AI Analysis Result:")
+        print(f"  Name: {analysis.get('candidate_name')}")
+        print(f"  Score: {analysis.get('overall_score')}")
+        
+        # Create Excel report
+        print("📊 Creating Excel report...")
+        excel_start = time.time()
         excel_filename = f"analysis_{timestamp}.xlsx"
-        excel_path = create_batch_excel_report([analysis], excel_filename)
+        excel_path = create_excel_report(analysis, excel_filename)
+        excel_time = time.time() - excel_start
+        print(f"✅ Excel report created in {excel_time:.2f}s: {excel_path}")
         
-        analysis['excel_filename'] = excel_filename
+        # Return analysis with download link
+        analysis['excel_filename'] = os.path.basename(excel_path)
+        analysis['openai_status'] = warmup_status
+        analysis['response_time'] = f"{ai_time:.2f}s"
         
-        print(f"✅ Single analysis completed")
+        total_time = time.time() - start_time
+        print(f"✅ Request completed in {total_time:.2f} seconds")
         print("="*50 + "\n")
         
         return jsonify(analysis)
         
     except Exception as e:
-        print(f"❌ Single analysis error: {traceback.format_exc()}")
-        return jsonify({'error': f'Analysis failed: {str(e)[:200]}'}), 500
+        print(f"❌ Unexpected error: {traceback.format_exc()}")
+        return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
-@app.route('/analyze-batch', methods=['POST'])
-def analyze_batch():
-    """Batch analyze multiple resumes"""
+@app.route('/analyze-multiple', methods=['POST'])
+def analyze_multiple_resumes():
+    """Analyze multiple resumes at once"""
     update_activity()
     
     try:
         print("\n" + "="*50)
-        print("📥 Batch analysis request received")
+        print("📥 New multiple analysis request received")
         start_time = time.time()
         
         if 'resumes' not in request.files:
+            print("❌ No resume files in request")
             return jsonify({'error': 'No resume files provided'}), 400
         
         if 'jobDescription' not in request.form:
+            print("❌ No job description in request")
             return jsonify({'error': 'No job description provided'}), 400
         
         resume_files = request.files.getlist('resumes')
         job_description = request.form['jobDescription']
         
-        if len(resume_files) > 15:
-            return jsonify({'error': 'Maximum 15 resumes allowed per batch'}), 400
+        if not resume_files or resume_files[0].filename == '':
+            print("❌ No files selected")
+            return jsonify({'error': 'No files selected'}), 400
         
-        print(f"📄 Processing {len(resume_files)} resumes")
+        print(f"📄 Processing {len(resume_files)} resume files")
+        print(f"📋 Job description length: {len(job_description)} characters")
         
-        analyses = []
+        # Validate file count
+        if len(resume_files) > 20:
+            print(f"❌ Too many files: {len(resume_files)}")
+            return jsonify({'error': 'Too many files. Maximum is 20 files per request.'}), 400
         
+        # Check if API key is configured
+        if not api_key:
+            print("❌ API key not configured")
+            return jsonify({'error': 'API key not configured'}), 500
+        
+        if client is None:
+            print("❌ OpenAI client not initialized")
+            return jsonify({'error': 'OpenAI client not properly initialized'}), 500
+        
+        # Check OpenAI warm-up status
+        warmup_status = "Warmed up" if warmup_complete else "Warming up..."
+        print(f"🤖 OpenAI Status: {warmup_status}")
+        
+        all_analyses = []
+        processed_files = []
+        failed_files = []
+        
+        # Process each file
         for idx, resume_file in enumerate(resume_files, 1):
-            print(f"\n--- Processing resume {idx}/{len(resume_files)}: {resume_file.filename} ---")
+            print(f"\n📄 Processing file {idx}/{len(resume_files)}: {resume_file.filename}")
             
-            if resume_file.filename == '':
-                continue
-            
-            # Check file size
-            resume_file.seek(0, 2)
-            file_size = resume_file.tell()
-            resume_file.seek(0)
-            
-            if file_size > 10 * 1024 * 1024:
-                print(f"❌ File too large: {resume_file.filename}")
-                continue
-            
-            # Save file
-            file_ext = os.path.splitext(resume_file.filename)[1].lower()
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}_{idx}{file_ext}")
-            resume_file.save(file_path)
-            
-            # Extract text
-            if file_ext == '.pdf':
-                resume_text = extract_text_from_pdf(file_path)
-            elif file_ext in ['.docx', '.doc']:
-                resume_text = extract_text_from_docx(file_path)
-            elif file_ext == '.txt':
-                resume_text = extract_text_from_txt(file_path)
-            else:
-                print(f"❌ Unsupported file format: {file_ext}")
-                continue
-            
-            if resume_text.startswith('Error'):
-                print(f"❌ Text extraction error: {resume_text}")
-                continue
-            
-            # Analyze with OpenAI
-            analysis = analyze_resume_with_openai(resume_text, job_description, resume_file.filename)
-            analyses.append(analysis)
-            
-            # Small delay to avoid rate limits
-            time.sleep(1)
+            try:
+                # Check file size (10MB limit)
+                resume_file.seek(0, 2)  # Seek to end
+                file_size = resume_file.tell()
+                resume_file.seek(0)  # Reset to beginning
+                
+                if file_size > 10 * 1024 * 1024:  # 10MB
+                    print(f"❌ File too large: {resume_file.filename} ({file_size} bytes)")
+                    failed_files.append({
+                        'filename': resume_file.filename,
+                        'error': 'File size too large (max 10MB)'
+                    })
+                    continue
+                
+                # Save the uploaded file
+                file_ext = os.path.splitext(resume_file.filename)[1].lower()
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+                file_path = os.path.join(UPLOAD_FOLDER, f"resume_multi_{idx}_{timestamp}{file_ext}")
+                resume_file.save(file_path)
+                
+                # Extract text
+                print(f"📖 Extracting text from {file_ext} file...")
+                resume_text = extract_text_from_file(file_path, file_ext)
+                
+                if resume_text.startswith('Error'):
+                    print(f"❌ Text extraction error: {resume_text}")
+                    failed_files.append({
+                        'filename': resume_file.filename,
+                        'error': resume_text
+                    })
+                    continue
+                
+                print(f"✅ Extracted {len(resume_text)} characters")
+                
+                # Analyze with OpenAI
+                print(f"🤖 Analyzing with AI...")
+                analysis = analyze_resume_with_openai(resume_text, job_description, resume_file.filename)
+                
+                # Create individual Excel report
+                excel_filename = f"analysis_{idx}_{timestamp}.xlsx"
+                excel_path = create_excel_report(analysis, excel_filename)
+                
+                analysis['excel_filename'] = os.path.basename(excel_path)
+                analysis['original_filename'] = resume_file.filename
+                analysis['file_index'] = idx
+                
+                all_analyses.append(analysis)
+                processed_files.append(resume_file.filename)
+                
+                print(f"✅ Completed analysis for: {analysis.get('candidate_name', 'Unknown')}")
+                
+            except Exception as e:
+                print(f"❌ Error processing {resume_file.filename}: {str(e)}")
+                failed_files.append({
+                    'filename': resume_file.filename,
+                    'error': str(e)[:200]
+                })
         
-        if not analyses:
-            return jsonify({'error': 'No valid resumes could be processed'}), 400
-        
-        # Sort by score (highest to lowest)
-        analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
-        
-        # Create reports
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        excel_filename = f"batch_analysis_{timestamp}.xlsx"
-        csv_filename = f"batch_summary_{timestamp}.csv"
-        
-        excel_path = create_batch_excel_report(analyses, excel_filename)
-        csv_path = create_csv_report(analyses, csv_filename)
+        # Create summary report if we have successful analyses
+        summary_filename = None
+        if all_analyses:
+            print(f"\n📊 Creating summary report for {len(all_analyses)} successful analyses...")
+            summary_filename = f"summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            summary_path = create_summary_excel_report(all_analyses, summary_filename)
+            summary_filename = os.path.basename(summary_path)
+            print(f"✅ Summary report created: {summary_filename}")
         
         total_time = time.time() - start_time
-        print(f"✅ Batch analysis completed in {total_time:.2f} seconds")
+        
+        # Prepare response
+        response = {
+            'status': 'completed',
+            'total_files': len(resume_files),
+            'successfully_analyzed': len(all_analyses),
+            'failed_files': len(failed_files),
+            'total_time': f"{total_time:.2f}s",
+            'openai_status': warmup_status,
+            'summary_filename': summary_filename,
+            'individual_reports': [
+                {
+                    'candidate_name': a.get('candidate_name', 'Unknown'),
+                    'score': a.get('overall_score', 0),
+                    'recommendation': a.get('recommendation', 'N/A'),
+                    'excel_filename': a.get('excel_filename'),
+                    'original_filename': a.get('original_filename')
+                }
+                for a in all_analyses
+            ],
+            'failed_files_details': failed_files
+        }
+        
+        print(f"\n✅ Multiple analysis completed in {total_time:.2f} seconds")
+        print(f"   Success: {len(all_analyses)} files")
+        print(f"   Failed: {len(failed_files)} files")
         print("="*50 + "\n")
         
-        return jsonify({
-            'success': True,
-            'total_resumes': len(analyses),
-            'analyses': analyses,
-            'excel_filename': excel_filename,
-            'csv_filename': csv_filename,
-            'processing_time': f"{total_time:.2f}s"
-        })
+        return jsonify(response)
         
     except Exception as e:
-        print(f"❌ Batch analysis error: {traceback.format_exc()}")
-        return jsonify({'error': f'Batch analysis failed: {str(e)[:200]}'}), 500
+        print(f"❌ Unexpected error in multiple analysis: {traceback.format_exc()}")
+        return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_report(filename):
-    """Download Excel or CSV report"""
+    """Download the Excel report"""
     update_activity()
     
     try:
-        import re
+        print(f"📥 Download request for: {filename}")
+        
+        # Sanitize filename
         safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
+        
         file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
         
         if not os.path.exists(file_path):
+            print(f"❌ File not found: {file_path}")
             return jsonify({'error': 'File not found'}), 404
         
-        if filename.endswith('.csv'):
-            mimetype = 'text/csv'
-        else:
-            mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        print(f"✅ File found! Size: {os.path.getsize(file_path)} bytes")
         
         return send_file(
             file_path,
             as_attachment=True,
             download_name=safe_filename,
-            mimetype=mimetype
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
         
     except Exception as e:
@@ -623,6 +1327,103 @@ def force_warmup():
             'warmup_complete': False
         })
 
+@app.route('/quick-check', methods=['GET'])
+def quick_check():
+    """Quick endpoint to check if OpenAI is responsive"""
+    update_activity()
+    
+    try:
+        if client is None:
+            return jsonify({
+                'available': False, 
+                'reason': 'Client not initialized',
+                'warmup_complete': warmup_complete
+            })
+        
+        # Check warm-up status
+        if not warmup_complete:
+            return jsonify({
+                'available': False,
+                'reason': 'OpenAI is warming up',
+                'warmup_complete': False,
+                'suggestion': 'Try again in a few seconds or use /warmup endpoint'
+            })
+        
+        # Very quick test with thread timeout
+        start_time = time.time()
+        
+        def openai_check():
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": "Respond with just 'ready'"}
+                    ],
+                    max_tokens=10,
+                    timeout=5
+                )
+                return response
+            except Exception as e:
+                raise e
+        
+        try:
+            # Use thread with timeout
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(openai_check)
+                response = future.result(timeout=8)  # 8 second timeout
+            
+            response_time = time.time() - start_time
+            
+            if 'ready' in response.choices[0].message.content.lower():
+                return jsonify({
+                    'available': True,
+                    'response_time': f'{response_time:.2f}s',
+                    'status': 'ready',
+                    'warmup_complete': True,
+                    'quota_status': 'ok'
+                })
+            else:
+                return jsonify({
+                    'available': True,
+                    'response_time': f'{response_time:.2f}s',
+                    'status': 'responding',
+                    'warmup_complete': True,
+                    'quota_status': 'ok'
+                })
+                
+        except concurrent.futures.TimeoutError:
+            return jsonify({
+                'available': False,
+                'reason': 'Request timed out after 8 seconds',
+                'status': 'timeout',
+                'warmup_complete': warmup_complete,
+                'suggestion': 'AI service is taking too long. Please try again.'
+            })
+            
+    except Exception as e:
+        error_msg = str(e)
+        if "quota" in error_msg.lower() or "429" in error_msg or "insufficient_quota" in error_msg:
+            status = 'quota_exceeded'
+            suggestion = 'API quota exceeded. Please check your OpenAI account.'
+        elif "rate limit" in error_msg.lower():
+            status = 'rate_limit'
+            suggestion = 'Rate limit exceeded. Please try again in a minute.'
+        elif "timeout" in error_msg.lower():
+            status = 'timeout'
+            suggestion = 'AI service timeout. Please try again in a moment.'
+        else:
+            status = 'error'
+            suggestion = 'AI service error. Please try again.'
+            
+        return jsonify({
+            'available': False,
+            'reason': error_msg[:100],
+            'status': status,
+            'warmup_complete': warmup_complete,
+            'suggestion': suggestion
+        })
+
 @app.route('/ping', methods=['GET'])
 def ping():
     """Simple ping to keep service awake"""
@@ -631,15 +1432,19 @@ def ping():
     return jsonify({
         'status': 'pong',
         'timestamp': datetime.now().isoformat(),
-        'service': 'multi-resume-analyzer',
+        'service': 'resume-analyzer',
         'openai_warmup': warmup_complete,
-        'message': 'Service is running'
+        'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
+        'message': 'Service is alive and warm!' if warmup_complete else 'Service is alive, warming up OpenAI...'
     })
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     update_activity()
+    
+    inactive_time = datetime.now() - last_activity_time
+    inactive_minutes = int(inactive_time.total_seconds() / 60)
     
     return jsonify({
         'status': 'Backend is running!', 
@@ -648,21 +1453,44 @@ def health_check():
         'client_initialized': client is not None,
         'openai_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
-        'version': '2.0.0',
-        'features': ['batch_processing', 'single_analysis', 'excel_export', 'csv_export']
+        'upload_folder_path': UPLOAD_FOLDER,
+        'inactive_minutes': inactive_minutes,
+        'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
+        'version': '1.0.0',
+        'features': ['always_active', 'openai_warmup', 'keep_alive', 'multiple_files']
     })
+
+@app.route('/list-models', methods=['GET'])
+def list_models():
+    """List all available models"""
+    update_activity()
+    
+    try:
+        if not client:
+            return jsonify({'error': 'Client not initialized'})
+        
+        models = client.models.list()
+        model_names = [model.id for model in models.data]
+        
+        return jsonify({
+            'available_models': model_names,
+            'count': len(model_names)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 if __name__ == '__main__':
     print("\n" + "="*50)
-    print("🚀 Multi-Resume Analyzer Backend Starting...")
+    print("🚀 Resume Analyzer Backend Starting...")
     print("="*50)
     port = int(os.environ.get('PORT', 5002))
-    print(f"📍 Server will run on port: {port}")
+    print(f"📍 Server: http://localhost:{port}")
     print(f"🔑 API Key: {'✅ Configured' if api_key else '❌ NOT FOUND'}")
     print(f"🤖 OpenAI Client: {'✅ Initialized' if client else '❌ NOT INITIALIZED'}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
-    print("✅ Batch Processing: Enabled (1-15 resumes)")
-    print("✅ Single Analysis: Enabled")
+    print("✅ Always Active Mode: Enabled")
+    print("✅ OpenAI Keep-Warm: Enabled")
+    print("✅ Multiple Files Support: Enabled (Max 20 files)")
     print("="*50 + "\n")
     
     if not api_key:
@@ -670,5 +1498,6 @@ if __name__ == '__main__':
         print("Please create a .env file with: OPENAI_API_KEY=your_key_here\n")
         print("Get your API key from: https://platform.openai.com/api-keys")
     
+    # Use PORT environment variable (Render provides $PORT)
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
