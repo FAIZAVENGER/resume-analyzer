@@ -44,7 +44,7 @@ function App() {
     totalKeys: 0
   });
   
-  // UPDATED: Use your Render backend URL
+  // UPDATED: Point to your Hugging Face backend
   const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
   
   const keepAliveInterval = useRef(null);
@@ -114,8 +114,8 @@ function App() {
 
   const wakeUpBackend = async () => {
     try {
-      console.log('🔔 Waking up backend service...');
-      setLoadingMessage('Waking up backend service...');
+      console.log('🔔 Waking up Hugging Face backend...');
+      setLoadingMessage('Waking up Hugging Face backend...');
       
       // Send multiple pings to ensure backend wakes up
       const pingPromises = [
@@ -125,12 +125,12 @@ function App() {
       
       await Promise.allSettled(pingPromises);
       
-      console.log('✅ Backend is responding');
+      console.log('✅ Hugging Face backend is responding');
       setBackendStatus('ready');
       setLoadingMessage('');
       
     } catch (error) {
-      console.log('⚠️ Backend is waking up...');
+      console.log('⚠️ Hugging Face backend is waking up...');
       setBackendStatus('waking');
       
       // Send a longer timeout request to fully wake it
@@ -138,11 +138,11 @@ function App() {
         axios.get(`${API_BASE_URL}/ping`, { timeout: 15000 })
           .then(() => {
             setBackendStatus('ready');
-            console.log('✅ Backend fully awake');
+            console.log('✅ Hugging Face backend fully awake');
           })
           .catch(() => {
             setBackendStatus('sleeping');
-            console.log('❌ Backend still sleeping');
+            console.log('❌ Hugging Face backend still sleeping');
           });
       }, 3000);
     }
