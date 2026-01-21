@@ -666,28 +666,15 @@ function App() {
     }
   };
 
-  const formatTimeRemaining = (minutes) => {
-    if (minutes > 60) {
-      const hours = Math.floor(minutes / 60);
-      const mins = minutes % 60;
-      return `${hours}h ${mins}m`;
-    }
-    return `${minutes}m`;
-  };
-
   const getModelDisplayName = (modelId) => {
-    if (!modelId) return 'Hugging Face Model';
+    if (!modelId) return 'Hugging Face AI';
     const modelMap = {
-      'mistralai/Mistral-7B-Instruct-v0.2': 'Mistral 7B Instruct',
-      'google/flan-t5-xxl': 'Google Flan-T5 XXL',
-      'microsoft/phi-2': 'Microsoft Phi-2',
-      'meta-llama/Llama-2-7b-chat-hf': 'Llama 2 7B Chat',
-      'tiiuae/falcon-7b-instruct': 'Falcon 7B Instruct',
-      'mistralai/Mixtral-8x7B-Instruct-v0.1': 'Mixtral 8x7B Instruct',
-      'HuggingFaceH4/zephyr-7b-beta': 'Zephyr 7B Beta',
-      'google/gemma-7b-it': 'Gemma 7B Instruct'
+      'mistralai/Mistral-7B-Instruct-v0.2': 'Mistral 7B (Hugging Face)',
+      'google/flan-t5-xxl': 'Google Flan-T5 (Hugging Face)',
+      'microsoft/phi-2': 'Microsoft Phi-2 (Hugging Face)',
+      'meta-llama/Llama-2-7b-chat-hf': 'Llama 2 7B (Hugging Face)',
     };
-    return modelMap[modelId] || modelId.split('/').pop() || 'Hugging Face Model';
+    return modelMap[modelId] || modelId;
   };
 
   return (
