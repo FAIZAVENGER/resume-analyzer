@@ -181,19 +181,19 @@ function App() {
   };
 
   const handleFileChange = (e) => {
-    const files = Array.from(e.target.files);
-    
-    if (analysisMode === 'single' && files.length > 1) {
-      setError('Single mode: Please select only one resume');
-      setResumeFiles(files.slice(0, 1));
-    } else if (analysisMode === 'batch' && files.length > 15) {
-      setError('Maximum 15 resumes allowed');
-      setResumeFiles(files.slice(0, 15));
-    } else {
-      setResumeFiles(files);
-      setError('');
-    }
-  };
+  const files = Array.from(e.target.files);
+  
+  if (analysisMode === 'single' && files.length > 1) {
+    setError('Single mode: Please select only one resume');
+    setResumeFiles(files.slice(0, 1));
+  } else if (analysisMode === 'batch' && files.length > 15) {
+    setError('Maximum 15 resumes allowed');
+    setResumeFiles(files.slice(0, 15));
+  } else {
+    setResumeFiles(files);
+    setError('');
+  }
+};
 
   const removeFile = (index) => {
     setResumeFiles(files => files.filter((_, i) => i !== index));
