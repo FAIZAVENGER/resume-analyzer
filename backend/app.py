@@ -49,7 +49,7 @@ last_activity_time = datetime.now()
 keep_warm_thread = None
 warmup_lock = threading.Lock()
 
-def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=30):
+def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=45):
     """Call Hugging Face Inference API"""
     if not client:
         return None
@@ -66,7 +66,8 @@ def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=30):
             'temperature': temperature,
             'return_full_text': False,
             'do_sample': True,
-            'top_p': 0.95
+            'top_p': 0.95,
+            'repetition_penalty': 1.2
         }
     }
     
@@ -81,22 +82,31 @@ def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=30):
         if response.status_code == 200:
             return response.json()
         elif response.status_code == 503:
-            # Model is loading, get estimated time
+            # Model is loading
             print(f"⏳ Model is loading...")
-            if 'estimated_time' in response.json():
-                estimated = response.json()['estimated_time']
-                print(f"⏰ Estimated loading time: {estimated:.1f} seconds")
-            return None
+            try:
+                error_data = response.json()
+                if 'estimated_time' in error_data:
+                    estimated = error_data['estimated_time']
+                    print(f"⏰ Estimated loading time: {estimated:.1f} seconds")
+            except:
+                pass
+            return {'error': 'model_loading', 'status': 503}
         else:
-            print(f"❌ Hugging Face API Error {response.status_code}: {response.text}")
-            return None
+            print(f"❌ Hugging Face API Error {response.status_code}")
+            try:
+                error_data = response.json()
+                print(f"Error details: {json.dumps(error_data)[:200]}")
+            except:
+                print(f"Response text: {response.text[:200]}")
+            return {'error': f'api_error_{response.status_code}', 'status': response.status_code}
             
     except requests.exceptions.Timeout:
         print(f"❌ Hugging Face API timeout")
-        return None
+        return {'error': 'timeout', 'status': 408}
     except Exception as e:
         print(f"❌ Hugging Face API Exception: {str(e)}")
-        return None
+        return {'error': str(e), 'status': 500}
 
 def warmup_huggingface():
     """Warm up Hugging Face connection"""
@@ -110,15 +120,24 @@ def warmup_huggingface():
         print(f"🔥 Warming up Hugging Face connection with model: {model}...")
         start_time = time.time()
         
-        # Simple test request
+        # Simple test request with minimal content
         response = call_huggingface_api(
-            prompt="Say 'ready'",
+            prompt="Hello, are you ready? Respond with just 'ready'.",
             max_tokens=10,
             temperature=0.1,
-            timeout=10
+            timeout=15
         )
         
-        if response:
+        if isinstance(response, dict) and 'error' in response:
+            if response.get('error') == 'model_loading':
+                print("⚠️ Model is still loading, will retry in 20 seconds")
+                threading.Timer(20.0, warmup_huggingface).start()
+                return False
+            else:
+                print(f"⚠️ Warm-up attempt failed: {response.get('error')}")
+                threading.Timer(30.0, warmup_huggingface).start()
+                return False
+        elif response:
             elapsed = time.time() - start_time
             print(f"✅ Hugging Face warmed up in {elapsed:.2f}s")
             
@@ -127,15 +146,13 @@ def warmup_huggingface():
                 
             return True
         else:
-            print("⚠️ Warm-up attempt failed: No response or model loading")
-            # Schedule retry in 15 seconds
-            threading.Timer(15.0, warmup_huggingface).start()
+            print("⚠️ Warm-up attempt failed: No response")
+            threading.Timer(20.0, warmup_huggingface).start()
             return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        # Schedule retry in 15 seconds
-        threading.Timer(15.0, warmup_huggingface).start()
+        threading.Timer(20.0, warmup_huggingface).start()
         return False
 
 def keep_huggingface_warm():
@@ -143,23 +160,26 @@ def keep_huggingface_warm():
     global last_activity_time
     
     while True:
-        time.sleep(90)  # Check every 90 seconds (less frequent for Hugging Face)
+        time.sleep(120)  # Check every 2 minutes
         
         try:
-            # Check if we've been inactive for more than 3 minutes
+            # Check if we've been inactive for more than 5 minutes
             inactive_time = datetime.now() - last_activity_time
             
-            if client and inactive_time.total_seconds() > 180:  # 3 minutes
+            if client and inactive_time.total_seconds() > 300:  # 5 minutes
                 print("♨️ Keeping Hugging Face warm...")
                 
                 try:
                     # Send a minimal request
-                    call_huggingface_api(
-                        prompt="ping",
+                    response = call_huggingface_api(
+                        prompt="Ping",
                         max_tokens=5,
-                        timeout=5
+                        timeout=10
                     )
-                    print("✅ Keep-alive ping successful")
+                    if response and 'error' not in response:
+                        print("✅ Keep-alive ping successful")
+                    else:
+                        print("⚠️ Keep-alive ping failed or model loading")
                 except Exception as e:
                     print(f"⚠️ Keep-alive ping failed: {str(e)}")
                     
@@ -522,8 +542,8 @@ def extract_text_from_pdf(file_path):
             return "Error: PDF appears to be empty or text could not be extracted"
         
         # Limit text size for performance
-        if len(text) > 6000:
-            text = text[:6000] + "\n[Text truncated for processing...]"
+        if len(text) > 5000:
+            text = text[:5000] + "\n[Text truncated for processing...]"
             
         return text
     except Exception as e:
@@ -541,8 +561,8 @@ def extract_text_from_docx(file_path):
             return "Error: Document appears to be empty"
         
         # Limit text size for performance
-        if len(text) > 6000:
-            text = text[:6000] + "\n[Text truncated for processing...]"
+        if len(text) > 5000:
+            text = text[:5000] + "\n[Text truncated for processing...]"
             
         return text
     except Exception as e:
@@ -565,8 +585,8 @@ def extract_text_from_txt(file_path):
                     return "Error: Text file appears to be empty"
                 
                 # Limit text size for performance
-                if len(text) > 6000:
-                    text = text[:6000] + "\n[Text truncated for processing...]"
+                if len(text) > 5000:
+                    text = text[:5000] + "\n[Text truncated for processing...]"
                     
                 return text
             except UnicodeDecodeError:
@@ -578,118 +598,125 @@ def extract_text_from_txt(file_path):
         print(f"TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
-def fallback_response(reason):
+def fallback_response(reason, filename=None):
     """Return a fallback response when AI fails"""
     update_activity()
     
-    # Create a more informative fallback response
+    # Try to extract name from filename
+    candidate_name = "Professional Candidate"
+    if filename:
+        # Remove extension and common patterns
+        base_name = os.path.splitext(filename)[0]
+        # Clean up the name
+        clean_name = base_name.replace('-', ' ').replace('_', ' ').title()
+        if len(clean_name.split()) <= 4:  # Likely a name
+            candidate_name = clean_name
+    
     return {
-        "candidate_name": "Professional Candidate",
-        "skills_matched": ["Analysis service is warming up", "Please try again in a moment"],
-        "skills_missing": ["AI service is initializing", "Detailed analysis coming soon"],
-        "experience_summary": "The AI analysis service is currently warming up. This usually takes 10-30 seconds. Please try your analysis again shortly for detailed insights into the candidate's experience.",
-        "education_summary": "Educational background analysis will be available once the AI model is fully loaded. The service automatically warms up to provide faster responses.",
+        "candidate_name": candidate_name,
+        "skills_matched": ["AI service is initializing", "Please try again in a moment"],
+        "skills_missing": ["Detailed analysis coming soon", "Service warming up"],
+        "experience_summary": f"The AI analysis service is currently warming up. The Hugging Face model ({model}) is loading and will be ready shortly. Please try again in 30-60 seconds for a detailed analysis of work experience.",
+        "education_summary": f"Educational background analysis will be available once the {model} model is fully loaded. Hugging Face models can take 20-60 seconds to load initially, but then provide fast responses.",
         "overall_score": 0,
         "recommendation": "Service Warming Up - Please Retry",
-        "key_strengths": ["AI service is initializing", "Fast responses once warmed"],
+        "key_strengths": ["Fast analysis once model is loaded", "Accurate skill matching"],
         "areas_for_improvement": ["Please wait for model to load", "Try again in 30 seconds"]
     }
 
-def analyze_resume_with_huggingface(resume_text, job_description):
+def analyze_resume_with_huggingface(resume_text, job_description, filename=None):
     """Use Hugging Face to analyze resume against job description"""
     update_activity()
     
     if client is None:
         print("❌ Hugging Face client not initialized.")
-        return fallback_response("API Configuration Error")
+        return fallback_response("API Configuration Error", filename)
     
     # Check if warm-up is complete
     with warmup_lock:
         if not warmup_complete:
             print("⚠️ Hugging Face not warmed up yet, analysis may be slower")
     
-    # Truncate text for better performance with Hugging Face
+    # Truncate text for better performance
     resume_text = resume_text[:4000]
     job_description = job_description[:1500]
     
-    # Create a well-structured prompt for Hugging Face
-    prompt = f"""Analyze this resume against the job description and provide a detailed analysis in JSON format.
+    # Create a well-structured prompt
+    prompt = f"""Analyze this resume against the job description and provide analysis in JSON format.
 
-RESUME TEXT:
+RESUME:
 {resume_text}
 
 JOB DESCRIPTION:
 {job_description}
 
-Please analyze and provide the following information in JSON format:
-1. Extract the candidate's name from the resume or use "Professional Candidate"
-2. List 5-8 skills from the resume that match the job requirements
-3. List 5-8 important skills from the job description that are missing from the resume
-4. Provide a 2-3 sentence summary of the candidate's work experience
-5. Provide a 2-3 sentence summary of the candidate's education
-6. Calculate an overall match score from 0-100 based on skill matching, experience relevance, and education
-7. Provide a recommendation: "Highly Recommended", "Recommended", "Moderately Recommended", or "Needs Improvement"
-8. List 3-5 key professional strengths
-9. List 3-5 areas for improvement
+Provide analysis in this exact JSON format with these keys:
+{{
+    "candidate_name": "Extract name from resume or use 'Professional Candidate'",
+    "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5"],
+    "skills_missing": ["skill1", "skill2", "skill3", "skill4"],
+    "experience_summary": "2-3 sentence summary of work experience",
+    "education_summary": "2-3 sentence summary of education",
+    "overall_score": 75,
+    "recommendation": "Highly Recommended/Recommended/Moderately Recommended/Needs Improvement",
+    "key_strengths": ["strength1", "strength2", "strength3"],
+    "areas_for_improvement": ["improvement1", "improvement2"]
+}}
 
-Return ONLY valid JSON with these keys:
-candidate_name, skills_matched, skills_missing, experience_summary, education_summary, overall_score, recommendation, key_strengths, areas_for_improvement"""
+IMPORTANT: Return ONLY the JSON object, no other text."""
 
     def call_api():
         try:
             update_activity()
             response = call_huggingface_api(
                 prompt=prompt,
-                max_tokens=1200,
+                max_tokens=1000,
                 temperature=0.4,
-                timeout=45  # Hugging Face can be slower
+                timeout=60  # Hugging Face can be slower
             )
             return response
         except Exception as e:
             print(f"❌ API call error: {str(e)}")
-            return None
-    
+            return {'error': str(e)}
+
     try:
         print("🤖 Sending to Hugging Face...")
         start_time = time.time()
         
-        # Call with timeout
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(call_api)
-            response = future.result(timeout=45)
+        # Try to get response
+        response = call_api()
         
-        if not response:
-            print("❌ No response from Hugging Face - model might be loading")
-            # Try one more time with simpler prompt
-            print("🔄 Trying with simpler prompt...")
-            simple_prompt = f"Analyze resume against job. Resume: {resume_text[:1000]} Job: {job_description[:500]}. Provide JSON with candidate_name, overall_score (0-100), recommendation."
-            
-            simple_response = call_huggingface_api(
-                prompt=simple_prompt,
-                max_tokens=500,
-                temperature=0.3,
-                timeout=30
-            )
-            
-            if not simple_response:
-                print("❌ Simple prompt also failed")
-                return fallback_response("AI Service Loading")
-            
-            response = simple_response
+        if isinstance(response, dict) and 'error' in response:
+            error_type = response.get('error')
+            if error_type == 'model_loading':
+                print("❌ Model is still loading, returning fallback")
+                return fallback_response("Model Loading", filename)
+            elif error_type == 'timeout':
+                print("❌ Hugging Face timeout")
+                return fallback_response("AI Service Timeout", filename)
+            else:
+                print(f"❌ Hugging Face error: {error_type}")
+                return fallback_response(f"AI Service Error: {error_type}", filename)
         
         elapsed_time = time.time() - start_time
         print(f"✅ Hugging Face response in {elapsed_time:.2f} seconds")
         
-        # Extract text from response (Hugging Face returns different format)
+        # Extract text from response
         if isinstance(response, list) and len(response) > 0:
-            result_text = response[0].get('generated_text', '')
-        elif isinstance(response, dict):
-            result_text = response.get('generated_text', '')
+            if isinstance(response[0], dict) and 'generated_text' in response[0]:
+                result_text = response[0]['generated_text']
+            else:
+                result_text = str(response[0])
+        elif isinstance(response, dict) and 'generated_text' in response:
+            result_text = response['generated_text']
+        elif isinstance(response, str):
+            result_text = response
         else:
             result_text = str(response)
         
         # Clean response
         result_text = result_text.strip()
+        print(f"📝 Raw response (first 500 chars): {result_text[:500]}...")
         
         # Try to find JSON in the response
         json_start = result_text.find('{')
@@ -706,33 +733,50 @@ candidate_name, skills_matched, skills_missing, experience_summary, education_su
         # Parse JSON
         try:
             analysis = json.loads(json_str)
+            print(f"✅ Successfully parsed JSON response")
         except json.JSONDecodeError as e:
             print(f"❌ JSON Parse Error: {e}")
-            print(f"Raw response: {result_text[:500]}...")
+            print(f"Attempting to clean and retry...")
             
-            # Try to extract basic info even if JSON is malformed
-            analysis = {
-                "candidate_name": "Professional Candidate",
-                "skills_matched": ["Analysis completed", "Skills evaluation ready"],
-                "skills_missing": ["Review specific requirements"],
-                "experience_summary": f"Analysis completed in {elapsed_time:.1f}s. Candidate's experience has been evaluated against job requirements.",
-                "education_summary": "Educational qualifications have been analyzed for relevance to the position.",
-                "overall_score": 70,
-                "recommendation": "Recommended",
-                "key_strengths": ["Analysis completed successfully", "Detailed evaluation provided"],
-                "areas_for_improvement": ["Consider additional certifications", "Gain more industry experience"]
-            }
+            # Try to clean the JSON string
+            json_str = json_str.replace('\n', ' ').replace('\r', ' ')
+            # Remove any non-ASCII characters
+            json_str = ''.join(char for char in json_str if ord(char) < 128)
+            
+            try:
+                analysis = json.loads(json_str)
+                print(f"✅ Successfully parsed cleaned JSON")
+            except:
+                print(f"❌ Failed to parse even after cleaning")
+                # Create basic analysis from fallback
+                return fallback_response("JSON Parse Error", filename)
         
-        # Ensure required fields exist
-        analysis['candidate_name'] = analysis.get('candidate_name', 'Professional Candidate')
-        analysis['skills_matched'] = analysis.get('skills_matched', ['Analysis completed'])
-        analysis['skills_missing'] = analysis.get('skills_missing', ['Check specific requirements'])
-        analysis['experience_summary'] = analysis.get('experience_summary', 'Candidate demonstrates relevant professional experience suitable for this role.')
-        analysis['education_summary'] = analysis.get('education_summary', 'Candidate possesses appropriate educational qualifications for consideration.')
-        analysis['overall_score'] = min(100, max(0, int(analysis.get('overall_score', 70))))
-        analysis['recommendation'] = analysis.get('recommendation', 'Recommended')
-        analysis['key_strengths'] = analysis.get('key_strengths', ['Strong analytical skills', 'Good communication', 'Technical proficiency'])
-        analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', ['Could benefit from additional training', 'Consider gaining more experience'])
+        # Ensure required fields exist with defaults
+        required_fields = {
+            'candidate_name': 'Professional Candidate',
+            'skills_matched': ['Analysis completed successfully'],
+            'skills_missing': ['Check specific requirements'],
+            'experience_summary': 'Candidate demonstrates relevant professional experience suitable for this role based on resume evaluation.',
+            'education_summary': 'Candidate possesses appropriate educational qualifications for consideration in this position.',
+            'overall_score': 70,
+            'recommendation': 'Consider for Interview',
+            'key_strengths': ['Strong analytical skills', 'Good communication abilities', 'Technical proficiency'],
+            'areas_for_improvement': ['Could benefit from additional specific training', 'Consider gaining more industry experience']
+        }
+        
+        for field, default_value in required_fields.items():
+            if field not in analysis:
+                analysis[field] = default_value
+        
+        # Ensure score is valid
+        try:
+            score = int(analysis['overall_score'])
+            if score < 0 or score > 100:
+                analysis['overall_score'] = 70
+            else:
+                analysis['overall_score'] = score
+        except:
+            analysis['overall_score'] = 70
         
         # Limit array lengths
         analysis['skills_matched'] = analysis['skills_matched'][:8]
@@ -740,24 +784,19 @@ candidate_name, skills_matched, skills_missing, experience_summary, education_su
         analysis['key_strengths'] = analysis['key_strengths'][:5]
         analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:5]
         
-        print(f"✅ Analysis completed for: {analysis['candidate_name']}")
+        # Ensure all values are strings (not lists)
+        for field in ['experience_summary', 'education_summary', 'recommendation']:
+            if isinstance(analysis[field], list):
+                analysis[field] = ' '.join(analysis[field])
+        
+        print(f"✅ Analysis completed for: {analysis['candidate_name']} (Score: {analysis['overall_score']})")
         
         return analysis
         
-    except concurrent.futures.TimeoutError:
-        print("❌ Hugging Face API timeout after 45 seconds")
-        return fallback_response("AI Service Timeout")
-        
     except Exception as e:
         print(f"❌ Hugging Face Analysis Error: {str(e)}")
-        error_msg = str(e).lower()
-        
-        if "quota" in error_msg or "429" in error_msg:
-            return fallback_response("API Rate Limit")
-        elif "timeout" in error_msg:
-            return fallback_response("AI Service Timeout")
-        else:
-            return fallback_response("AI Service Error")
+        traceback.print_exc()
+        return fallback_response(f"AI Service Error: {str(e)[:100]}", filename)
 
 def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     """Create a beautiful Excel report with the analysis"""
@@ -1024,7 +1063,7 @@ def analyze_resume():
         # Analyze with Hugging Face
         print("🤖 Starting AI analysis...")
         ai_start = time.time()
-        analysis = analyze_resume_with_huggingface(resume_text, job_description)
+        analysis = analyze_resume_with_huggingface(resume_text, job_description, resume_file.filename)
         ai_time = time.time() - ai_start
         
         print(f"✅ AI analysis completed in {ai_time:.2f}s")
@@ -1069,32 +1108,37 @@ def analyze_resume_batch():
         
         # Check for files
         if 'resumes' not in request.files:
-            files = request.files.getlist('resume') or request.files.getlist('files')
-            if not files:
-                return jsonify({'error': 'No resume files provided'}), 400
-            resume_files = files
-        else:
-            resume_files = request.files.getlist('resumes')
+            print("❌ No 'resumes' key in request.files")
+            return jsonify({'error': 'No resume files provided'}), 400
+        
+        resume_files = request.files.getlist('resumes')
         
         # Check for job description
         if 'jobDescription' not in request.form:
+            print("❌ No job description in request")
             return jsonify({'error': 'No job description provided'}), 400
+        
         job_description = request.form['jobDescription']
         
         if len(resume_files) == 0:
+            print("❌ No files selected")
             return jsonify({'error': 'No files selected'}), 400
         
         print(f"📦 Batch size: {len(resume_files)} resumes")
+        print(f"📋 Job description: {job_description[:100]}...")
         
         # Limit batch size
-        if len(resume_files) > 15:
-            return jsonify({'error': 'Maximum 15 resumes allowed per batch'}), 400
+        if len(resume_files) > 10:
+            print(f"❌ Too many files: {len(resume_files)}")
+            return jsonify({'error': 'Maximum 10 resumes allowed per batch'}), 400
         
         # Check API key
         if not api_key:
+            print("❌ API key not configured")
             return jsonify({'error': 'API key not configured'}), 500
         
         if client is None:
+            print("❌ Hugging Face client not initialized")
             return jsonify({'error': 'Hugging Face client not initialized'}), 500
         
         # Prepare batch analysis
@@ -1105,10 +1149,20 @@ def analyze_resume_batch():
             try:
                 print(f"\n📄 Processing resume {idx + 1}/{len(resume_files)}: {resume_file.filename}")
                 
+                # Skip empty files
+                if resume_file.filename == '':
+                    print(f"⚠️ Skipping empty file at index {idx}")
+                    errors.append({'filename': 'Empty file', 'error': 'File has no name'})
+                    continue
+                
                 # Check file size
                 resume_file.seek(0, 2)
                 file_size = resume_file.tell()
                 resume_file.seek(0)
+                
+                if file_size == 0:
+                    errors.append({'filename': resume_file.filename, 'error': 'File is empty'})
+                    continue
                 
                 if file_size > 10 * 1024 * 1024:
                     errors.append({'filename': resume_file.filename, 'error': 'File too large (max 10MB)'})
@@ -1138,8 +1192,9 @@ def analyze_resume_batch():
                     continue
                 
                 # Analyze
-                analysis = analyze_resume_with_huggingface(resume_text, job_description)
+                analysis = analyze_resume_with_huggingface(resume_text, job_description, resume_file.filename)
                 analysis['filename'] = resume_file.filename
+                analysis['original_filename'] = resume_file.filename
                 analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
                 
                 all_analyses.append(analysis)
@@ -1150,8 +1205,12 @@ def analyze_resume_batch():
                 print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
                 
             except Exception as e:
-                errors.append({'filename': resume_file.filename, 'error': str(e)[:200]})
+                error_msg = f"Processing error: {str(e)[:100]}"
+                errors.append({'filename': resume_file.filename, 'error': error_msg})
+                print(f"❌ Error: {error_msg}")
                 continue
+        
+        print(f"\n📊 Batch processing complete. Successful: {len(all_analyses)}, Failed: {len(errors)}")
         
         # Sort by score
         all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
@@ -1160,13 +1219,16 @@ def analyze_resume_batch():
         for rank, analysis in enumerate(all_analyses, 1):
             analysis['rank'] = rank
         
-        # Create Excel report
+        # Create Excel report if we have analyses
+        excel_path = None
         if all_analyses:
-            print("📊 Creating batch Excel report...")
-            excel_filename = f"batch_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            excel_path = create_batch_excel_report(all_analyses, job_description, excel_filename)
-        else:
-            excel_path = None
+            try:
+                print("📊 Creating batch Excel report...")
+                excel_filename = f"batch_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                excel_path = create_batch_excel_report(all_analyses, job_description, excel_filename)
+                print(f"✅ Excel report created: {excel_path}")
+            except Exception as e:
+                print(f"❌ Failed to create Excel report: {str(e)}")
         
         # Prepare response
         batch_summary = {
@@ -1182,7 +1244,7 @@ def analyze_resume_batch():
             'processing_time': f"{time.time() - start_time:.2f}s"
         }
         
-        print(f"✅ Batch analysis completed")
+        print(f"✅ Batch analysis completed in {time.time() - start_time:.2f}s")
         print("="*50 + "\n")
         
         return jsonify(batch_summary)
@@ -1452,7 +1514,7 @@ def quick_check():
                 response = call_huggingface_api(
                     prompt="Say 'ready'",
                     max_tokens=10,
-                    timeout=8
+                    timeout=15
                 )
                 return response
             except Exception as e:
@@ -1461,11 +1523,20 @@ def quick_check():
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(huggingface_check)
-                response = future.result(timeout=12)
+                response = future.result(timeout=20)
             
             response_time = time.time() - start_time
             
-            if response:
+            if isinstance(response, dict) and 'error' in response:
+                return jsonify({
+                    'available': False,
+                    'response_time': f'{response_time:.2f}s',
+                    'status': 'error',
+                    'error': response.get('error'),
+                    'model': model,
+                    'warmup_complete': warmup_complete
+                })
+            elif response:
                 return jsonify({
                     'available': True,
                     'response_time': f'{response_time:.2f}s',
@@ -1485,7 +1556,7 @@ def quick_check():
         except concurrent.futures.TimeoutError:
             return jsonify({
                 'available': False,
-                'reason': 'Request timed out after 12 seconds',
+                'reason': 'Request timed out after 20 seconds',
                 'status': 'timeout',
                 'model': model,
                 'warmup_complete': warmup_complete
@@ -1535,7 +1606,7 @@ def health_check():
         'upload_folder_path': UPLOAD_FOLDER,
         'inactive_minutes': inactive_minutes,
         'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
-        'version': '2.1.0',
+        'version': '3.0.0',
         'features': ['always_active', 'huggingface', 'batch_processing', 'keep_alive']
     })
 
@@ -1545,19 +1616,14 @@ def list_models():
     update_activity()
     
     try:
-        if not api_key:
-            return jsonify({'error': 'API key not configured'})
-        
         # Popular Hugging Face models for inference
         popular_models = [
-            {'id': 'mistralai/Mistral-7B-Instruct-v0.2', 'name': 'Mistral 7B Instruct', 'provider': 'Mistral AI', 'free': True},
-            {'id': 'google/flan-t5-xxl', 'name': 'Google Flan-T5 XXL', 'provider': 'Google', 'free': True},
-            {'id': 'microsoft/phi-2', 'name': 'Microsoft Phi-2', 'provider': 'Microsoft', 'free': True},
-            {'id': 'meta-llama/Llama-2-7b-chat-hf', 'name': 'Llama 2 7B Chat', 'provider': 'Meta', 'free': True},
-            {'id': 'tiiuae/falcon-7b-instruct', 'name': 'Falcon 7B Instruct', 'provider': 'TII', 'free': True},
-            {'id': 'mistralai/Mixtral-8x7B-Instruct-v0.1', 'name': 'Mixtral 8x7B Instruct', 'provider': 'Mistral AI', 'free': True},
-            {'id': 'HuggingFaceH4/zephyr-7b-beta', 'name': 'Zephyr 7B Beta', 'provider': 'Hugging Face', 'free': True},
-            {'id': 'google/gemma-7b-it', 'name': 'Gemma 7B Instruct', 'provider': 'Google', 'free': True},
+            {'id': 'mistralai/Mistral-7B-Instruct-v0.2', 'name': 'Mistral 7B Instruct', 'provider': 'Mistral AI'},
+            {'id': 'google/flan-t5-xxl', 'name': 'Google Flan-T5 XXL', 'provider': 'Google'},
+            {'id': 'microsoft/phi-2', 'name': 'Microsoft Phi-2', 'provider': 'Microsoft'},
+            {'id': 'meta-llama/Llama-2-7b-chat-hf', 'name': 'Llama 2 7B Chat', 'provider': 'Meta'},
+            {'id': 'tiiuae/falcon-7b-instruct', 'name': 'Falcon 7B Instruct', 'provider': 'TII'},
+            {'id': 'HuggingFaceH4/zephyr-7b-beta', 'name': 'Zephyr 7B Beta', 'provider': 'Hugging Face'},
         ]
         
         return jsonify({
@@ -1585,7 +1651,7 @@ if __name__ == '__main__':
     
     if not api_key:
         print("⚠️  WARNING: HUGGINGFACE_API_KEY not found!")
-        print("Please create a .env file with: HUGGINGFACE_API_KEY=your_key_here\n")
+        print("Please set HUGGINGFACE_API_KEY in Render environment variables")
         print("Get your API key from: https://huggingface.co/settings/tokens")
         print("Free tier: 30k tokens/month")
     
