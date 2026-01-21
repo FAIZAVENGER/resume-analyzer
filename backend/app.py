@@ -23,22 +23,38 @@ CORS(app)
 
 # Configure Hugging Face Router API
 api_key = os.getenv('HUGGINGFACE_API_KEY')
-# Using smaller model that works better with Router API
-model = os.getenv('HUGGINGFACE_MODEL', 'mistralai/Mistral-7B-Instruct-v0.1')
+# Use Together AI as fallback
+together_api_key = os.getenv('TOGETHER_API_KEY')
+model = os.getenv('HUGGINGFACE_MODEL', 'mistralai/Mistral-7B-Instruct-v0.2')
 
-if not api_key:
-    print("❌ ERROR: HUGGINGFACE_API_KEY not found in .env file!")
-    print("Get your free API key from: https://huggingface.co/settings/tokens")
-    client = None
-else:
+# Track which API is available
+api_provider = None
+api_config = {}
+
+if api_key:
     print(f"✅ Hugging Face API Key loaded: {api_key[:10]}...")
     print(f"✅ Using model: {model}")
-    # Using the new Hugging Face Router API
-    client = {
+    # Try Hugging Face Router API first
+    api_config['huggingface'] = {
         'api_key': api_key,
         'model': model,
-        'api_url': "https://router.huggingface.co/huggingface/v1/chat/completions"  # New Router API
+        'api_url': 'https://router.huggingface.co/huggingface'
     }
+    api_provider = 'huggingface'
+elif together_api_key:
+    print(f"✅ Together AI API Key loaded: {together_api_key[:10]}...")
+    print(f"✅ Using Together AI with model: {model}")
+    api_config['together'] = {
+        'api_key': together_api_key,
+        'model': model,
+        'api_url': 'https://api.together.xyz/v1/chat/completions'
+    }
+    api_provider = 'together'
+else:
+    print("⚠️ WARNING: No API key found!")
+    print("Please set either HUGGINGFACE_API_KEY or TOGETHER_API_KEY in .env file")
+    print("Get Hugging Face token: https://huggingface.co/settings/tokens")
+    print("Get Together AI key: https://api.together.ai")
 
 # Get absolute path for uploads folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,31 +68,87 @@ last_activity_time = datetime.now()
 keep_warm_thread = None
 warmup_lock = threading.Lock()
 
-def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=90):
+def call_huggingface_router_api(prompt, max_tokens=800, temperature=0.3, timeout=60):
     """Call Hugging Face Router API"""
-    if not client:
+    if not api_config.get('huggingface'):
         return None
     
+    config = api_config['huggingface']
     headers = {
-        'Authorization': f'Bearer {client["api_key"]}',
+        'Authorization': f'Bearer {config["api_key"]}',
         'Content-Type': 'application/json'
     }
     
-    # New Router API format - chat completions
     payload = {
-        'model': client['model'],
+        'inputs': prompt,
+        'parameters': {
+            'max_new_tokens': max_tokens,
+            'temperature': temperature,
+            'return_full_text': False,
+            'do_sample': True,
+            'top_p': 0.95,
+            'repetition_penalty': 1.2
+        }
+    }
+    
+    try:
+        response = requests.post(
+            config['api_url'],
+            headers=headers,
+            json=payload,
+            timeout=timeout
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 503:
+            print(f"⏳ Model is loading...")
+            return {'error': 'model_loading', 'status': 503}
+        elif response.status_code == 429:
+            print(f"❌ Rate limit exceeded")
+            return {'error': 'rate_limit', 'status': 429}
+        else:
+            print(f"❌ Hugging Face Router API Error {response.status_code}")
+            try:
+                error_data = response.json()
+                print(f"Error details: {json.dumps(error_data)[:200]}")
+            except:
+                print(f"Response text: {response.text[:200]}")
+            return {'error': f'api_error_{response.status_code}', 'status': response.status_code}
+            
+    except requests.exceptions.Timeout:
+        print(f"❌ Hugging Face Router API timeout")
+        return {'error': 'timeout', 'status': 408}
+    except Exception as e:
+        print(f"❌ Hugging Face Router API Exception: {str(e)}")
+        return {'error': str(e), 'status': 500}
+
+def call_together_api(prompt, max_tokens=800, temperature=0.3, timeout=60):
+    """Call Together AI API"""
+    if not api_config.get('together'):
+        return None
+    
+    config = api_config['together']
+    headers = {
+        'Authorization': f'Bearer {config["api_key"]}',
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        'model': config['model'],
         'messages': [
             {"role": "user", "content": prompt}
         ],
         'max_tokens': max_tokens,
         'temperature': temperature,
         'top_p': 0.95,
-        'repetition_penalty': 1.2
+        'repetition_penalty': 1.2,
+        'stop': ['</s>', '[/INST]', '</end>']
     }
     
     try:
         response = requests.post(
-            client['api_url'],
+            config['api_url'],
             headers=headers,
             json=payload,
             timeout=timeout
@@ -86,19 +158,12 @@ def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=90):
             data = response.json()
             if 'choices' in data and len(data['choices']) > 0:
                 return data['choices'][0]['message']['content']
-            return data
-        elif response.status_code == 503:
-            # Model is loading
-            print(f"⏳ Model is loading...")
-            return {'error': 'model_loading', 'status': 503}
+            return None
         elif response.status_code == 429:
-            print(f"❌ Rate limit exceeded")
+            print(f"❌ Together AI rate limit exceeded")
             return {'error': 'rate_limit', 'status': 429}
-        elif response.status_code == 402:
-            print(f"❌ Payment required - free tier exceeded")
-            return {'error': 'payment_required', 'status': 402}
         else:
-            print(f"❌ Hugging Face API Error {response.status_code}")
+            print(f"❌ Together AI API Error {response.status_code}")
             try:
                 error_data = response.json()
                 print(f"Error details: {json.dumps(error_data)[:200]}")
@@ -107,26 +172,45 @@ def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=90):
             return {'error': f'api_error_{response.status_code}', 'status': response.status_code}
             
     except requests.exceptions.Timeout:
-        print(f"❌ Hugging Face API timeout")
+        print(f"❌ Together AI API timeout")
         return {'error': 'timeout', 'status': 408}
     except Exception as e:
-        print(f"❌ Hugging Face API Exception: {str(e)}")
+        print(f"❌ Together AI API Exception: {str(e)}")
         return {'error': str(e), 'status': 500}
 
-def warmup_huggingface():
-    """Warm up Hugging Face connection"""
-    global warmup_complete
+def call_ai_api(prompt, max_tokens=800, temperature=0.3, timeout=60):
+    """Call AI API with fallback between providers"""
+    # First try the current provider
+    if api_provider == 'huggingface':
+        response = call_huggingface_router_api(prompt, max_tokens, temperature, timeout)
+        if isinstance(response, dict) and 'error' in response:
+            if response.get('error') == 'api_error_410' or response.get('status') == 410:
+                print("⚠️ Hugging Face Router API failed, trying Together AI...")
+                # Switch to Together AI if available
+                if api_config.get('together'):
+                    global api_provider
+                    api_provider = 'together'
+                    return call_together_api(prompt, max_tokens, temperature, timeout)
+        return response
+    elif api_provider == 'together':
+        return call_together_api(prompt, max_tokens, temperature, timeout)
     
-    if client is None:
-        print("⚠️ Skipping Hugging Face warm-up: Client not initialized")
+    return None
+
+def warmup_ai_service():
+    """Warm up AI service connection"""
+    global warmup_complete, api_provider
+    
+    if not api_config:
+        print("⚠️ Skipping AI warm-up: No API configured")
         return False
     
     try:
-        print(f"🔥 Warming up Hugging Face Router API with model: {model}...")
+        print(f"🔥 Warming up {api_provider.upper()} connection...")
         start_time = time.time()
         
-        # Simple test request with minimal content
-        response = call_huggingface_api(
+        # Simple test request
+        response = call_ai_api(
             prompt="Hello, are you ready? Respond with just 'ready'.",
             max_tokens=10,
             temperature=0.1,
@@ -134,57 +218,45 @@ def warmup_huggingface():
         )
         
         if isinstance(response, dict) and 'error' in response:
-            if response.get('error') == 'model_loading':
-                print("⚠️ Model is still loading, will retry in 30 seconds")
-                threading.Timer(30.0, warmup_huggingface).start()
-                return False
-            elif response.get('error') == 'payment_required':
-                print("⚠️ Free tier limit exceeded. Will use enhanced fallback mode.")
-                with warmup_lock:
-                    warmup_complete = True  # Mark as complete but will use fallback
-                return True
-            else:
-                print(f"⚠️ Warm-up attempt failed: {response.get('error')}")
-                # Try again in 30 seconds
-                threading.Timer(30.0, warmup_huggingface).start()
-                return False
-        elif response and 'ready' in str(response).lower():
+            print(f"⚠️ Warm-up attempt failed: {response.get('error')}")
+            # Try again in 30 seconds
+            threading.Timer(30.0, warmup_ai_service).start()
+            return False
+        elif response:
             elapsed = time.time() - start_time
-            print(f"✅ Hugging Face Router API warmed up in {elapsed:.2f}s")
+            print(f"✅ {api_provider.upper()} warmed up in {elapsed:.2f}s")
             
             with warmup_lock:
                 warmup_complete = True
                 
             return True
         else:
-            print(f"⚠️ Warm-up got unexpected response: {response}")
-            # Consider it warmed up if we got any response
-            with warmup_lock:
-                warmup_complete = True
-            return True
+            print("⚠️ Warm-up attempt failed: No response")
+            threading.Timer(30.0, warmup_ai_service).start()
+            return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        threading.Timer(30.0, warmup_huggingface).start()
+        threading.Timer(30.0, warmup_ai_service).start()
         return False
 
-def keep_huggingface_warm():
-    """Periodically send requests to keep Hugging Face connection alive"""
+def keep_ai_warm():
+    """Periodically send requests to keep AI service alive"""
     global last_activity_time
     
     while True:
-        time.sleep(300)  # Check every 5 minutes (to save credits)
+        time.sleep(300)  # Check every 5 minutes
         
         try:
             # Check if we've been inactive for more than 10 minutes
             inactive_time = datetime.now() - last_activity_time
             
-            if client and inactive_time.total_seconds() > 600:  # 10 minutes
-                print("♨️ Keeping Hugging Face warm...")
+            if api_config and inactive_time.total_seconds() > 600:  # 10 minutes
+                print(f"♨️ Keeping {api_provider.upper()} warm...")
                 
                 try:
                     # Send a minimal request
-                    response = call_huggingface_api(
+                    response = call_ai_api(
                         prompt="Ping - just say 'pong'",
                         max_tokens=5,
                         timeout=20
@@ -205,20 +277,20 @@ def update_activity():
     last_activity_time = datetime.now()
 
 # Start warm-up on app start
-if client:
-    print("🚀 Starting Hugging Face Router API warm-up...")
-    warmup_thread = threading.Thread(target=warmup_huggingface, daemon=True)
+if api_config:
+    print(f"🚀 Starting {api_provider.upper()} warm-up...")
+    warmup_thread = threading.Thread(target=warmup_ai_service, daemon=True)
     warmup_thread.start()
     
     # Start keep-warm thread
-    keep_warm_thread = threading.Thread(target=keep_huggingface_warm, daemon=True)
+    keep_warm_thread = threading.Thread(target=keep_ai_warm, daemon=True)
     keep_warm_thread.start()
     print("✅ Keep-warm thread started")
 
 @app.route('/')
 def home():
     """Root route - API landing page"""
-    global warmup_complete, last_activity_time
+    global warmup_complete, last_activity_time, api_provider, model
     
     update_activity()
     
@@ -226,6 +298,7 @@ def home():
     inactive_minutes = int(inactive_time.total_seconds() / 60)
     
     warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
+    provider_display = api_provider.upper() if api_provider else "Not Configured"
     
     return f'''
     <!DOCTYPE html>
@@ -429,12 +502,17 @@ def home():
             color: #ff9800;
             font-weight: 600;
         }}
+        
+        .info {{
+            color: #2196f3;
+            font-weight: 600;
+        }}
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🤖 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis using Hugging Face Router API • Always Active</p>
+        <p class="subtitle">AI-powered resume analysis • Always Active</p>
         
         <div class="api-status">
             ✅ API IS RUNNING
@@ -443,7 +521,7 @@ def home():
         <div class="warmup-status">
             <div class="warmup-dot"></div>
             <div>
-                <strong>Hugging Face Router Status:</strong> {warmup_status}
+                <strong>AI Service Status:</strong> {warmup_status}
                 <br>
                 <small>Last activity: {inactive_minutes} minute(s) ago</small>
             </div>
@@ -455,15 +533,15 @@ def home():
                 <span class="status-value">Always Active ♨️</span>
             </div>
             <div class="status-item">
-                <span class="status-label">Hugging Face API:</span>
-                {'<span class="success">✅ Configured (' + api_key[:10] + '...)</span>' if api_key else '<span class="error">❌ NOT FOUND</span>'}
+                <span class="status-label">AI Provider:</span>
+                <span class="status-value info">{provider_display}</span>
             </div>
             <div class="status-item">
                 <span class="status-label">Model:</span>
                 <span class="status-value">{model}</span>
             </div>
             <div class="status-item">
-                <span class="status-label">Router API Status:</span>
+                <span class="status-label">AI Service Status:</span>
                 {'<span class="success">✅ Warmed Up</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
             </div>
             <div class="status-item">
@@ -496,7 +574,7 @@ def home():
             <div class="endpoint">
                 <span class="method">GET</span>
                 <span class="path">/warmup</span>
-                <p class="description">Force warm-up Hugging Face connection</p>
+                <p class="description">Force warm-up AI service connection</p>
             </div>
             
             <div class="endpoint">
@@ -520,20 +598,20 @@ def home():
             <div class="endpoint">
                 <span class="method">GET</span>
                 <span class="path">/models</span>
-                <p class="description">List available Hugging Face models</p>
+                <p class="description">List available AI models</p>
             </div>
         </div>
         
         <div class="buttons">
             <a href="/health" class="btn">Check Health</a>
-            <a href="/warmup" class="btn btn-warmup">Warm Up Hugging Face</a>
+            <a href="/warmup" class="btn btn-warmup">Warm Up AI Service</a>
             <a href="/models" class="btn">Available Models</a>
             <a href="/ping" class="btn btn-secondary">Ping Service</a>
         </div>
         
         <div class="footer">
-            <p>Powered by Flask & Hugging Face Router API | Deployed on Render | Always Active Mode</p>
-            <p>Hugging Face Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
+            <p>Powered by Flask & AI Services | Deployed on Render | Always Active Mode</p>
+            <p>AI Service: {provider_display} | Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
         </div>
     </div>
 </body>
@@ -555,8 +633,8 @@ def extract_text_from_pdf(file_path):
             return "Error: PDF appears to be empty or text could not be extracted"
         
         # Limit text size for performance
-        if len(text) > 3000:  # Reduced for API limits
-            text = text[:3000] + "\n[Text truncated for processing...]"
+        if len(text) > 5000:
+            text = text[:5000] + "\n[Text truncated for processing...]"
             
         return text
     except Exception as e:
@@ -574,8 +652,8 @@ def extract_text_from_docx(file_path):
             return "Error: Document appears to be empty"
         
         # Limit text size for performance
-        if len(text) > 3000:
-            text = text[:3000] + "\n[Text truncated for processing...]"
+        if len(text) > 5000:
+            text = text[:5000] + "\n[Text truncated for processing...]"
             
         return text
     except Exception as e:
@@ -598,8 +676,8 @@ def extract_text_from_txt(file_path):
                     return "Error: Text file appears to be empty"
                 
                 # Limit text size for performance
-                if len(text) > 3000:
-                    text = text[:3000] + "\n[Text truncated for processing...]"
+                if len(text) > 5000:
+                    text = text[:5000] + "\n[Text truncated for processing...]"
                     
                 return text
             except UnicodeDecodeError:
@@ -627,33 +705,34 @@ def fallback_response(reason, filename=None):
     
     return {
         "candidate_name": candidate_name,
-        "skills_matched": ["Enhanced analysis mode", "Basic skill matching"],
-        "skills_missing": ["Detailed AI analysis unavailable", "Using enhanced fallback"],
-        "experience_summary": f"Enhanced analysis: Resume processed with fallback mode. For detailed AI analysis, ensure Hugging Face Router API is properly configured with valid credits.",
-        "education_summary": f"Educational background analyzed using enhanced fallback mode.",
+        "skills_matched": ["AI service is initializing", "Please try again in a moment"],
+        "skills_missing": ["Detailed analysis coming soon", "Service warming up"],
+        "experience_summary": f"The AI analysis service is currently warming up. The {api_provider} model ({model}) is loading and will be ready shortly.",
+        "education_summary": f"Educational background analysis will be available once the {model} model is fully loaded.",
         "overall_score": 50,
-        "recommendation": "Enhanced Analysis Mode",
-        "key_strengths": ["Basic analysis completed", "File processed successfully"],
-        "areas_for_improvement": ["Enable Hugging Face Router API for detailed AI analysis", "Configure API key with credits"]
+        "recommendation": "Service Warming Up - Please Retry",
+        "key_strengths": ["Fast analysis once model is loaded", "Accurate skill matching"],
+        "areas_for_improvement": ["Please wait for model to load", "Try again in 30 seconds"],
+        "ai_provider": api_provider,
+        "ai_status": "Warming up"
     }
 
-def analyze_resume_with_huggingface(resume_text, job_description, filename=None):
-    """Use Hugging Face Router API to analyze resume against job description"""
+def analyze_resume_with_ai(resume_text, job_description, filename=None):
+    """Use AI to analyze resume against job description"""
     update_activity()
     
-    if client is None:
-        print("❌ Hugging Face client not initialized.")
+    if not api_config:
+        print("❌ No AI service configured.")
         return fallback_response("API Configuration Error", filename)
     
     # Check if warm-up is complete
     with warmup_lock:
         if not warmup_complete:
-            print("⚠️ Hugging Face Router API not warmed up yet, using enhanced fallback")
-            return fallback_response("Router API Warming", filename)
+            print(f"⚠️ {api_provider.upper()} not warmed up yet, analysis may be slower")
     
-    # Truncate text for API limits
-    resume_text = resume_text[:2000]  # Further reduced for Router API limits
-    job_description = job_description[:800]
+    # Truncate text for better performance
+    resume_text = resume_text[:3000]
+    job_description = job_description[:1000]
     
     # Create a well-structured prompt
     prompt = f"""Analyze this resume against the job description and provide analysis in JSON format.
@@ -667,54 +746,64 @@ JOB DESCRIPTION:
 Provide analysis in this exact JSON format with these keys:
 {{
     "candidate_name": "Extract name from resume or use 'Professional Candidate'",
-    "skills_matched": ["skill1", "skill2", "skill3"],
-    "skills_missing": ["skill1", "skill2"],
+    "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5"],
+    "skills_missing": ["skill1", "skill2", "skill3", "skill4"],
     "experience_summary": "2-3 sentence summary of work experience",
     "education_summary": "2-3 sentence summary of education",
     "overall_score": 75,
     "recommendation": "Highly Recommended/Recommended/Moderately Recommended/Needs Improvement",
-    "key_strengths": ["strength1", "strength2"],
+    "key_strengths": ["strength1", "strength2", "strength3"],
     "areas_for_improvement": ["improvement1", "improvement2"]
 }}
 
 IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown formatting."""
 
     try:
-        print("🤖 Sending to Hugging Face Router API...")
+        print(f"🤖 Sending to {api_provider.upper()}...")
         start_time = time.time()
         
         # Try to get response
-        response = call_huggingface_api(
+        response = call_ai_api(
             prompt=prompt,
-            max_tokens=500,  # Reduced for Router API
+            max_tokens=600,
             temperature=0.4,
-            timeout=60
+            timeout=90
         )
         
         if isinstance(response, dict) and 'error' in response:
             error_type = response.get('error')
             if error_type == 'model_loading':
-                print("❌ Model is still loading, returning enhanced fallback")
+                print("❌ Model is still loading, returning fallback")
                 return fallback_response("Model Loading", filename)
-            elif error_type == 'payment_required':
-                print("❌ Payment required - free credits exceeded")
-                return fallback_response("API Credits Exceeded", filename)
             elif error_type == 'timeout':
-                print("❌ Hugging Face timeout")
+                print("❌ AI service timeout")
                 return fallback_response("AI Service Timeout", filename)
             elif error_type == 'rate_limit':
-                print("❌ Hugging Face rate limit exceeded")
+                print("❌ Rate limit exceeded")
                 return fallback_response("Rate Limit Exceeded", filename)
             else:
-                print(f"❌ Hugging Face error: {error_type}")
+                print(f"❌ AI service error: {error_type}")
                 return fallback_response(f"AI Service Error: {error_type}", filename)
         
         elapsed_time = time.time() - start_time
-        print(f"✅ Hugging Face Router API response in {elapsed_time:.2f} seconds")
+        print(f"✅ {api_provider.upper()} response in {elapsed_time:.2f} seconds")
+        
+        # Extract text from response
+        if isinstance(response, list) and len(response) > 0:
+            if isinstance(response[0], dict) and 'generated_text' in response[0]:
+                result_text = response[0]['generated_text']
+            else:
+                result_text = str(response[0])
+        elif isinstance(response, dict) and 'generated_text' in response:
+            result_text = response['generated_text']
+        elif isinstance(response, str):
+            result_text = response
+        else:
+            result_text = str(response)
         
         # Clean response
-        result_text = str(response).strip()
-        print(f"📝 Raw response (first 300 chars): {result_text[:300]}...")
+        result_text = result_text.strip()
+        print(f"📝 Raw response (first 500 chars): {result_text[:500]}...")
         
         # Try to find JSON in the response
         json_start = result_text.find('{')
@@ -738,17 +827,18 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
             
             # Create basic analysis from text
             if "candidate" in result_text.lower() or "skill" in result_text.lower():
-                # Try to extract some information
                 return {
                     "candidate_name": "Professional Candidate",
-                    "skills_matched": ["AI analysis completed via Router API", "Basic skill matching"],
-                    "skills_missing": ["Review detailed output"],
-                    "experience_summary": f"Analysis completed using Hugging Face Router API ({model}).",
-                    "education_summary": "Educational background evaluated.",
+                    "skills_matched": ["AI analysis completed", "Check specific match details"],
+                    "skills_missing": ["Review detailed analysis for missing skills"],
+                    "experience_summary": f"Analysis completed using {api_provider.upper()}. The AI has processed your resume and job description.",
+                    "education_summary": "Educational qualifications have been evaluated by the AI model.",
                     "overall_score": 65,
                     "recommendation": "Consider for Review",
-                    "key_strengths": ["Router API analysis", "AI-powered evaluation"],
-                    "areas_for_improvement": ["Check specific requirements"]
+                    "key_strengths": ["AI-powered analysis", "Quick processing", "Comprehensive evaluation"],
+                    "areas_for_improvement": ["Review specific skill requirements"],
+                    "ai_provider": api_provider,
+                    "ai_status": "Warmed up"
                 }
             else:
                 return fallback_response("JSON Parse Error", filename)
@@ -762,8 +852,8 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
             'education_summary': 'Candidate possesses appropriate educational qualifications for consideration in this position.',
             'overall_score': 70,
             'recommendation': 'Consider for Interview',
-            'key_strengths': ['Strong analytical skills', 'Good communication abilities'],
-            'areas_for_improvement': ['Could benefit from additional specific training']
+            'key_strengths': ['Strong analytical skills', 'Good communication abilities', 'Technical proficiency'],
+            'areas_for_improvement': ['Could benefit from additional specific training', 'Consider gaining more industry experience']
         }
         
         for field, default_value in required_fields.items():
@@ -781,10 +871,10 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
             analysis['overall_score'] = 70
         
         # Limit array lengths
-        analysis['skills_matched'] = analysis['skills_matched'][:4]
-        analysis['skills_missing'] = analysis['skills_missing'][:4]
-        analysis['key_strengths'] = analysis['key_strengths'][:3]
-        analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:3]
+        analysis['skills_matched'] = analysis['skills_matched'][:6]
+        analysis['skills_missing'] = analysis['skills_missing'][:6]
+        analysis['key_strengths'] = analysis['key_strengths'][:4]
+        analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:4]
         
         # Ensure all values are strings (not lists)
         for field in ['experience_summary', 'education_summary', 'recommendation']:
@@ -793,12 +883,16 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
             elif not isinstance(analysis[field], str):
                 analysis[field] = str(analysis[field])
         
+        # Add AI provider info
+        analysis['ai_provider'] = api_provider
+        analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
+        
         print(f"✅ Analysis completed for: {analysis['candidate_name']} (Score: {analysis['overall_score']})")
         
         return analysis
         
     except Exception as e:
-        print(f"❌ Hugging Face Analysis Error: {str(e)}")
+        print(f"❌ AI Analysis Error: {str(e)}")
         traceback.print_exc()
         return fallback_response(f"AI Service Error: {str(e)[:100]}", filename)
 
@@ -854,6 +948,12 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     ws[f'A{row}'].font = subheader_font
     ws[f'A{row}'].fill = subheader_fill
     ws[f'B{row}'] = model
+    row += 1
+    
+    ws[f'A{row}'] = "AI Provider"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = api_provider.upper() if api_provider else 'N/A'
     row += 2
     
     # Overall Score
@@ -1055,19 +1155,15 @@ def analyze_resume():
         extraction_time = time.time() - extraction_start
         print(f"✅ Extracted {len(resume_text)} characters in {extraction_time:.2f}s")
         
-        # Check API key
-        if not api_key:
-            print("❌ API key not configured")
-            return jsonify({'error': 'API key not configured. Please add HUGGINGFACE_API_KEY to .env file'}), 500
+        # Check API configuration
+        if not api_config:
+            print("❌ No AI service configured")
+            return jsonify({'error': 'AI service not configured. Please set API keys in environment variables'}), 500
         
-        if client is None:
-            print("❌ Hugging Face client not initialized")
-            return jsonify({'error': 'Hugging Face client not properly initialized'}), 500
-        
-        # Analyze with Hugging Face Router API
-        print("🤖 Starting AI analysis with Router API...")
+        # Analyze with AI
+        print("🤖 Starting AI analysis...")
         ai_start = time.time()
-        analysis = analyze_resume_with_huggingface(resume_text, job_description, resume_file.filename)
+        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename)
         ai_time = time.time() - ai_start
         
         print(f"✅ AI analysis completed in {ai_time:.2f}s")
@@ -1087,7 +1183,7 @@ def analyze_resume():
         # Return analysis
         analysis['excel_filename'] = os.path.basename(excel_path)
         analysis['ai_model'] = model
-        analysis['ai_status'] = "Router API Ready" if warmup_complete else "Router API Warming"
+        analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['response_time'] = f"{ai_time:.2f}s"
         
         total_time = time.time() - start_time
@@ -1132,18 +1228,14 @@ def analyze_resume_batch():
         print(f"📋 Job description: {job_description[:100]}...")
         
         # Limit batch size
-        if len(resume_files) > 3:  # Further reduced for Router API limits
+        if len(resume_files) > 5:
             print(f"❌ Too many files: {len(resume_files)}")
-            return jsonify({'error': 'Maximum 3 resumes allowed per batch for Router API'}), 400
+            return jsonify({'error': 'Maximum 5 resumes allowed per batch for free tier'}), 400
         
-        # Check API key
-        if not api_key:
-            print("❌ API key not configured")
-            return jsonify({'error': 'API key not configured'}), 500
-        
-        if client is None:
-            print("❌ Hugging Face client not initialized")
-            return jsonify({'error': 'Hugging Face client not initialized'}), 500
+        # Check API configuration
+        if not api_config:
+            print("❌ No AI service configured")
+            return jsonify({'error': 'AI service not configured'}), 500
         
         # Prepare batch analysis
         all_analyses = []
@@ -1196,7 +1288,7 @@ def analyze_resume_batch():
                     continue
                 
                 # Analyze
-                analysis = analyze_resume_with_huggingface(resume_text, job_description, resume_file.filename)
+                analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename)
                 analysis['filename'] = resume_file.filename
                 analysis['original_filename'] = resume_file.filename
                 analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
@@ -1210,7 +1302,7 @@ def analyze_resume_batch():
                 
                 # Add delay between requests to avoid rate limiting
                 if idx < len(resume_files) - 1:
-                    time.sleep(3)  # Longer delay for Router API
+                    time.sleep(2)
                 
             except Exception as e:
                 error_msg = f"Processing error: {str(e)[:100]}"
@@ -1248,7 +1340,8 @@ def analyze_resume_batch():
             'batch_excel_filename': os.path.basename(excel_path) if excel_path else None,
             'analyses': all_analyses,
             'model_used': model,
-            'ai_status': "Router API Ready" if warmup_complete else "Router API Warming",
+            'ai_provider': api_provider,
+            'ai_status': "Warmed up" if warmup_complete else "Warming up",
             'processing_time': f"{time.time() - start_time:.2f}s"
         }
         
@@ -1309,6 +1402,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         ("Total Resumes", len(analyses)),
         ("AI Model", model),
+        ("AI Provider", api_provider.upper() if api_provider else "Unknown"),
         ("Job Description", job_description[:100] + ("..." if len(job_description) > 100 else "")),
     ]
     
@@ -1463,23 +1557,24 @@ def download_report(filename):
 
 @app.route('/warmup', methods=['GET'])
 def force_warmup():
-    """Force warm-up Hugging Face connection"""
+    """Force warm-up AI service"""
     update_activity()
     
     try:
-        if client is None:
+        if not api_config:
             return jsonify({
                 'status': 'error',
-                'message': 'Hugging Face client not initialized',
+                'message': 'AI service not configured',
                 'warmup_complete': False
             })
         
-        result = warmup_huggingface()
+        result = warmup_ai_service()
         
         return jsonify({
             'status': 'success' if result else 'error',
-            'message': 'Hugging Face warmed up successfully' if result else 'Warm-up failed',
+            'message': f'{api_provider.upper()} warmed up successfully' if result else 'Warm-up failed',
             'warmup_complete': warmup_complete,
+            'ai_provider': api_provider,
             'model': model,
             'timestamp': datetime.now().isoformat()
         })
@@ -1493,14 +1588,14 @@ def force_warmup():
 
 @app.route('/quick-check', methods=['GET'])
 def quick_check():
-    """Quick endpoint to check if Hugging Face is responsive"""
+    """Quick endpoint to check if AI service is responsive"""
     update_activity()
     
     try:
-        if client is None:
+        if not api_config:
             return jsonify({
                 'available': False, 
-                'reason': 'Client not initialized',
+                'reason': 'AI service not configured',
                 'warmup_complete': warmup_complete
             })
         
@@ -1508,8 +1603,9 @@ def quick_check():
         if not warmup_complete:
             return jsonify({
                 'available': False,
-                'reason': 'Hugging Face Router API is warming up',
+                'reason': f'{api_provider.upper()} is warming up',
                 'warmup_complete': False,
+                'ai_provider': api_provider,
                 'model': model,
                 'suggestion': 'Try again in a few seconds or use /warmup endpoint'
             })
@@ -1517,9 +1613,9 @@ def quick_check():
         # Quick test
         start_time = time.time()
         
-        def huggingface_check():
+        def ai_service_check():
             try:
-                response = call_huggingface_api(
+                response = call_ai_api(
                     prompt="Say 'ready'",
                     max_tokens=10,
                     timeout=20
@@ -1530,7 +1626,7 @@ def quick_check():
         
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(huggingface_check)
+                future = executor.submit(ai_service_check)
                 response = future.result(timeout=30)
             
             response_time = time.time() - start_time
@@ -1541,6 +1637,7 @@ def quick_check():
                     'response_time': f'{response_time:.2f}s',
                     'status': 'error',
                     'error': response.get('error'),
+                    'ai_provider': api_provider,
                     'model': model,
                     'warmup_complete': warmup_complete
                 })
@@ -1549,6 +1646,7 @@ def quick_check():
                     'available': True,
                     'response_time': f'{response_time:.2f}s',
                     'status': 'ready',
+                    'ai_provider': api_provider,
                     'model': model,
                     'warmup_complete': True
                 })
@@ -1557,6 +1655,7 @@ def quick_check():
                     'available': False,
                     'response_time': f'{response_time:.2f}s',
                     'status': 'no_response',
+                    'ai_provider': api_provider,
                     'model': model,
                     'warmup_complete': warmup_complete
                 })
@@ -1566,6 +1665,7 @@ def quick_check():
                 'available': False,
                 'reason': 'Request timed out after 30 seconds',
                 'status': 'timeout',
+                'ai_provider': api_provider,
                 'model': model,
                 'warmup_complete': warmup_complete
             })
@@ -1576,6 +1676,7 @@ def quick_check():
             'available': False,
             'reason': error_msg[:100],
             'status': 'error',
+            'ai_provider': api_provider,
             'model': model,
             'warmup_complete': warmup_complete
         })
@@ -1589,10 +1690,11 @@ def ping():
         'status': 'pong',
         'timestamp': datetime.now().isoformat(),
         'service': 'resume-analyzer',
-        'huggingface_warmup': warmup_complete,
+        'ai_provider': api_provider,
+        'ai_warmup': warmup_complete,
         'model': model,
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
-        'message': 'Service is alive and warm!' if warmup_complete else 'Service is alive, warming up Hugging Face...'
+        'message': f'Service is alive and {api_provider} is warm!' if warmup_complete else f'Service is alive, warming up {api_provider}...'
     })
 
 @app.route('/health', methods=['GET'])
@@ -1606,38 +1708,48 @@ def health_check():
     return jsonify({
         'status': 'Backend is running!', 
         'timestamp': datetime.now().isoformat(),
-        'api_key_configured': bool(api_key),
-        'client_initialized': client is not None,
+        'ai_provider': api_provider,
+        'ai_provider_configured': bool(api_config),
         'model': model,
-        'huggingface_warmup_complete': warmup_complete,
+        'ai_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'upload_folder_path': UPLOAD_FOLDER,
         'inactive_minutes': inactive_minutes,
         'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
         'version': '4.0.0',
-        'features': ['always_active', 'huggingface_router', 'batch_processing', 'enhanced_fallback']
+        'features': ['always_active', 'multi_provider_support', 'batch_processing', 'keep_alive']
     })
 
 @app.route('/models', methods=['GET'])
 def list_models():
-    """List available Hugging Face models"""
+    """List available AI models"""
     update_activity()
     
     try:
-        # Models compatible with Hugging Face Router API
-        router_models = [
-            {'id': 'mistralai/Mistral-7B-Instruct-v0.1', 'name': 'Mistral 7B Instruct', 'provider': 'Mistral AI', 'type': 'Router API'},
-            {'id': 'google/flan-t5-xxl', 'name': 'Google Flan-T5 XXL', 'provider': 'Google', 'type': 'Router API'},
-            {'id': 'microsoft/phi-2', 'name': 'Microsoft Phi-2', 'provider': 'Microsoft', 'type': 'Router API'},
-            {'id': 'meta-llama/Llama-2-7b-chat-hf', 'name': 'Llama 2 7B Chat', 'provider': 'Meta', 'type': 'Router API'},
+        # Available models for different providers
+        huggingface_models = [
+            {'id': 'mistralai/Mistral-7B-Instruct-v0.2', 'name': 'Mistral 7B Instruct', 'provider': 'Hugging Face'},
+            {'id': 'google/flan-t5-xxl', 'name': 'Google Flan-T5 XXL', 'provider': 'Hugging Face'},
+            {'id': 'microsoft/phi-2', 'name': 'Microsoft Phi-2', 'provider': 'Hugging Face'},
+        ]
+        
+        together_models = [
+            {'id': 'mistralai/Mixtral-8x7B-Instruct-v0.1', 'name': 'Mixtral 8x7B Instruct', 'provider': 'Together AI'},
+            {'id': 'meta-llama/Llama-2-70b-chat-hf', 'name': 'Llama 2 70B Chat', 'provider': 'Together AI'},
+            {'id': 'togethercomputer/CodeLlama-34b-Instruct', 'name': 'CodeLlama 34B Instruct', 'provider': 'Together AI'},
         ]
         
         return jsonify({
-            'available_models': router_models,
+            'available_models': {
+                'huggingface': huggingface_models,
+                'together': together_models
+            },
+            'current_provider': api_provider,
             'current_model': model,
-            'count': len(router_models),
-            'api_type': 'Hugging Face Router API',
-            'documentation': 'https://huggingface.co/docs/api-inference/index'
+            'documentation': {
+                'huggingface': 'https://huggingface.co/models',
+                'together': 'https://docs.together.ai/docs/models-inference'
+            }
         })
     except Exception as e:
         return jsonify({'error': str(e)})
@@ -1648,19 +1760,20 @@ if __name__ == '__main__':
     print("="*50)
     port = int(os.environ.get('PORT', 5002))
     print(f"📍 Server: http://localhost:{port}")
-    print(f"🔑 Hugging Face API Key: {'✅ Configured' if api_key else '❌ NOT FOUND'}")
-    print(f"🤖 Model: {model}")
+    print(f"🤖 AI Provider: {api_provider.upper() if api_provider else 'NOT CONFIGURED'}")
+    print(f"🧠 Model: {model}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print("✅ Always Active Mode: Enabled")
-    print("✅ Hugging Face Router API: Enabled")
-    print("✅ Enhanced Fallback Mode: Enabled")
+    print("✅ AI Keep-Warm: Enabled")
+    print("✅ Batch Processing: Enabled")
     print("="*50 + "\n")
     
-    if not api_key:
-        print("⚠️  WARNING: HUGGINGFACE_API_KEY not found!")
-        print("Please set HUGGINGFACE_API_KEY in Render environment variables")
-        print("Get your API key from: https://huggingface.co/settings/tokens")
-        print("Note: Router API may require credits for some models")
+    if not api_config:
+        print("⚠️  WARNING: No API key found!")
+        print("Please set one of the following in Render environment variables:")
+        print("1. HUGGINGFACE_API_KEY (Get from: https://huggingface.co/settings/tokens)")
+        print("2. TOGETHER_API_KEY (Get from: https://api.together.ai)")
+        print("\nNote: Hugging Face Router API may require payment for some models")
     
     # Use PORT environment variable
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
