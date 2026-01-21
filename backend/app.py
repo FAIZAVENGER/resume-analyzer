@@ -23,10 +23,12 @@ CORS(app)
 
 # Configure Hugging Face API
 api_key = os.getenv('HUGGINGFACE_API_KEY')
+# Use a reliable, free model from Hugging Face that's typically available
 model = os.getenv('HUGGINGFACE_MODEL', 'mistralai/Mistral-7B-Instruct-v0.2')
 
 if not api_key:
     print("❌ ERROR: HUGGINGFACE_API_KEY not found in .env file!")
+    print("Get your free API key from: https://huggingface.co/settings/tokens")
     client = None
 else:
     print(f"✅ Hugging Face API Key loaded: {api_key[:10]}...")
@@ -49,7 +51,7 @@ last_activity_time = datetime.now()
 keep_warm_thread = None
 warmup_lock = threading.Lock()
 
-def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=45):
+def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=60):
     """Call Hugging Face Inference API"""
     if not client:
         return None
@@ -125,16 +127,17 @@ def warmup_huggingface():
             prompt="Hello, are you ready? Respond with just 'ready'.",
             max_tokens=10,
             temperature=0.1,
-            timeout=15
+            timeout=30
         )
         
         if isinstance(response, dict) and 'error' in response:
             if response.get('error') == 'model_loading':
-                print("⚠️ Model is still loading, will retry in 20 seconds")
-                threading.Timer(20.0, warmup_huggingface).start()
+                print("⚠️ Model is still loading, will retry in 30 seconds")
+                threading.Timer(30.0, warmup_huggingface).start()
                 return False
             else:
                 print(f"⚠️ Warm-up attempt failed: {response.get('error')}")
+                # Try again in 30 seconds
                 threading.Timer(30.0, warmup_huggingface).start()
                 return False
         elif response:
@@ -147,12 +150,12 @@ def warmup_huggingface():
             return True
         else:
             print("⚠️ Warm-up attempt failed: No response")
-            threading.Timer(20.0, warmup_huggingface).start()
+            threading.Timer(30.0, warmup_huggingface).start()
             return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        threading.Timer(20.0, warmup_huggingface).start()
+        threading.Timer(30.0, warmup_huggingface).start()
         return False
 
 def keep_huggingface_warm():
@@ -174,7 +177,7 @@ def keep_huggingface_warm():
                     response = call_huggingface_api(
                         prompt="Ping",
                         max_tokens=5,
-                        timeout=10
+                        timeout=20
                     )
                     if response and 'error' not in response:
                         print("✅ Keep-alive ping successful")
@@ -672,7 +675,7 @@ IMPORTANT: Return ONLY the JSON object, no other text."""
                 prompt=prompt,
                 max_tokens=1000,
                 temperature=0.4,
-                timeout=60  # Hugging Face can be slower
+                timeout=90  # Hugging Face can be slower
             )
             return response
         except Exception as e:
@@ -1514,7 +1517,7 @@ def quick_check():
                 response = call_huggingface_api(
                     prompt="Say 'ready'",
                     max_tokens=10,
-                    timeout=15
+                    timeout=20
                 )
                 return response
             except Exception as e:
@@ -1523,7 +1526,7 @@ def quick_check():
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(huggingface_check)
-                response = future.result(timeout=20)
+                response = future.result(timeout=30)
             
             response_time = time.time() - start_time
             
@@ -1556,7 +1559,7 @@ def quick_check():
         except concurrent.futures.TimeoutError:
             return jsonify({
                 'available': False,
-                'reason': 'Request timed out after 20 seconds',
+                'reason': 'Request timed out after 30 seconds',
                 'status': 'timeout',
                 'model': model,
                 'warmup_complete': warmup_complete
