@@ -4,7 +4,53 @@
   padding: 0;
   box-sizing: border-box;
 }
+/* Fix for full screen layout */
+html, body {
+  width: 100vw;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
 
+.app {
+  width: 100vw;
+  max-width: 100vw;
+  min-height: 100vh;
+}
+
+/* Make all containers full width */
+.header,
+.main-content,
+.footer {
+  width: 100vw;
+  max-width: 100vw;
+}
+
+/* Remove max-width constraints for full screen */
+.header-content,
+.main-content,
+.footer-content,
+.footer-bottom {
+  max-width: none !important;
+  width: 100% !important;
+}
+
+/* Ensure content stretches */
+.upload-section,
+.results-section {
+  width: 100% !important;
+}
+
+/* Fix for upload grid on large screens */
+.upload-grid {
+  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)) !important;
+  gap: 2rem !important;
+}
+
+@media (min-width: 1400px) {
+  .upload-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+}
 :root {
   --primary: #6366f1;
   --primary-glow: #818cf8;
