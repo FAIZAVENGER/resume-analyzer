@@ -14,13 +14,12 @@ from dotenv import load_dotenv
 import traceback
 import threading
 import csv
-import io
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Configure OpenAI API
 api_key = os.getenv('OPENAI_API_KEY')
@@ -61,7 +60,7 @@ def warmup_openai():
         start_time = time.time()
         
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-3.5-turbo",  # Changed to gpt-3.5-turbo for reliability
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": "Just respond with 'ready'"}
@@ -98,7 +97,7 @@ def keep_openai_warm():
                 
                 try:
                     client.chat.completions.create(
-                        model="gpt-4o-mini",
+                        model="gpt-3.5-turbo",
                         messages=[{"role": "user", "content": "ping"}],
                         max_tokens=5,
                         timeout=5
@@ -128,109 +127,19 @@ if client:
 @app.route('/')
 def home():
     """Root route - API landing page"""
-    global warmup_complete, last_activity_time
-    
     update_activity()
     
-    inactive_time = datetime.now() - last_activity_time
-    inactive_minutes = int(inactive_time.total_seconds() / 60)
-    
-    warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
-    
-    return f'''
-    <!DOCTYPE html>
-<html>
-<head>
-    <title>Multi-Resume Analyzer API</title>
-    <style>
-        body {{
-            font-family: 'Arial', sans-serif;
-            margin: 0;
-            padding: 40px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }}
-        
-        .container {{
-            max-width: 800px;
-            width: 100%;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            padding: 40px;
-            text-align: center;
-        }}
-        
-        h1 {{
-            color: #2c3e50;
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }}
-        
-        .subtitle {{
-            color: #7f8c8d;
-            font-size: 1.1rem;
-            margin-bottom: 30px;
-        }}
-        
-        .status-card {{
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            border-radius: 15px;
-            padding: 20px;
-            margin: 20px 0;
-            border-left: 5px solid #667eea;
-        }}
-        
-        .status-item {{
-            display: flex;
-            justify-content: space-between;
-            margin: 10px 0;
-            padding: 8px 0;
-            border-bottom: 1px solid #e0e0e0;
-        }}
-        
-        .status-label {{
-            font-weight: 600;
-            color: #2c3e50;
-        }}
-        
-        .status-value {{
-            color: #27ae60;
-            font-weight: 600;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🤖 Multi-Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered batch resume analysis using OpenAI • Always Active</p>
-        
-        <div class="status-card">
-            <div class="status-item">
-                <span class="status-label">Service Status:</span>
-                <span class="status-value">✅ Active</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">OpenAI Status:</span>
-                <span class="status-value">{warmup_status}</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">Batch Processing:</span>
-                <span class="status-value">✅ Enabled (1-15 resumes)</span>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-    '''
+    return jsonify({
+        "status": "Multi-Resume Analyzer API is running",
+        "version": "2.0.0",
+        "endpoints": {
+            "/analyze-batch": "POST - Analyze multiple resumes",
+            "/analyze-single": "POST - Analyze single resume",
+            "/health": "GET - Health check",
+            "/warmup": "GET - Warm up OpenAI",
+            "/ping": "GET - Ping service"
+        }
+    })
 
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file"""
@@ -299,42 +208,31 @@ def extract_text_from_txt(file_path):
         print(f"TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
-def fallback_response(reason, filename="Unknown"):
-    """Return a fallback response when AI fails"""
-    update_activity()
-    return {
-        "candidate_name": f"Candidate from {os.path.splitext(filename)[0]}",
-        "filename": filename,
-        "skills_matched": ["Analysis temporarily unavailable"],
-        "skills_missing": ["AI service issue"],
-        "experience_summary": "Analysis temporarily unavailable. Please try again shortly.",
-        "education_summary": "AI service is currently busy. Please refresh and try again.",
-        "overall_score": 0,
-        "recommendation": "Service Error - Please Retry",
-        "key_strengths": ["Server is warming up"],
-        "areas_for_improvement": ["Please try again in a moment"],
-        "error": reason
-    }
-
 def analyze_resume_with_openai(resume_text, job_description, filename="Unknown"):
     """Use OpenAI to analyze resume against job description"""
     update_activity()
     
     if client is None:
         print("❌ OpenAI client not initialized.")
-        return fallback_response("API Configuration Error", filename)
-    
-    with warmup_lock:
-        if not warmup_complete:
-            print("⚠️ OpenAI not warmed up yet, warming now...")
-            warmup_openai()
+        return {
+            "candidate_name": f"Candidate from {os.path.splitext(filename)[0]}",
+            "filename": filename,
+            "skills_matched": ["Analysis temporarily unavailable"],
+            "skills_missing": ["API configuration issue"],
+            "experience_summary": "Analysis service is not properly configured.",
+            "education_summary": "Please check OpenAI API key configuration.",
+            "overall_score": 0,
+            "recommendation": "Service Error",
+            "key_strengths": ["Server configuration needed"],
+            "areas_for_improvement": ["Configure OpenAI API key"]
+        }
     
     resume_text = resume_text[:6000]
     job_description = job_description[:2500]
     
-    system_prompt = """You are an expert resume analyzer. Analyze resumes against job descriptions and provide detailed insights. Extract the candidate's name from the resume if available."""
+    system_prompt = """You are an expert resume analyzer. Analyze resumes against job descriptions and provide detailed insights."""
     
-    user_prompt = f"""RESUME ANALYSIS - PROVIDE DETAILED SUMMARIES:
+    user_prompt = f"""RESUME ANALYSIS:
 Analyze this resume against the job description and provide comprehensive insights.
 
 RESUME TEXT:
@@ -343,47 +241,32 @@ RESUME TEXT:
 JOB DESCRIPTION:
 {job_description}
 
-IMPORTANT: Provide detailed and comprehensive summaries (2-3 sentences each) for experience and education.
-
-Return ONLY this JSON with detailed information:
+IMPORTANT: Return ONLY this JSON format:
 {{
-    "candidate_name": "Extract full name from resume or use filename without extension as candidate name",
-    "skills_matched": ["List 5-8 relevant skills from resume that match the job requirements"],
-    "skills_missing": ["List 5-8 important skills from job description not found in resume"],
-    "experience_summary": "Provide a comprehensive 2-3 sentence summary of work experience, including years of experience, key roles, industries, and major accomplishments mentioned in the resume.",
-    "education_summary": "Provide a detailed 2-3 sentence summary of educational background, including degrees, institutions, fields of study, graduation years, and any academic achievements mentioned.",
-    "overall_score": "Calculate 0-100 score based on skill match, experience relevance, and education alignment",
+    "candidate_name": "Extract name from resume or use filename",
+    "skills_matched": ["List relevant skills matching job requirements"],
+    "skills_missing": ["List important skills missing from resume"],
+    "experience_summary": "2-3 sentence summary of work experience",
+    "education_summary": "2-3 sentence summary of education",
+    "overall_score": "0-100 score based on match",
     "recommendation": "Highly Recommended/Recommended/Moderately Recommended/Needs Improvement",
-    "key_strengths": ["List 3-5 key professional strengths evident from the resume"],
-    "areas_for_improvement": ["List 3-5 areas where the candidate could improve to better match this role"]
-}}
+    "key_strengths": ["List 3-5 key strengths"],
+    "areas_for_improvement": ["List 3-5 areas for improvement"]
+}}"""
 
-Ensure summaries are detailed, professional, and comprehensive."""
-
-    def call_openai():
-        try:
-            update_activity()
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.3,
-                max_tokens=1500,
-                response_format={"type": "json_object"}
-            )
-            return response
-        except Exception as e:
-            raise e
-    
     try:
         print(f"🤖 Analyzing {filename}...")
         start_time = time.time()
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(call_openai)
-            response = future.result(timeout=30)
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",  # Using gpt-3.5-turbo for reliability
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.3,
+            max_tokens=1500
+        )
         
         elapsed_time = time.time() - start_time
         print(f"✅ Analyzed {filename} in {elapsed_time:.2f}s")
@@ -395,7 +278,7 @@ Ensure summaries are detailed, professional, and comprehensive."""
         analysis['filename'] = filename
         
         # If candidate name wasn't extracted, use filename
-        if analysis['candidate_name'] == "Extract full name from resume or use filename without extension as candidate name":
+        if 'candidate_name' not in analysis or analysis['candidate_name'] == "Extract name from resume or use filename":
             name_from_file = os.path.splitext(filename)[0]
             analysis['candidate_name'] = name_from_file.replace('_', ' ').replace('-', ' ').title()
         
@@ -404,27 +287,16 @@ Ensure summaries are detailed, professional, and comprehensive."""
         except:
             analysis['overall_score'] = 0
             
-        experience_summary = analysis.get('experience_summary', '')
-        education_summary = analysis.get('education_summary', '')
-        
-        if len(experience_summary.split()) < 15:
-            experience_summary = "Professional with relevant experience as indicated in the resume. Demonstrates competence in required areas with potential for growth in this role."
-        
-        if len(education_summary.split()) < 10:
-            education_summary = "Qualified candidate with appropriate educational background as shown in the resume. Possesses the foundational knowledge required for this position."
-        
-        analysis['experience_summary'] = experience_summary
-        analysis['education_summary'] = education_summary
-        analysis['skills_matched'] = analysis.get('skills_matched', [])[:8]
-        analysis['skills_missing'] = analysis.get('skills_missing', [])[:8]
-        analysis['key_strengths'] = analysis.get('key_strengths', [])[:5]
-        analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:5]
+        # Ensure all fields exist
+        analysis.setdefault('skills_matched', [])
+        analysis.setdefault('skills_missing', [])
+        analysis.setdefault('experience_summary', 'No experience summary available.')
+        analysis.setdefault('education_summary', 'No education summary available.')
+        analysis.setdefault('recommendation', 'Not Specified')
+        analysis.setdefault('key_strengths', [])
+        analysis.setdefault('areas_for_improvement', [])
         
         return analysis
-        
-    except concurrent.futures.TimeoutError:
-        print(f"❌ OpenAI timeout for {filename}")
-        return fallback_response("AI Timeout", filename)
         
     except Exception as e:
         print(f"❌ Error analyzing {filename}: {str(e)}")
@@ -435,11 +307,11 @@ Ensure summaries are detailed, professional, and comprehensive."""
             "filename": filename,
             "skills_matched": ["Analysis completed"],
             "skills_missing": ["Check requirements"],
-            "experience_summary": "Experienced professional with relevant background suitable for this position.",
-            "education_summary": "Qualified candidate with appropriate educational qualifications.",
+            "experience_summary": "Experienced professional with relevant background.",
+            "education_summary": "Qualified candidate with appropriate education.",
             "overall_score": 70,
             "recommendation": "Consider for Interview",
-            "key_strengths": ["Adaptable learner", "Problem-solving skills"],
+            "key_strengths": ["Adaptable", "Problem-solver"],
             "areas_for_improvement": ["Could enhance specific skills"]
         }
 
@@ -496,95 +368,9 @@ def create_batch_excel_report(analyses, filename="batch_analysis_report.xlsx"):
         ws_summary.cell(idx, 4, analysis.get('recommendation', 'N/A')).border = border
         ws_summary.cell(idx, 5, analysis.get('filename', 'Unknown')).border = border
     
-    # Create detailed sheets for each candidate
-    for idx, analysis in enumerate(analyses, 1):
-        ws = wb.create_sheet(f"Candidate_{idx}")
-        ws.column_dimensions['A'].width = 30
-        ws.column_dimensions['B'].width = 60
-        
-        row = 1
-        
-        # Title
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = f"DETAILED ANALYSIS - {analysis.get('candidate_name', 'Unknown')}"
-        cell.font = Font(bold=True, size=14, color="FFFFFF")
-        cell.fill = PatternFill(start_color="203864", end_color="203864", fill_type="solid")
-        cell.alignment = Alignment(horizontal='center', vertical='center')
-        row += 2
-        
-        # Basic info
-        ws[f'A{row}'] = "Candidate Name"
-        ws[f'A{row}'].font = Font(bold=True)
-        ws[f'B{row}'] = analysis.get('candidate_name', 'N/A')
-        row += 1
-        
-        ws[f'A{row}'] = "Overall Score"
-        ws[f'A{row}'].font = Font(bold=True)
-        ws[f'B{row}'] = f"{analysis.get('overall_score', 0)}/100"
-        row += 1
-        
-        ws[f'A{row}'] = "Recommendation"
-        ws[f'A{row}'].font = Font(bold=True)
-        ws[f'B{row}'] = analysis.get('recommendation', 'N/A')
-        row += 2
-        
-        # Skills matched
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = "SKILLS MATCHED ✓"
-        cell.font = header_font
-        cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
-        row += 1
-        
-        for skill in analysis.get('skills_matched', []):
-            ws[f'B{row}'] = skill
-            row += 1
-        row += 1
-        
-        # Skills missing
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = "SKILLS MISSING ✗"
-        cell.font = header_font
-        cell.fill = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
-        row += 1
-        
-        for skill in analysis.get('skills_missing', []):
-            ws[f'B{row}'] = skill
-            row += 1
-        row += 1
-        
-        # Experience
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = "EXPERIENCE SUMMARY"
-        cell.font = header_font
-        cell.fill = header_fill
-        row += 1
-        
-        ws.merge_cells(f'A{row}:B{row}')
-        ws[f'A{row}'] = analysis.get('experience_summary', 'N/A')
-        ws[f'A{row}'].alignment = Alignment(wrap_text=True)
-        ws.row_dimensions[row].height = 60
-        row += 2
-        
-        # Education
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = "EDUCATION SUMMARY"
-        cell.font = header_font
-        cell.fill = header_fill
-        row += 1
-        
-        ws.merge_cells(f'A{row}:B{row}')
-        ws[f'A{row}'] = analysis.get('education_summary', 'N/A')
-        ws[f'A{row}'].alignment = Alignment(wrap_text=True)
-        ws.row_dimensions[row].height = 60
-    
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     wb.save(filepath)
-    print(f"📄 Batch Excel report saved to: {filepath}")
+    print(f"📄 Excel report saved to: {filepath}")
     return filepath
 
 def create_csv_report(analyses, filename="batch_analysis_summary.csv"):
@@ -595,7 +381,7 @@ def create_csv_report(analyses, filename="batch_analysis_summary.csv"):
     
     with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
         fieldnames = ['Rank', 'Candidate Name', 'Score', 'Recommendation', 'Filename', 
-                     'Skills Matched', 'Skills Missing', 'Experience Summary', 'Education Summary']
+                     'Skills Matched', 'Skills Missing']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         
         writer.writeheader()
@@ -606,10 +392,8 @@ def create_csv_report(analyses, filename="batch_analysis_summary.csv"):
                 'Score': analysis.get('overall_score', 0),
                 'Recommendation': analysis.get('recommendation', 'N/A'),
                 'Filename': analysis.get('filename', 'Unknown'),
-                'Skills Matched': ', '.join(analysis.get('skills_matched', [])),
-                'Skills Missing': ', '.join(analysis.get('skills_missing', [])),
-                'Experience Summary': analysis.get('experience_summary', 'N/A'),
-                'Education Summary': analysis.get('education_summary', 'N/A')
+                'Skills Matched': ', '.join(analysis.get('skills_matched', [])[:5]),
+                'Skills Missing': ', '.join(analysis.get('skills_missing', [])[:5])
             })
     
     print(f"📄 CSV report saved to: {filepath}")
@@ -623,7 +407,6 @@ def analyze_single():
     try:
         print("\n" + "="*50)
         print("📥 Single analysis request received")
-        start_time = time.time()
         
         if 'resume' not in request.files:
             return jsonify({'error': 'No resume file provided'}), 400
@@ -637,9 +420,17 @@ def analyze_single():
         if resume_file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
+        # Check file size
+        resume_file.seek(0, 2)
+        file_size = resume_file.tell()
+        resume_file.seek(0)
+        
+        if file_size > 10 * 1024 * 1024:
+            return jsonify({'error': 'File size too large. Maximum size is 10MB.'}), 400
+        
         # Save file
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}{file_ext}")
         resume_file.save(file_path)
         
@@ -651,7 +442,7 @@ def analyze_single():
         elif file_ext == '.txt':
             resume_text = extract_text_from_txt(file_path)
         else:
-            return jsonify({'error': 'Unsupported file format'}), 400
+            return jsonify({'error': 'Unsupported file format. Use PDF, DOCX, DOC, or TXT.'}), 400
         
         if resume_text.startswith('Error'):
             return jsonify({'error': resume_text}), 500
@@ -659,190 +450,13 @@ def analyze_single():
         # Analyze with OpenAI
         analysis = analyze_resume_with_openai(resume_text, job_description, resume_file.filename)
         
-        # Create Excel report
+        # Create Excel report for single analysis
         excel_filename = f"analysis_{timestamp}.xlsx"
-        
-        # Create workbook for single analysis
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Resume Analysis"
-        
-        # Define styles
-        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        header_font = Font(bold=True, color="FFFFFF", size=12)
-        subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-        subheader_font = Font(bold=True, size=11)
-        border = Border(
-            left=Side(style='thin'),
-            right=Side(style='thin'),
-            top=Side(style='thin'),
-            bottom=Side(style='thin')
-        )
-        
-        # Set column widths
-        ws.column_dimensions['A'].width = 30
-        ws.column_dimensions['B'].width = 60
-        
-        row = 1
-        
-        # Title
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = "RESUME ANALYSIS REPORT"
-        cell.font = Font(bold=True, size=16, color="FFFFFF")
-        cell.fill = PatternFill(start_color="203864", end_color="203864", fill_type="solid")
-        cell.alignment = Alignment(horizontal='center', vertical='center')
-        row += 2
-        
-        # Candidate Information
-        ws[f'A{row}'] = "Candidate Name"
-        ws[f'A{row}'].font = subheader_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'B{row}'] = analysis.get('candidate_name', 'N/A')
-        row += 1
-        
-        ws[f'A{row}'] = "Analysis Date"
-        ws[f'A{row}'].font = subheader_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'B{row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        row += 2
-        
-        # Overall Score
-        ws[f'A{row}'] = "Overall Match Score"
-        ws[f'A{row}'].font = Font(bold=True, size=12)
-        ws[f'A{row}'].fill = header_fill
-        ws[f'A{row}'].font = Font(bold=True, size=12, color="FFFFFF")
-        ws[f'B{row}'] = f"{analysis.get('overall_score', 0)}/100"
-        score_color = "C00000" if analysis.get('overall_score', 0) < 60 else "70AD47" if analysis.get('overall_score', 0) >= 80 else "FFC000"
-        ws[f'B{row}'].font = Font(bold=True, size=12, color=score_color)
-        row += 1
-        
-        ws[f'A{row}'] = "Recommendation"
-        ws[f'A{row}'].font = subheader_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'B{row}'] = analysis.get('recommendation', 'N/A')
-        row += 2
-        
-        # Skills Matched Section
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = "SKILLS MATCHED ✓"
-        cell.font = header_font
-        cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
-        cell.alignment = Alignment(horizontal='center')
-        row += 1
-        
-        skills_matched = analysis.get('skills_matched', [])
-        if skills_matched:
-            for i, skill in enumerate(skills_matched, 1):
-                ws[f'A{row}'] = f"{i}."
-                ws[f'B{row}'] = skill
-                ws[f'B{row}'].alignment = Alignment(wrap_text=True)
-                row += 1
-        else:
-            ws[f'A{row}'] = "No matched skills found"
-            row += 1
-        
-        row += 1
-        
-        # Skills Missing Section
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = "SKILLS MISSING ✗"
-        cell.font = header_font
-        cell.fill = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
-        cell.alignment = Alignment(horizontal='center')
-        row += 1
-        
-        skills_missing = analysis.get('skills_missing', [])
-        if skills_missing:
-            for i, skill in enumerate(skills_missing, 1):
-                ws[f'A{row}'] = f"{i}."
-                ws[f'B{row}'] = skill
-                ws[f'B{row}'].alignment = Alignment(wrap_text=True)
-                row += 1
-        else:
-            ws[f'A{row}'] = "All required skills are present!"
-            row += 1
-        
-        row += 1
-        
-        # Experience Summary
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = "EXPERIENCE SUMMARY"
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center')
-        row += 1
-        
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = analysis.get('experience_summary', 'N/A')
-        cell.alignment = Alignment(wrap_text=True, vertical='top')
-        ws.row_dimensions[row].height = 80
-        row += 2
-        
-        # Education Summary
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = "EDUCATION SUMMARY"
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center')
-        row += 1
-        
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = analysis.get('education_summary', 'N/A')
-        cell.alignment = Alignment(wrap_text=True, vertical='top')
-        ws.row_dimensions[row].height = 60
-        row += 2
-        
-        # Key Strengths
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = "KEY STRENGTHS"
-        cell.font = header_font
-        cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
-        cell.alignment = Alignment(horizontal='center')
-        row += 1
-        
-        for strength in analysis.get('key_strengths', []):
-            ws[f'A{row}'] = "•"
-            ws[f'B{row}'] = strength
-            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
-            row += 1
-        
-        row += 1
-        
-        # Areas for Improvement
-        ws.merge_cells(f'A{row}:B{row}')
-        cell = ws[f'A{row}']
-        cell.value = "AREAS FOR IMPROVEMENT"
-        cell.font = header_font
-        cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
-        cell.alignment = Alignment(horizontal='center')
-        row += 1
-        
-        for area in analysis.get('areas_for_improvement', []):
-            ws[f'A{row}'] = "•"
-            ws[f'B{row}'] = area
-            ws[f'B{row}'].alignment = Alignment(wrap_text=True)
-            row += 1
-        
-        # Apply borders to all cells
-        for row_cells in ws.iter_rows(min_row=1, max_row=row, min_col=1, max_col=2):
-            for cell in row_cells:
-                cell.border = border
-        
-        excel_path = os.path.join(UPLOAD_FOLDER, excel_filename)
-        wb.save(excel_path)
+        excel_path = create_batch_excel_report([analysis], excel_filename)
         
         analysis['excel_filename'] = excel_filename
         
-        total_time = time.time() - start_time
-        print(f"✅ Single analysis completed in {total_time:.2f} seconds")
+        print(f"✅ Single analysis completed")
         print("="*50 + "\n")
         
         return jsonify(analysis)
@@ -894,7 +508,7 @@ def analyze_batch():
             
             # Save file
             file_ext = os.path.splitext(resume_file.filename)[1].lower()
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}_{idx}{file_ext}")
             resume_file.save(file_path)
             
@@ -918,7 +532,7 @@ def analyze_batch():
             analyses.append(analysis)
             
             # Small delay to avoid rate limits
-            time.sleep(0.5)
+            time.sleep(1)
         
         if not analyses:
             return jsonify({'error': 'No valid resumes could be processed'}), 400
@@ -1009,48 +623,6 @@ def force_warmup():
             'warmup_complete': False
         })
 
-@app.route('/quick-check', methods=['GET'])
-def quick_check():
-    """Quick endpoint to check if OpenAI is responsive"""
-    update_activity()
-    
-    try:
-        if client is None:
-            return jsonify({
-                'available': False, 
-                'reason': 'Client not initialized',
-                'warmup_complete': warmup_complete
-            })
-        
-        if not warmup_complete:
-            return jsonify({
-                'available': False,
-                'reason': 'OpenAI is warming up',
-                'warmup_complete': False
-            })
-        
-        return jsonify({
-            'available': True,
-            'warmup_complete': True,
-            'status': 'ready'
-        })
-            
-    except Exception as e:
-        error_msg = str(e)
-        if "quota" in error_msg.lower() or "429" in error_msg or "insufficient_quota" in error_msg:
-            status = 'quota_exceeded'
-        elif "rate limit" in error_msg.lower():
-            status = 'rate_limit'
-        else:
-            status = 'error'
-            
-        return jsonify({
-            'available': False,
-            'reason': error_msg[:100],
-            'status': status,
-            'warmup_complete': warmup_complete
-        })
-
 @app.route('/ping', methods=['GET'])
 def ping():
     """Simple ping to keep service awake"""
@@ -1061,16 +633,13 @@ def ping():
         'timestamp': datetime.now().isoformat(),
         'service': 'multi-resume-analyzer',
         'openai_warmup': warmup_complete,
-        'message': 'Service is alive and warm!' if warmup_complete else 'Service is alive, warming up OpenAI...'
+        'message': 'Service is running'
     })
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     update_activity()
-    
-    inactive_time = datetime.now() - last_activity_time
-    inactive_minutes = int(inactive_time.total_seconds() / 60)
     
     return jsonify({
         'status': 'Backend is running!', 
@@ -1079,9 +648,6 @@ def health_check():
         'client_initialized': client is not None,
         'openai_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
-        'upload_folder_path': UPLOAD_FOLDER,
-        'inactive_minutes': inactive_minutes,
-        'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
         'version': '2.0.0',
         'features': ['batch_processing', 'single_analysis', 'excel_export', 'csv_export']
     })
@@ -1091,7 +657,7 @@ if __name__ == '__main__':
     print("🚀 Multi-Resume Analyzer Backend Starting...")
     print("="*50)
     port = int(os.environ.get('PORT', 5002))
-    print(f"📍 Server: http://localhost:{port}")
+    print(f"📍 Server will run on port: {port}")
     print(f"🔑 API Key: {'✅ Configured' if api_key else '❌ NOT FOUND'}")
     print(f"🤖 OpenAI Client: {'✅ Initialized' if client else '❌ NOT INITIALIZED'}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
