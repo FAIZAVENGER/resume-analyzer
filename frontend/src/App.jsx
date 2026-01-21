@@ -1088,7 +1088,7 @@ function App() {
                     <CheckCircle size={24} />
                   </div>
                   <div className="skills-header-content">
-                    <h3>Skills Matched</h3>
+                    <h3>Candidate's Skills</h3>
                     <p className="skills-subtitle">Found in your resume</p>
                   </div>
                   <div className="skills-count success">
