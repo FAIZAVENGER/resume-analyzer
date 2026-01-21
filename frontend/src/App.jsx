@@ -31,20 +31,13 @@ function App() {
   const [aiStatus, setAiStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState('checking');
   const [huggingfaceWarmup, setHuggingfaceWarmup] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
-  const [quotaInfo, setQuotaInfo] = useState(null);
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
   const [modelInfo, setModelInfo] = useState(null);
-  const [serviceStatus, setServiceStatus] = useState({
-    enhancedFallback: true,
-    validKeys: 0,
-    totalKeys: 0
-  });
   
-  // UPDATED: Use your Render backend URL
+  // Use your Render backend URL
   const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
   
   const keepAliveInterval = useRef(null);
@@ -84,12 +77,6 @@ function App() {
       }).catch(() => null);
       
       if (healthResponse?.data) {
-        setServiceStatus({
-          enhancedFallback: healthResponse.data.client_initialized || false,
-          validKeys: healthResponse.data.client_initialized ? 1 : 0,
-          totalKeys: healthResponse.data.api_key_configured ? 1 : 0
-        });
-        
         setHuggingfaceWarmup(healthResponse.data.huggingface_warmup_complete || false);
         setModelInfo(healthResponse.data.model);
         setBackendStatus('ready');
@@ -320,7 +307,7 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 20)); // Max 20 files
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10)); // Max 10 files
       setError('');
     }
   };
@@ -387,7 +374,7 @@ function App() {
 
       // Update loading message based on service status
       if (aiStatus === 'available' && huggingfaceWarmup) {
-        setLoadingMessage('Hugging Face AI analysis (Always Active)...');
+        setLoadingMessage('Hugging Face AI analysis...');
       } else {
         setLoadingMessage('Enhanced analysis (Warming up AI)...');
       }
@@ -401,7 +388,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 90000, // 90 seconds
+        timeout: 90000,
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -501,7 +488,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 180000, // 3 minutes for batch processing
+        timeout: 180000,
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -679,16 +666,13 @@ function App() {
 
   return (
     <div className="app">
-      {/* Animated Background Elements */}
       <div className="bg-grid"></div>
       <div className="bg-blur-1"></div>
       <div className="bg-blur-2"></div>
       
-      {/* Header */}
       <header className="header">
         <div className="header-content">
           <div className="header-main">
-            {/* Logo and Title */}
             <div className="logo">
               <div className="logo-glow">
                 <Sparkles className="logo-icon" />
@@ -704,7 +688,6 @@ function App() {
               </div>
             </div>
             
-            {/* Leadsoc Logo */}
             <div className="leadsoc-logo-container">
               <button
                 onClick={handleLeadsocClick}
@@ -732,7 +715,6 @@ function App() {
           </div>
           
           <div className="header-features">
-            {/* Backend Status */}
             <div 
               className="feature backend-status-indicator" 
               style={{ 
@@ -746,7 +728,6 @@ function App() {
               {backendStatus === 'waking' && <Loader size={12} className="pulse-spinner" />}
             </div>
             
-            {/* AI Status */}
             <div 
               className="feature ai-status-indicator" 
               style={{ 
@@ -760,7 +741,6 @@ function App() {
               {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
             </div>
             
-            {/* Model Info */}
             {modelInfo && (
               <div className="feature model-info">
                 <Cpu size={16} />
@@ -768,15 +748,6 @@ function App() {
               </div>
             )}
             
-            {/* Enhanced Fallback Indicator */}
-            {serviceStatus.enhancedFallback && (
-              <div className="feature enhanced-fallback">
-                <Sparkles size={16} />
-                <span>Enhanced Analysis</span>
-              </div>
-            )}
-            
-            {/* Warm-up Button */}
             {aiStatus !== 'available' && (
               <button 
                 className="feature warmup-button"
@@ -792,7 +763,6 @@ function App() {
               </button>
             )}
             
-            {/* Quota Status Toggle */}
             <button 
               className="feature quota-toggle"
               onClick={() => setShowQuotaPanel(!showQuotaPanel)}
@@ -814,7 +784,6 @@ function App() {
       </header>
 
       <main className="main-content">
-        {/* Status Panel */}
         {showQuotaPanel && (
           <div className="quota-status-panel glass">
             <div className="quota-panel-header">
@@ -911,7 +880,6 @@ function App() {
           </div>
         )}
 
-        {/* Status Banner */}
         <div className="top-notice-bar glass">
           <div className="notice-content">
             <div className="status-indicators">
@@ -969,7 +937,6 @@ function App() {
                 )}
               </div>
               
-              {/* Batch Mode Toggle */}
               <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
                 <button
                   className={`mode-toggle ${!batchMode ? 'active' : ''}`}
@@ -1017,7 +984,6 @@ function App() {
             </div>
             
             <div className="upload-grid">
-              {/* Left Column - File Upload */}
               <div className="upload-card glass">
                 <div className="card-decoration"></div>
                 <div className="card-header">
@@ -1028,14 +994,13 @@ function App() {
                     <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
                     <p className="card-subtitle">
                       {batchMode 
-                        ? 'Upload multiple resumes (Max 20, 10MB each)' 
+                        ? 'Upload multiple resumes (Max 10, 10MB each)' 
                         : 'Supported: PDF, DOC, DOCX, TXT (Max 10MB)'}
                     </p>
                   </div>
                 </div>
                 
                 {!batchMode ? (
-                  // Single file upload
                   <div 
                     className={`upload-area ${dragActive ? 'drag-active' : ''} ${resumeFile ? 'has-file' : ''}`}
                     onDragEnter={handleDrag}
@@ -1084,7 +1049,6 @@ function App() {
                     )}
                   </div>
                 ) : (
-                  // Batch file upload
                   <div 
                     className={`upload-area ${dragActive ? 'drag-active' : ''} ${resumeFiles.length > 0 ? 'has-file' : ''}`}
                     onDragEnter={handleDrag}
@@ -1143,7 +1107,7 @@ function App() {
                             <span className="upload-text">
                               Drag & drop multiple files or click to browse
                             </span>
-                            <span className="upload-hint">Max 20 files, 10MB each</span>
+                            <span className="upload-hint">Max 10 files, 10MB each</span>
                           </>
                         )}
                       </div>
@@ -1183,7 +1147,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Right Column - Job Description */}
               <div className="job-description-card glass">
                 <div className="card-decoration"></div>
                 <div className="card-header">
@@ -1232,7 +1195,6 @@ function App() {
               </div>
             )}
 
-            {/* Loading Progress Bar */}
             {(loading || batchLoading) && (
               <div className="loading-section glass">
                 <div className="loading-container">
@@ -1312,13 +1274,12 @@ function App() {
               )}
             </button>
 
-            {/* Tips Section */}
             <div className="tips-section">
               {batchMode ? (
                 <>
                   <div className="tip">
                     <Sparkles size={16} />
-                    <span>Upload up to 20 resumes for batch processing</span>
+                    <span>Upload up to 10 resumes for batch processing</span>
                   </div>
                   <div className="tip">
                     <TrendingUp size={16} />
@@ -1356,7 +1317,6 @@ function App() {
             </div>
           </div>
         ) : batchAnalysis ? (
-          // BATCH RESULTS DISPLAY
           <div className="results-section">
             <div className="analysis-header" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
@@ -1433,7 +1393,6 @@ function App() {
               )}
             </div>
 
-            {/* Batch Results Grid */}
             <div className="section-title">
               <h2>Candidate Rankings</h2>
               <p>Sorted by ATS Score (Highest to Lowest)</p>
@@ -1558,7 +1517,6 @@ function App() {
               ))}
             </div>
 
-            {/* Action Section */}
             <div className="action-section glass">
               <div className="action-content">
                 <h3>Batch Analysis Complete</h3>
@@ -1600,9 +1558,7 @@ function App() {
             </div>
           </div>
         ) : (
-          // SINGLE RESULT DISPLAY
           <div className="results-section">
-            {/* Analysis Header */}
             <div className="analysis-header">
               <div className="candidate-info">
                 <div className="candidate-avatar">
@@ -1667,7 +1623,6 @@ function App() {
               </div>
             </div>
 
-            {/* Recommendation Card */}
             <div className="recommendation-card glass" style={{
               background: `linear-gradient(135deg, ${getScoreColor(analysis.overall_score)}15, ${getScoreColor(analysis.overall_score)}08)`,
               borderLeft: `4px solid ${getScoreColor(analysis.overall_score)}`
@@ -1690,7 +1645,6 @@ function App() {
               </div>
             </div>
 
-            {/* Skills Analysis */}
             <div className="section-title">
               <h2>Skills Analysis</h2>
               <p>Detailed breakdown of matched and missing skills</p>
@@ -1766,7 +1720,6 @@ function App() {
               </div>
             </div>
 
-            {/* Summary Section */}
             <div className="section-title">
               <h2>Profile Summary</h2>
               <p>Insights extracted from your resume</p>
@@ -1804,7 +1757,6 @@ function App() {
               </div>
             </div>
 
-            {/* Insights Section */}
             <div className="section-title">
               <h2>Insights & Recommendations</h2>
               <p>Personalized suggestions to improve your match</p>
@@ -1856,7 +1808,6 @@ function App() {
               </div>
             </div>
 
-            {/* Action Section */}
             <div className="action-section glass">
               <div className="action-content">
                 <h3>Ready to Take Action?</h3>
@@ -1880,7 +1831,6 @@ function App() {
                   setError('');
                   setProgress(0);
                   setLoadingMessage('');
-                  setRetryCount(0);
                   setShowQuotaPanel(false);
                   initializeService();
                 }}>
@@ -1903,7 +1853,6 @@ function App() {
         )}
       </main>
 
-      {/* Footer */}
       <footer className="footer">
         <div className="footer-content">
           <div className="footer-brand">
