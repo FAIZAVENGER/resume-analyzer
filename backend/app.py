@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 import traceback
 import threading
 import atexit
+import requests
 
 # Load environment variables
 load_dotenv()
@@ -21,19 +22,22 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Configure OpenAI API
-api_key = os.getenv('OPENAI_API_KEY')
+# Configure OpenRouter API
+api_key = os.getenv('OPENROUTER_API_KEY')
+base_url = os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')
+model = os.getenv('OPENROUTER_MODEL', 'meta-llama/llama-3.2-3b-instruct:free')
+
 if not api_key:
-    print("❌ ERROR: OPENAI_API_KEY not found in .env file!")
+    print("❌ ERROR: OPENROUTER_API_KEY not found in .env file!")
     client = None
 else:
-    print(f"✅ API Key loaded: {api_key[:10]}...")
-    try:
-        client = openai.OpenAI(api_key=api_key)
-        print("✅ OpenAI client initialized successfully")
-    except Exception as e:
-        print(f"❌ Failed to initialize OpenAI client: {str(e)}")
-        client = None
+    print(f"✅ OpenRouter API Key loaded: {api_key[:10]}...")
+    print(f"✅ Using model: {model}")
+    client = {
+        'api_key': api_key,
+        'base_url': base_url,
+        'model': model
+    }
 
 # Get absolute path for uploads folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -47,45 +51,89 @@ last_activity_time = datetime.now()
 keep_warm_thread = None
 warmup_lock = threading.Lock()
 
-def warmup_openai():
-    """Warm up OpenAI connection"""
+def call_openrouter_api(messages, max_tokens=1500, temperature=0.3, timeout=30):
+    """Call OpenRouter API with proper headers"""
+    if not client:
+        return None
+    
+    headers = {
+        'Authorization': f'Bearer {client["api_key"]}',
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://resume-analyzer.com',  # Required by OpenRouter
+        'X-Title': 'Resume Analyzer'
+    }
+    
+    payload = {
+        'model': client['model'],
+        'messages': messages,
+        'max_tokens': max_tokens,
+        'temperature': temperature,
+        'response_format': {'type': 'json_object'}
+    }
+    
+    try:
+        response = requests.post(
+            f'{client["base_url"]}/chat/completions',
+            headers=headers,
+            json=payload,
+            timeout=timeout
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"❌ OpenRouter API Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ OpenRouter API Exception: {str(e)}")
+        return None
+
+def warmup_openrouter():
+    """Warm up OpenRouter connection"""
     global warmup_complete
     
     if client is None:
-        print("⚠️ Skipping OpenAI warm-up: Client not initialized")
+        print("⚠️ Skipping OpenRouter warm-up: Client not initialized")
         return False
     
     try:
-        print("🔥 Warming up OpenAI connection...")
+        print(f"🔥 Warming up OpenRouter connection with model: {model}...")
         start_time = time.time()
         
         # Simple test request
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = call_openrouter_api(
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "Just respond with 'ready'"}
+                {"role": "user", "content": "Just respond with 'ready' in JSON format: {\"status\": \"ready\"}"}
             ],
             max_tokens=10,
-            temperature=0.1
+            temperature=0.1,
+            timeout=10
         )
         
-        elapsed = time.time() - start_time
-        print(f"✅ OpenAI warmed up in {elapsed:.2f}s: {response.choices[0].message.content}")
-        
-        with warmup_lock:
-            warmup_complete = True
+        if response:
+            elapsed = time.time() - start_time
+            print(f"✅ OpenRouter warmed up in {elapsed:.2f}s")
             
-        return True
+            with warmup_lock:
+                warmup_complete = True
+                
+            return True
+        else:
+            print("⚠️ Warm-up attempt failed: No response")
+            # Schedule retry in 10 seconds
+            threading.Timer(10.0, warmup_openrouter).start()
+            return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
         # Schedule retry in 10 seconds
-        threading.Timer(10.0, warmup_openai).start()
+        threading.Timer(10.0, warmup_openrouter).start()
         return False
 
-def keep_openai_warm():
-    """Periodically send requests to keep OpenAI connection alive"""
+def keep_openrouter_warm():
+    """Periodically send requests to keep OpenRouter connection alive"""
     global last_activity_time
     
     while True:
@@ -96,12 +144,11 @@ def keep_openai_warm():
             inactive_time = datetime.now() - last_activity_time
             
             if client and inactive_time.total_seconds() > 120:  # 2 minutes
-                print("♨️ Keeping OpenAI warm...")
+                print("♨️ Keeping OpenRouter warm...")
                 
                 try:
                     # Send a minimal request
-                    client.chat.completions.create(
-                        model="gpt-4o-mini",
+                    call_openrouter_api(
                         messages=[{"role": "user", "content": "ping"}],
                         max_tokens=5,
                         timeout=5
@@ -120,12 +167,12 @@ def update_activity():
 
 # Start warm-up on app start
 if client:
-    print("🚀 Starting OpenAI warm-up...")
-    warmup_thread = threading.Thread(target=warmup_openai, daemon=True)
+    print("🚀 Starting OpenRouter warm-up...")
+    warmup_thread = threading.Thread(target=warmup_openrouter, daemon=True)
     warmup_thread.start()
     
     # Start keep-warm thread
-    keep_warm_thread = threading.Thread(target=keep_openai_warm, daemon=True)
+    keep_warm_thread = threading.Thread(target=keep_openrouter_warm, daemon=True)
     keep_warm_thread.start()
     print("✅ Keep-warm thread started")
 
@@ -348,7 +395,7 @@ def home():
 <body>
     <div class="container">
         <h1>🤖 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis using OpenAI • Always Active</p>
+        <p class="subtitle">AI-powered resume analysis using OpenRouter • Always Active</p>
         
         <div class="api-status">
             ✅ API IS RUNNING
@@ -357,7 +404,7 @@ def home():
         <div class="warmup-status">
             <div class="warmup-dot"></div>
             <div>
-                <strong>OpenAI Status:</strong> {warmup_status}
+                <strong>OpenRouter Status:</strong> {warmup_status}
                 <br>
                 <small>Last activity: {inactive_minutes} minute(s) ago</small>
             </div>
@@ -369,16 +416,16 @@ def home():
                 <span class="status-value">Always Active ♨️</span>
             </div>
             <div class="status-item">
-                <span class="status-label">OpenAI API:</span>
+                <span class="status-label">OpenRouter API:</span>
                 {'<span class="success">✅ Configured (' + api_key[:10] + '...)</span>' if api_key else '<span class="error">❌ NOT FOUND</span>'}
             </div>
             <div class="status-item">
-                <span class="status-label">OpenAI Status:</span>
-                {'<span class="success">✅ Warmed Up</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
+                <span class="status-label">Model:</span>
+                <span class="status-value">{model}</span>
             </div>
             <div class="status-item">
-                <span class="status-label">Client:</span>
-                {'<span class="success">✅ Initialized</span>' if client else '<span class="error">❌ NOT INITIALIZED</span>'}
+                <span class="status-label">OpenRouter Status:</span>
+                {'<span class="success">✅ Warmed Up</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
             </div>
             <div class="status-item">
                 <span class="status-label">Upload Folder:</span>
@@ -392,7 +439,13 @@ def home():
             <div class="endpoint">
                 <span class="method">POST</span>
                 <span class="path">/analyze</span>
-                <p class="description">Upload a resume (PDF/DOCX/TXT) with job description for AI analysis</p>
+                <p class="description">Upload a single resume (PDF/DOCX/TXT) with job description for AI analysis</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">POST</span>
+                <span class="path">/analyze-batch</span>
+                <p class="description">Upload multiple resumes for batch analysis with ranking</p>
             </div>
             
             <div class="endpoint">
@@ -404,7 +457,7 @@ def home():
             <div class="endpoint">
                 <span class="method">GET</span>
                 <span class="path">/warmup</span>
-                <p class="description">Force warm-up OpenAI connection</p>
+                <p class="description">Force warm-up OpenRouter connection</p>
             </div>
             
             <div class="endpoint">
@@ -424,17 +477,24 @@ def home():
                 <span class="path">/download/{filename}</path>
                 <p class="description">Download generated Excel analysis reports</p>
             </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/models</span>
+                <p class="description">List available OpenRouter models</p>
+            </div>
         </div>
         
         <div class="buttons">
             <a href="/health" class="btn">Check Health</a>
-            <a href="/warmup" class="btn btn-warmup">Warm Up OpenAI</a>
+            <a href="/warmup" class="btn btn-warmup">Warm Up OpenRouter</a>
+            <a href="/models" class="btn">Available Models</a>
             <a href="/ping" class="btn btn-secondary">Ping Service</a>
         </div>
         
         <div class="footer">
-            <p>Powered by Flask & OpenAI | Deployed on Render | Always Active Mode</p>
-            <p>OpenAI Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
+            <p>Powered by Flask & OpenRouter | Deployed on Render | Always Active Mode</p>
+            <p>OpenRouter Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
         </div>
     </div>
 </body>
@@ -527,25 +587,25 @@ def fallback_response(reason):
         "areas_for_improvement": ["Please try again in a moment"]
     }
 
-def analyze_resume_with_openai(resume_text, job_description):
-    """Use OpenAI to analyze resume against job description"""
+def analyze_resume_with_openrouter(resume_text, job_description):
+    """Use OpenRouter to analyze resume against job description"""
     update_activity()
     
     if client is None:
-        print("❌ OpenAI client not initialized.")
+        print("❌ OpenRouter client not initialized.")
         return fallback_response("API Configuration Error")
     
     # Check if warm-up is complete
     with warmup_lock:
         if not warmup_complete:
-            print("⚠️ OpenAI not warmed up yet, warming now...")
-            warmup_openai()
+            print("⚠️ OpenRouter not warmed up yet, warming now...")
+            warmup_openrouter()
     
     # TRUNCATE text
     resume_text = resume_text[:6000]
     job_description = job_description[:2500]
     
-    system_prompt = """You are an expert resume analyzer. Analyze resumes against job descriptions and provide detailed insights."""
+    system_prompt = """You are an expert resume analyzer. Analyze resumes against job descriptions and provide detailed insights in JSON format."""
     
     user_prompt = f"""RESUME ANALYSIS - PROVIDE DETAILED SUMMARIES:
 Analyze this resume against the job description and provide comprehensive insights.
@@ -573,36 +633,39 @@ Return ONLY this JSON with detailed information:
 
 Ensure summaries are detailed, professional, and comprehensive."""
 
-    def call_openai():
+    def call_api():
         try:
             update_activity()
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",  # You can use "gpt-4", "gpt-4-turbo", or "gpt-3.5-turbo"
+            response = call_openrouter_api(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.3,
                 max_tokens=1500,
-                response_format={"type": "json_object"}
+                temperature=0.3,
+                timeout=30
             )
             return response
         except Exception as e:
             raise e
     
     try:
-        print("🤖 Sending to OpenAI...")
+        print("🤖 Sending to OpenRouter...")
         start_time = time.time()
         
         # Call with 30 second timeout
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(call_openai)
+            future = executor.submit(call_api)
             response = future.result(timeout=30)
         
-        elapsed_time = time.time() - start_time
-        print(f"✅ OpenAI response in {elapsed_time:.2f} seconds")
+        if not response:
+            print("❌ No response from OpenRouter")
+            return fallback_response("AI Service Unavailable")
         
-        result_text = response.choices[0].message.content.strip()
+        elapsed_time = time.time() - start_time
+        print(f"✅ OpenRouter response in {elapsed_time:.2f} seconds")
+        
+        result_text = response['choices'][0]['message']['content'].strip()
         
         # Clean response
         result_text = result_text.replace('```json', '').replace('```', '').strip()
@@ -641,7 +704,7 @@ Ensure summaries are detailed, professional, and comprehensive."""
         return analysis
         
     except concurrent.futures.TimeoutError:
-        print("❌ OpenAI API timeout after 30 seconds")
+        print("❌ OpenRouter API timeout after 30 seconds")
         return fallback_response("AI Timeout - Service taking too long")
         
     except json.JSONDecodeError as e:
@@ -660,7 +723,7 @@ Ensure summaries are detailed, professional, and comprehensive."""
         }
         
     except Exception as e:
-        print(f"❌ OpenAI Analysis Error: {str(e)}")
+        print(f"❌ OpenRouter Analysis Error: {str(e)}")
         error_msg = str(e).lower()
         if "quota" in error_msg or "429" in error_msg or "insufficient_quota" in error_msg:
             return fallback_response("API Quota Exceeded")
@@ -865,12 +928,12 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
 
 @app.route('/analyze', methods=['POST'])
 def analyze_resume():
-    """Main endpoint to analyze resume"""
+    """Main endpoint to analyze single resume"""
     update_activity()
     
     try:
         print("\n" + "="*50)
-        print("📥 New analysis request received")
+        print("📥 New single analysis request received")
         start_time = time.time()
         
         if 'resume' not in request.files:
@@ -930,20 +993,20 @@ def analyze_resume():
         # Check if API key is configured
         if not api_key:
             print("❌ API key not configured")
-            return jsonify({'error': 'API key not configured. Please add OPENAI_API_KEY to .env file'}), 500
+            return jsonify({'error': 'API key not configured. Please add OPENROUTER_API_KEY to .env file'}), 500
         
         if client is None:
-            print("❌ OpenAI client not initialized")
-            return jsonify({'error': 'OpenAI client not properly initialized'}), 500
+            print("❌ OpenRouter client not initialized")
+            return jsonify({'error': 'OpenRouter client not properly initialized'}), 500
         
-        # Check OpenAI warm-up status
+        # Check OpenRouter warm-up status
         warmup_status = "Warmed up" if warmup_complete else "Warming up..."
-        print(f"🤖 OpenAI Status: {warmup_status}")
+        print(f"🤖 OpenRouter Status: {warmup_status}")
         
-        # Analyze with OpenAI
+        # Analyze with OpenRouter
         print("🤖 Starting AI analysis...")
         ai_start = time.time()
-        analysis = analyze_resume_with_openai(resume_text, job_description)
+        analysis = analyze_resume_with_openrouter(resume_text, job_description)
         ai_time = time.time() - ai_start
         
         print(f"✅ AI analysis completed in {ai_time:.2f}s")
@@ -963,9 +1026,14 @@ def analyze_resume():
         excel_time = time.time() - excel_start
         print(f"✅ Excel report created in {excel_time:.2f}s: {excel_path}")
         
+        # Clean up uploaded file
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        
         # Return analysis with download link
         analysis['excel_filename'] = os.path.basename(excel_path)
-        analysis['openai_status'] = warmup_status
+        analysis['ai_status'] = warmup_status
+        analysis['model_used'] = model
         analysis['response_time'] = f"{ai_time:.2f}s"
         
         total_time = time.time() - start_time
@@ -977,6 +1045,346 @@ def analyze_resume():
     except Exception as e:
         print(f"❌ Unexpected error: {traceback.format_exc()}")
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
+
+@app.route('/analyze-batch', methods=['POST'])
+def analyze_resume_batch():
+    """Analyze multiple resumes against a single job description"""
+    update_activity()
+    
+    try:
+        print("\n" + "="*50)
+        print("📦 New batch analysis request received")
+        start_time = time.time()
+        
+        if 'resumes' not in request.files:
+            print("❌ No resume files in request")
+            return jsonify({'error': 'No resume files provided'}), 400
+        
+        if 'jobDescription' not in request.form:
+            print("❌ No job description in request")
+            return jsonify({'error': 'No job description provided'}), 400
+        
+        job_description = request.form['jobDescription']
+        resume_files = request.files.getlist('resumes')
+        
+        if len(resume_files) == 0:
+            return jsonify({'error': 'No files selected'}), 400
+        
+        print(f"📦 Batch size: {len(resume_files)} resumes")
+        print(f"📋 Job description length: {len(job_description)} characters")
+        
+        # Limit batch size
+        if len(resume_files) > 20:
+            return jsonify({'error': 'Maximum 20 resumes allowed per batch'}), 400
+        
+        # Check API key and client
+        if not api_key:
+            print("❌ API key not configured")
+            return jsonify({'error': 'API key not configured'}), 500
+        
+        if client is None:
+            print("❌ OpenRouter client not initialized")
+            return jsonify({'error': 'OpenRouter client not properly initialized'}), 500
+        
+        # Prepare batch analysis
+        all_analyses = []
+        errors = []
+        
+        for idx, resume_file in enumerate(resume_files):
+            try:
+                print(f"\n📄 Processing resume {idx + 1}/{len(resume_files)}: {resume_file.filename}")
+                
+                # Check file size (10MB limit)
+                resume_file.seek(0, 2)
+                file_size = resume_file.tell()
+                resume_file.seek(0)
+                
+                if file_size > 10 * 1024 * 1024:
+                    error_msg = f"File {resume_file.filename} too large (max 10MB)"
+                    errors.append({'filename': resume_file.filename, 'error': error_msg})
+                    continue
+                
+                # Save file temporarily
+                file_ext = os.path.splitext(resume_file.filename)[1].lower()
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+                file_path = os.path.join(UPLOAD_FOLDER, f"batch_resume_{timestamp}_{idx}{file_ext}")
+                resume_file.save(file_path)
+                
+                # Extract text based on file type
+                if file_ext == '.pdf':
+                    resume_text = extract_text_from_pdf(file_path)
+                elif file_ext in ['.docx', '.doc']:
+                    resume_text = extract_text_from_docx(file_path)
+                elif file_ext == '.txt':
+                    resume_text = extract_text_from_txt(file_path)
+                else:
+                    error_msg = f"Unsupported file format: {file_ext}"
+                    errors.append({'filename': resume_file.filename, 'error': error_msg})
+                    os.remove(file_path)
+                    continue
+                
+                if resume_text.startswith('Error'):
+                    error_msg = resume_text
+                    errors.append({'filename': resume_file.filename, 'error': error_msg})
+                    os.remove(file_path)
+                    continue
+                
+                # Analyze with OpenRouter
+                analysis = analyze_resume_with_openrouter(resume_text, job_description)
+                analysis['filename'] = resume_file.filename
+                analysis['processed_index'] = idx
+                analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
+                
+                all_analyses.append(analysis)
+                
+                # Clean up temp file
+                os.remove(file_path)
+                
+                print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
+                
+            except Exception as e:
+                error_msg = f"Error processing {resume_file.filename}: {str(e)[:200]}"
+                errors.append({'filename': resume_file.filename, 'error': error_msg})
+                print(f"❌ Error processing {resume_file.filename}: {str(e)}")
+                continue
+        
+        # Sort analyses by score (highest first)
+        all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
+        
+        # Add ranking
+        for rank, analysis in enumerate(all_analyses, 1):
+            analysis['rank'] = rank
+        
+        # Create combined Excel report
+        print("📊 Creating batch Excel report...")
+        excel_start = time.time()
+        excel_filename = f"batch_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        excel_path = create_batch_excel_report(all_analyses, job_description, excel_filename)
+        excel_time = time.time() - excel_start
+        print(f"✅ Batch Excel report created in {excel_time:.2f}s: {excel_path}")
+        
+        # Prepare response
+        batch_summary = {
+            'total_files': len(resume_files),
+            'successfully_analyzed': len(all_analyses),
+            'failed_files': len(errors),
+            'errors': errors,
+            'batch_excel_filename': os.path.basename(excel_path),
+            'analyses': all_analyses,
+            'job_description_preview': job_description[:200] + ('...' if len(job_description) > 200 else ''),
+            'timestamp': datetime.now().isoformat(),
+            'model_used': model,
+            'ai_status': "Warmed up" if warmup_complete else "Warming up"
+        }
+        
+        total_time = time.time() - start_time
+        print(f"✅ Batch analysis completed in {total_time:.2f} seconds")
+        print(f"📊 Summary: {len(all_analyses)} successful, {len(errors)} failed")
+        print("="*50 + "\n")
+        
+        return jsonify(batch_summary)
+        
+    except Exception as e:
+        print(f"❌ Batch analysis error: {traceback.format_exc()}")
+        return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
+
+def create_batch_excel_report(analyses, job_description, filename="batch_resume_analysis.xlsx"):
+    """Create a comprehensive Excel report for batch analysis"""
+    update_activity()
+    
+    wb = Workbook()
+    
+    # Summary Sheet
+    ws_summary = wb.active
+    ws_summary.title = "Batch Summary"
+    
+    # Analysis Details Sheet
+    ws_details = wb.create_sheet("Detailed Analysis")
+    
+    # Skills Analysis Sheet
+    ws_skills = wb.create_sheet("Skills Analysis")
+    
+    # Define styles
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=12)
+    subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    subheader_font = Font(bold=True, size=11)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # ========== SUMMARY SHEET ==========
+    ws_summary.column_dimensions['A'].width = 25
+    ws_summary.column_dimensions['B'].width = 40
+    ws_summary.column_dimensions['C'].width = 20
+    ws_summary.column_dimensions['D'].width = 15
+    ws_summary.column_dimensions['E'].width = 25
+    
+    # Title
+    ws_summary.merge_cells('A1:E1')
+    title_cell = ws_summary['A1']
+    title_cell.value = "BATCH RESUME ANALYSIS REPORT"
+    title_cell.font = Font(bold=True, size=16, color="FFFFFF")
+    title_cell.fill = PatternFill(start_color="203864", end_color="203864", fill_type="solid")
+    title_cell.alignment = Alignment(horizontal='center', vertical='center')
+    
+    # Summary Information
+    summary_info = [
+        ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        ("Total Resumes", len(analyses)),
+        ("Job Description", job_description[:100] + ("..." if len(job_description) > 100 else "")),
+        ("AI Model Used", model),
+        ("Generated By", "AI Resume Analyzer (OpenRouter)"),
+    ]
+    
+    for i, (label, value) in enumerate(summary_info, start=3):
+        ws_summary[f'A{i}'] = label
+        ws_summary[f'A{i}'].font = subheader_font
+        ws_summary[f'A{i}'].fill = subheader_fill
+        ws_summary[f'B{i}'] = value
+    
+    # Candidates Ranking Header
+    row = len(summary_info) + 4
+    ws_summary.merge_cells(f'A{row}:E{row}')
+    header_cell = ws_summary[f'A{row}']
+    header_cell.value = "CANDIDATES RANKING (BY ATS SCORE)"
+    header_cell.font = header_font
+    header_cell.fill = header_fill
+    header_cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    # Table Headers
+    headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "Key Skills Matched"]
+    for col, header in enumerate(headers, start=1):
+        cell = ws_summary.cell(row=row, column=col)
+        cell.value = header
+        cell.font = Font(bold=True, color="FFFFFF", size=11)
+        cell.fill = PatternFill(start_color="5B9BD5", end_color="5B9BD5", fill_type="solid")
+        cell.alignment = Alignment(horizontal='center')
+    
+    row += 1
+    
+    # Add candidates data
+    for analysis in analyses:
+        ws_summary.cell(row=row, column=1, value=analysis.get('rank', '-'))
+        ws_summary.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
+        
+        score_cell = ws_summary.cell(row=row, column=3, value=analysis.get('overall_score', 0))
+        score = analysis.get('overall_score', 0)
+        if score >= 80:
+            score_cell.font = Font(color="00B050", bold=True)  # Green
+        elif score >= 60:
+            score_cell.font = Font(color="FFC000", bold=True)  # Yellow
+        else:
+            score_cell.font = Font(color="FF0000", bold=True)  # Red
+        
+        ws_summary.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
+        
+        skills = ", ".join(analysis.get('skills_matched', [])[:3])
+        ws_summary.cell(row=row, column=5, value=skills)
+        
+        row += 1
+    
+    # Add border to the table
+    for r in range(row - len(analyses) - 1, row):
+        for c in range(1, 6):
+            ws_summary.cell(row=r, column=c).border = border
+    
+    # Score Distribution Info
+    row += 2
+    ws_summary.merge_cells(f'A{row}:E{row}')
+    chart_header = ws_summary[f'A{row}']
+    chart_header.value = "SCORE DISTRIBUTION"
+    chart_header.font = header_font
+    chart_header.fill = header_fill
+    chart_header.alignment = Alignment(horizontal='center')
+    
+    # ========== DETAILED ANALYSIS SHEET ==========
+    # Set column widths for details sheet
+    for col in range(1, 7):
+        ws_details.column_dimensions[chr(64 + col)].width = 25
+    
+    # Add header to details sheet
+    details_headers = [
+        "Rank", "Candidate Name", "ATS Score", "Recommendation", 
+        "Experience Summary", "Education Summary", "Key Strengths"
+    ]
+    
+    for col, header in enumerate(details_headers, start=1):
+        cell = ws_details.cell(row=1, column=col)
+        cell.value = header
+        cell.font = Font(bold=True, color="FFFFFF", size=11)
+        cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        cell.alignment = Alignment(horizontal='center', wrap_text=True)
+    
+    # Add detailed data
+    for idx, analysis in enumerate(analyses, start=2):
+        ws_details.cell(row=idx, column=1, value=analysis.get('rank', '-'))
+        ws_details.cell(row=idx, column=2, value=analysis.get('candidate_name', 'Unknown'))
+        ws_details.cell(row=idx, column=3, value=analysis.get('overall_score', 0))
+        ws_details.cell(row=idx, column=4, value=analysis.get('recommendation', 'N/A'))
+        ws_details.cell(row=idx, column=5, value=analysis.get('experience_summary', 'N/A'))
+        ws_details.cell(row=idx, column=6, value=analysis.get('education_summary', 'N/A'))
+        ws_details.cell(row=idx, column=7, value=", ".join(analysis.get('key_strengths', [])))
+        
+        # Auto-adjust row height for summary cells
+        ws_details.row_dimensions[idx].height = 60
+    
+    # Add border to details table
+    for r in range(1, len(analyses) + 2):
+        for c in range(1, 8):
+            ws_details.cell(row=r, column=c).border = border
+            ws_details.cell(row=r, column=c).alignment = Alignment(wrap_text=True, vertical='top')
+    
+    # ========== SKILLS ANALYSIS SHEET ==========
+    # Skills sheet headers
+    skills_headers = ["Rank", "Candidate", "Matched Skills", "Missing Skills", "Skills Match %"]
+    for col, header in enumerate(skills_headers, start=1):
+        cell = ws_skills.cell(row=1, column=col)
+        cell.value = header
+        cell.font = Font(bold=True, color="FFFFFF", size=11)
+        cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+        cell.alignment = Alignment(horizontal='center')
+    
+    # Add skills data
+    for idx, analysis in enumerate(analyses, start=2):
+        ws_skills.cell(row=idx, column=1, value=analysis.get('rank', '-'))
+        ws_skills.cell(row=idx, column=2, value=analysis.get('candidate_name', 'Unknown'))
+        ws_skills.cell(row=idx, column=3, value=", ".join(analysis.get('skills_matched', [])))
+        ws_skills.cell(row=idx, column=4, value=", ".join(analysis.get('skills_missing', [])))
+        
+        # Calculate approximate match percentage
+        total_skills = len(analysis.get('skills_matched', [])) + len(analysis.get('skills_missing', []))
+        if total_skills > 0:
+            match_percent = (len(analysis.get('skills_matched', [])) / total_skills) * 100
+        else:
+            match_percent = 0
+        
+        percent_cell = ws_skills.cell(row=idx, column=5, value=f"{match_percent:.1f}%")
+        if match_percent >= 70:
+            percent_cell.font = Font(color="00B050", bold=True)
+        elif match_percent >= 50:
+            percent_cell.font = Font(color="FFC000", bold=True)
+        else:
+            percent_cell.font = Font(color="FF0000", bold=True)
+        
+        # Auto-adjust row height
+        ws_skills.row_dimensions[idx].height = 40
+    
+    # Add border to skills table
+    for r in range(1, len(analyses) + 2):
+        for c in range(1, 6):
+            ws_skills.cell(row=r, column=c).border = border
+            ws_skills.cell(row=r, column=c).alignment = Alignment(wrap_text=True, vertical='top')
+    
+    # Save the file
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    wb.save(filepath)
+    print(f"📊 Batch Excel report saved to: {filepath}")
+    return filepath
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_report(filename):
@@ -1011,23 +1419,24 @@ def download_report(filename):
 
 @app.route('/warmup', methods=['GET'])
 def force_warmup():
-    """Force warm-up OpenAI connection"""
+    """Force warm-up OpenRouter connection"""
     update_activity()
     
     try:
         if client is None:
             return jsonify({
                 'status': 'error',
-                'message': 'OpenAI client not initialized',
+                'message': 'OpenRouter client not initialized',
                 'warmup_complete': False
             })
         
-        result = warmup_openai()
+        result = warmup_openrouter()
         
         return jsonify({
             'status': 'success' if result else 'error',
-            'message': 'OpenAI warmed up successfully' if result else 'Warm-up failed',
+            'message': 'OpenRouter warmed up successfully' if result else 'Warm-up failed',
             'warmup_complete': warmup_complete,
+            'model': model,
             'timestamp': datetime.now().isoformat()
         })
         
@@ -1040,7 +1449,7 @@ def force_warmup():
 
 @app.route('/quick-check', methods=['GET'])
 def quick_check():
-    """Quick endpoint to check if OpenAI is responsive"""
+    """Quick endpoint to check if OpenRouter is responsive"""
     update_activity()
     
     try:
@@ -1055,21 +1464,21 @@ def quick_check():
         if not warmup_complete:
             return jsonify({
                 'available': False,
-                'reason': 'OpenAI is warming up',
+                'reason': 'OpenRouter is warming up',
                 'warmup_complete': False,
+                'model': model,
                 'suggestion': 'Try again in a few seconds or use /warmup endpoint'
             })
         
         # Very quick test with thread timeout
         start_time = time.time()
         
-        def openai_check():
+        def openrouter_check():
             try:
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
+                response = call_openrouter_api(
                     messages=[
                         {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": "Respond with just 'ready'"}
+                        {"role": "user", "content": "Respond with just 'ready' in JSON format: {\"status\": \"ready\"}"}
                     ],
                     max_tokens=10,
                     timeout=5
@@ -1081,26 +1490,28 @@ def quick_check():
         try:
             # Use thread with timeout
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(openai_check)
+                future = executor.submit(openrouter_check)
                 response = future.result(timeout=8)  # 8 second timeout
             
             response_time = time.time() - start_time
             
-            if 'ready' in response.choices[0].message.content.lower():
+            if response:
                 return jsonify({
                     'available': True,
                     'response_time': f'{response_time:.2f}s',
                     'status': 'ready',
+                    'model': model,
                     'warmup_complete': True,
-                    'quota_status': 'ok'
+                    'service': 'openrouter'
                 })
             else:
                 return jsonify({
-                    'available': True,
+                    'available': False,
                     'response_time': f'{response_time:.2f}s',
-                    'status': 'responding',
-                    'warmup_complete': True,
-                    'quota_status': 'ok'
+                    'status': 'no_response',
+                    'model': model,
+                    'warmup_complete': warmup_complete,
+                    'suggestion': 'OpenRouter service is not responding'
                 })
                 
         except concurrent.futures.TimeoutError:
@@ -1108,6 +1519,7 @@ def quick_check():
                 'available': False,
                 'reason': 'Request timed out after 8 seconds',
                 'status': 'timeout',
+                'model': model,
                 'warmup_complete': warmup_complete,
                 'suggestion': 'AI service is taking too long. Please try again.'
             })
@@ -1116,7 +1528,7 @@ def quick_check():
         error_msg = str(e)
         if "quota" in error_msg.lower() or "429" in error_msg or "insufficient_quota" in error_msg:
             status = 'quota_exceeded'
-            suggestion = 'API quota exceeded. Please check your OpenAI account.'
+            suggestion = 'API quota exceeded. Please check your OpenRouter account.'
         elif "rate limit" in error_msg.lower():
             status = 'rate_limit'
             suggestion = 'Rate limit exceeded. Please try again in a minute.'
@@ -1131,6 +1543,7 @@ def quick_check():
             'available': False,
             'reason': error_msg[:100],
             'status': status,
+            'model': model,
             'warmup_complete': warmup_complete,
             'suggestion': suggestion
         })
@@ -1144,9 +1557,10 @@ def ping():
         'status': 'pong',
         'timestamp': datetime.now().isoformat(),
         'service': 'resume-analyzer',
-        'openai_warmup': warmup_complete,
+        'openrouter_warmup': warmup_complete,
+        'model': model,
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
-        'message': 'Service is alive and warm!' if warmup_complete else 'Service is alive, warming up OpenAI...'
+        'message': 'Service is alive and warm!' if warmup_complete else 'Service is alive, warming up OpenRouter...'
     })
 
 @app.route('/health', methods=['GET'])
@@ -1162,30 +1576,42 @@ def health_check():
         'timestamp': datetime.now().isoformat(),
         'api_key_configured': bool(api_key),
         'client_initialized': client is not None,
-        'openai_warmup_complete': warmup_complete,
+        'model': model,
+        'openrouter_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'upload_folder_path': UPLOAD_FOLDER,
         'inactive_minutes': inactive_minutes,
         'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
-        'version': '1.0.0',
-        'features': ['always_active', 'openai_warmup', 'keep_alive']
+        'version': '2.0.0',
+        'features': ['always_active', 'openrouter', 'batch_processing', 'keep_alive']
     })
 
-@app.route('/list-models', methods=['GET'])
+@app.route('/models', methods=['GET'])
 def list_models():
-    """List all available models"""
+    """List available OpenRouter models"""
     update_activity()
     
     try:
-        if not client:
-            return jsonify({'error': 'Client not initialized'})
+        if not api_key:
+            return jsonify({'error': 'API key not configured'})
         
-        models = client.models.list()
-        model_names = [model.id for model in models.data]
+        # Popular OpenRouter models
+        popular_models = [
+            {'id': 'meta-llama/llama-3.2-3b-instruct:free', 'name': 'Llama 3.2 3B (Free)', 'provider': 'Meta'},
+            {'id': 'mistralai/mistral-7b-instruct:free', 'name': 'Mistral 7B (Free)', 'provider': 'Mistral AI'},
+            {'id': 'google/gemma-2-2b-it:free', 'name': 'Gemma 2 2B (Free)', 'provider': 'Google'},
+            {'id': 'meta-llama/llama-3.1-8b-instruct:free', 'name': 'Llama 3.1 8B (Free)', 'provider': 'Meta'},
+            {'id': 'openai/gpt-4o-mini', 'name': 'GPT-4o Mini', 'provider': 'OpenAI'},
+            {'id': 'anthropic/claude-3.5-sonnet', 'name': 'Claude 3.5 Sonnet', 'provider': 'Anthropic'},
+            {'id': 'google/gemini-pro', 'name': 'Gemini Pro', 'provider': 'Google'},
+            {'id': 'meta-llama/llama-3.3-70b-instruct:free', 'name': 'Llama 3.3 70B (Free - Rate Limited)', 'provider': 'Meta'},
+        ]
         
         return jsonify({
-            'available_models': model_names,
-            'count': len(model_names)
+            'available_models': popular_models,
+            'current_model': model,
+            'count': len(popular_models),
+            'documentation': 'https://openrouter.ai/models'
         })
     except Exception as e:
         return jsonify({'error': str(e)})
@@ -1196,17 +1622,19 @@ if __name__ == '__main__':
     print("="*50)
     port = int(os.environ.get('PORT', 5002))
     print(f"📍 Server: http://localhost:{port}")
-    print(f"🔑 API Key: {'✅ Configured' if api_key else '❌ NOT FOUND'}")
-    print(f"🤖 OpenAI Client: {'✅ Initialized' if client else '❌ NOT INITIALIZED'}")
+    print(f"🔑 OpenRouter API Key: {'✅ Configured' if api_key else '❌ NOT FOUND'}")
+    print(f"🤖 Model: {model}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print("✅ Always Active Mode: Enabled")
-    print("✅ OpenAI Keep-Warm: Enabled")
+    print("✅ OpenRouter Keep-Warm: Enabled")
+    print("✅ Batch Processing: Enabled")
     print("="*50 + "\n")
     
     if not api_key:
-        print("⚠️  WARNING: OPENAI_API_KEY not found!")
-        print("Please create a .env file with: OPENAI_API_KEY=your_key_here\n")
-        print("Get your API key from: https://platform.openai.com/api-keys")
+        print("⚠️  WARNING: OPENROUTER_API_KEY not found!")
+        print("Please create a .env file with: OPENROUTER_API_KEY=your_key_here\n")
+        print("Get your API key from: https://openrouter.ai/keys")
+        print("Free models available: meta-llama/llama-3.2-3b-instruct:free")
     
     # Use PORT environment variable (Render provides $PORT)
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
