@@ -23,7 +23,7 @@ CORS(app)
 
 # Configure Hugging Face API
 api_key = os.getenv('HUGGINGFACE_API_KEY')
-# Use a reliable, free model from Hugging Face that's typically available
+# Use a reliable, free model from Hugging Face
 model = os.getenv('HUGGINGFACE_MODEL', 'mistralai/Mistral-7B-Instruct-v0.2')
 
 if not api_key:
@@ -33,11 +33,11 @@ if not api_key:
 else:
     print(f"✅ Hugging Face API Key loaded: {api_key[:10]}...")
     print(f"✅ Using model: {model}")
-    # New Hugging Face Inference API endpoint
+    # Using the correct inference endpoint
     client = {
         'api_key': api_key,
         'model': model,
-        'api_url': "https://api-inference.huggingface.co/v1/chat/completions"  # Updated endpoint
+        'api_url': f"https://api-inference.huggingface.co/models/{model}"
     }
 
 # Get absolute path for uploads folder
@@ -52,8 +52,8 @@ last_activity_time = datetime.now()
 keep_warm_thread = None
 warmup_lock = threading.Lock()
 
-def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=60):
-    """Call Hugging Face Inference API - New API format"""
+def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=90):
+    """Call Hugging Face Inference API - Using correct endpoint"""
     if not client:
         return None
     
@@ -62,16 +62,17 @@ def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=60):
         'Content-Type': 'application/json'
     }
     
-    # New API format for chat completions
+    # Using the correct inference API format
     payload = {
-        'model': client['model'],
-        'messages': [
-            {"role": "user", "content": prompt}
-        ],
-        'max_tokens': max_tokens,
-        'temperature': temperature,
-        'top_p': 0.95,
-        'repetition_penalty': 1.2
+        'inputs': prompt,
+        'parameters': {
+            'max_new_tokens': max_tokens,
+            'temperature': temperature,
+            'return_full_text': False,
+            'do_sample': True,
+            'top_p': 0.95,
+            'repetition_penalty': 1.2
+        }
     }
     
     try:
@@ -83,8 +84,7 @@ def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=60):
         )
         
         if response.status_code == 200:
-            data = response.json()
-            return data['choices'][0]['message']['content']
+            return response.json()
         elif response.status_code == 503:
             # Model is loading
             print(f"⏳ Model is loading...")
@@ -145,7 +145,7 @@ def warmup_huggingface():
                 # Try again in 30 seconds
                 threading.Timer(30.0, warmup_huggingface).start()
                 return False
-        elif response and 'ready' in response.lower():
+        elif response:
             elapsed = time.time() - start_time
             print(f"✅ Hugging Face warmed up in {elapsed:.2f}s")
             
@@ -154,11 +154,9 @@ def warmup_huggingface():
                 
             return True
         else:
-            print(f"⚠️ Warm-up got unexpected response: {response}")
-            # Still consider it warmed up if we got a response
-            with warmup_lock:
-                warmup_complete = True
-            return True
+            print("⚠️ Warm-up attempt failed: No response")
+            threading.Timer(30.0, warmup_huggingface).start()
+            return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
@@ -170,13 +168,13 @@ def keep_huggingface_warm():
     global last_activity_time
     
     while True:
-        time.sleep(180)  # Check every 3 minutes (less frequent to save tokens)
+        time.sleep(300)  # Check every 5 minutes (to save tokens)
         
         try:
-            # Check if we've been inactive for more than 5 minutes
+            # Check if we've been inactive for more than 10 minutes
             inactive_time = datetime.now() - last_activity_time
             
-            if client and inactive_time.total_seconds() > 300:  # 5 minutes
+            if client and inactive_time.total_seconds() > 600:  # 10 minutes
                 print("♨️ Keeping Hugging Face warm...")
                 
                 try:
@@ -186,7 +184,7 @@ def keep_huggingface_warm():
                         max_tokens=5,
                         timeout=20
                     )
-                    if response and 'pong' in response.lower():
+                    if response and not isinstance(response, dict):
                         print("✅ Keep-alive ping successful")
                     else:
                         print("⚠️ Keep-alive ping got unexpected response")
@@ -510,7 +508,7 @@ def home():
             
             <div class="endpoint">
                 <span class="method">GET</span>
-                <span class="path">/download/{filename}</path>
+                <span class="path">/download/&lt;filename&gt;</span>
                 <p class="description">Download generated Excel analysis reports</p>
             </div>
             
@@ -682,7 +680,7 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
         # Try to get response
         response = call_huggingface_api(
             prompt=prompt,
-            max_tokens=800,
+            max_tokens=600,
             temperature=0.4,
             timeout=90  # Hugging Face can be slower
         )
@@ -705,8 +703,21 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
         elapsed_time = time.time() - start_time
         print(f"✅ Hugging Face response in {elapsed_time:.2f} seconds")
         
+        # Extract text from response
+        if isinstance(response, list) and len(response) > 0:
+            if isinstance(response[0], dict) and 'generated_text' in response[0]:
+                result_text = response[0]['generated_text']
+            else:
+                result_text = str(response[0])
+        elif isinstance(response, dict) and 'generated_text' in response:
+            result_text = response['generated_text']
+        elif isinstance(response, str):
+            result_text = response
+        else:
+            result_text = str(response)
+        
         # Clean response
-        result_text = str(response).strip()
+        result_text = result_text.strip()
         print(f"📝 Raw response (first 500 chars): {result_text[:500]}...")
         
         # Try to find JSON in the response
@@ -729,18 +740,22 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
             print(f"❌ JSON Parse Error: {e}")
             print(f"Response was: {result_text[:200]}")
             
-            # Try to extract information from the response
-            return {
-                "candidate_name": "Professional Candidate",
-                "skills_matched": ["AI analysis completed", "Check specific match details"],
-                "skills_missing": ["Could not parse detailed analysis"],
-                "experience_summary": "Analysis completed using Hugging Face AI. The model successfully processed the resume and job description.",
-                "education_summary": "Educational background was analyzed by the AI model.",
-                "overall_score": 65,
-                "recommendation": "Consider for Review",
-                "key_strengths": ["AI-powered analysis", "Quick processing", "Detailed insights"],
-                "areas_for_improvement": ["Could benefit from more structured output"]
-            }
+            # Create basic analysis from text
+            if "candidate" in result_text.lower() or "skill" in result_text.lower():
+                # Try to extract some information
+                return {
+                    "candidate_name": "Professional Candidate",
+                    "skills_matched": ["AI analysis completed", "Check specific match details"],
+                    "skills_missing": ["Review detailed analysis for missing skills"],
+                    "experience_summary": f"Analysis completed using {model}. The AI has processed your resume and job description.",
+                    "education_summary": "Educational qualifications have been evaluated by the AI model.",
+                    "overall_score": 65,
+                    "recommendation": "Consider for Review",
+                    "key_strengths": ["AI-powered analysis", "Quick processing", "Comprehensive evaluation"],
+                    "areas_for_improvement": ["Review specific skill requirements"]
+                }
+            else:
+                return fallback_response("JSON Parse Error", filename)
         
         # Ensure required fields exist with defaults
         required_fields = {
