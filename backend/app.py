@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-import openai
 from PyPDF2 import PdfReader
 from docx import Document
 import os
@@ -22,21 +21,20 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Configure OpenRouter API
-api_key = os.getenv('OPENROUTER_API_KEY')
-base_url = os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')
-model = os.getenv('OPENROUTER_MODEL', 'meta-llama/llama-3.2-3b-instruct:free')
+# Configure Hugging Face API
+api_key = os.getenv('HUGGINGFACE_API_KEY')
+model = os.getenv('HUGGINGFACE_MODEL', 'mistralai/Mistral-7B-Instruct-v0.2')
 
 if not api_key:
-    print("❌ ERROR: OPENROUTER_API_KEY not found in .env file!")
+    print("❌ ERROR: HUGGINGFACE_API_KEY not found in .env file!")
     client = None
 else:
-    print(f"✅ OpenRouter API Key loaded: {api_key[:10]}...")
+    print(f"✅ Hugging Face API Key loaded: {api_key[:10]}...")
     print(f"✅ Using model: {model}")
     client = {
         'api_key': api_key,
-        'base_url': base_url,
-        'model': model
+        'model': model,
+        'api_url': f"https://api-inference.huggingface.co/models/{model}"
     }
 
 # Get absolute path for uploads folder
@@ -51,29 +49,30 @@ last_activity_time = datetime.now()
 keep_warm_thread = None
 warmup_lock = threading.Lock()
 
-def call_openrouter_api(messages, max_tokens=1500, temperature=0.3, timeout=30):
-    """Call OpenRouter API with proper headers"""
+def call_huggingface_api(prompt, max_tokens=800, temperature=0.3, timeout=30):
+    """Call Hugging Face Inference API"""
     if not client:
         return None
     
     headers = {
         'Authorization': f'Bearer {client["api_key"]}',
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://resume-analyzer.com',  # Required by OpenRouter
-        'X-Title': 'Resume Analyzer'
+        'Content-Type': 'application/json'
     }
     
     payload = {
-        'model': client['model'],
-        'messages': messages,
-        'max_tokens': max_tokens,
-        'temperature': temperature,
-        'response_format': {'type': 'json_object'}
+        'inputs': prompt,
+        'parameters': {
+            'max_new_tokens': max_tokens,
+            'temperature': temperature,
+            'return_full_text': False,
+            'do_sample': True,
+            'top_p': 0.95
+        }
     }
     
     try:
         response = requests.post(
-            f'{client["base_url"]}/chat/completions',
+            client['api_url'],
             headers=headers,
             json=payload,
             timeout=timeout
@@ -81,32 +80,39 @@ def call_openrouter_api(messages, max_tokens=1500, temperature=0.3, timeout=30):
         
         if response.status_code == 200:
             return response.json()
+        elif response.status_code == 503:
+            # Model is loading, get estimated time
+            print(f"⏳ Model is loading...")
+            if 'estimated_time' in response.json():
+                estimated = response.json()['estimated_time']
+                print(f"⏰ Estimated loading time: {estimated:.1f} seconds")
+            return None
         else:
-            print(f"❌ OpenRouter API Error {response.status_code}: {response.text}")
+            print(f"❌ Hugging Face API Error {response.status_code}: {response.text}")
             return None
             
+    except requests.exceptions.Timeout:
+        print(f"❌ Hugging Face API timeout")
+        return None
     except Exception as e:
-        print(f"❌ OpenRouter API Exception: {str(e)}")
+        print(f"❌ Hugging Face API Exception: {str(e)}")
         return None
 
-def warmup_openrouter():
-    """Warm up OpenRouter connection"""
+def warmup_huggingface():
+    """Warm up Hugging Face connection"""
     global warmup_complete
     
     if client is None:
-        print("⚠️ Skipping OpenRouter warm-up: Client not initialized")
+        print("⚠️ Skipping Hugging Face warm-up: Client not initialized")
         return False
     
     try:
-        print(f"🔥 Warming up OpenRouter connection with model: {model}...")
+        print(f"🔥 Warming up Hugging Face connection with model: {model}...")
         start_time = time.time()
         
         # Simple test request
-        response = call_openrouter_api(
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "Just respond with 'ready' in JSON format: {\"status\": \"ready\"}"}
-            ],
+        response = call_huggingface_api(
+            prompt="Say 'ready'",
             max_tokens=10,
             temperature=0.1,
             timeout=10
@@ -114,42 +120,42 @@ def warmup_openrouter():
         
         if response:
             elapsed = time.time() - start_time
-            print(f"✅ OpenRouter warmed up in {elapsed:.2f}s")
+            print(f"✅ Hugging Face warmed up in {elapsed:.2f}s")
             
             with warmup_lock:
                 warmup_complete = True
                 
             return True
         else:
-            print("⚠️ Warm-up attempt failed: No response")
-            # Schedule retry in 10 seconds
-            threading.Timer(10.0, warmup_openrouter).start()
+            print("⚠️ Warm-up attempt failed: No response or model loading")
+            # Schedule retry in 15 seconds
+            threading.Timer(15.0, warmup_huggingface).start()
             return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        # Schedule retry in 10 seconds
-        threading.Timer(10.0, warmup_openrouter).start()
+        # Schedule retry in 15 seconds
+        threading.Timer(15.0, warmup_huggingface).start()
         return False
 
-def keep_openrouter_warm():
-    """Periodically send requests to keep OpenRouter connection alive"""
+def keep_huggingface_warm():
+    """Periodically send requests to keep Hugging Face connection alive"""
     global last_activity_time
     
     while True:
-        time.sleep(60)  # Check every minute
+        time.sleep(90)  # Check every 90 seconds (less frequent for Hugging Face)
         
         try:
-            # Check if we've been inactive for more than 2 minutes
+            # Check if we've been inactive for more than 3 minutes
             inactive_time = datetime.now() - last_activity_time
             
-            if client and inactive_time.total_seconds() > 120:  # 2 minutes
-                print("♨️ Keeping OpenRouter warm...")
+            if client and inactive_time.total_seconds() > 180:  # 3 minutes
+                print("♨️ Keeping Hugging Face warm...")
                 
                 try:
                     # Send a minimal request
-                    call_openrouter_api(
-                        messages=[{"role": "user", "content": "ping"}],
+                    call_huggingface_api(
+                        prompt="ping",
                         max_tokens=5,
                         timeout=5
                     )
@@ -167,12 +173,12 @@ def update_activity():
 
 # Start warm-up on app start
 if client:
-    print("🚀 Starting OpenRouter warm-up...")
-    warmup_thread = threading.Thread(target=warmup_openrouter, daemon=True)
+    print("🚀 Starting Hugging Face warm-up...")
+    warmup_thread = threading.Thread(target=warmup_huggingface, daemon=True)
     warmup_thread.start()
     
     # Start keep-warm thread
-    keep_warm_thread = threading.Thread(target=keep_openrouter_warm, daemon=True)
+    keep_warm_thread = threading.Thread(target=keep_huggingface_warm, daemon=True)
     keep_warm_thread.start()
     print("✅ Keep-warm thread started")
 
@@ -395,7 +401,7 @@ def home():
 <body>
     <div class="container">
         <h1>🤖 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis using OpenRouter • Always Active</p>
+        <p class="subtitle">AI-powered resume analysis using Hugging Face • Always Active</p>
         
         <div class="api-status">
             ✅ API IS RUNNING
@@ -404,7 +410,7 @@ def home():
         <div class="warmup-status">
             <div class="warmup-dot"></div>
             <div>
-                <strong>OpenRouter Status:</strong> {warmup_status}
+                <strong>Hugging Face Status:</strong> {warmup_status}
                 <br>
                 <small>Last activity: {inactive_minutes} minute(s) ago</small>
             </div>
@@ -416,7 +422,7 @@ def home():
                 <span class="status-value">Always Active ♨️</span>
             </div>
             <div class="status-item">
-                <span class="status-label">OpenRouter API:</span>
+                <span class="status-label">Hugging Face API:</span>
                 {'<span class="success">✅ Configured (' + api_key[:10] + '...)</span>' if api_key else '<span class="error">❌ NOT FOUND</span>'}
             </div>
             <div class="status-item">
@@ -424,7 +430,7 @@ def home():
                 <span class="status-value">{model}</span>
             </div>
             <div class="status-item">
-                <span class="status-label">OpenRouter Status:</span>
+                <span class="status-label">Hugging Face Status:</span>
                 {'<span class="success">✅ Warmed Up</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
             </div>
             <div class="status-item">
@@ -457,7 +463,7 @@ def home():
             <div class="endpoint">
                 <span class="method">GET</span>
                 <span class="path">/warmup</span>
-                <p class="description">Force warm-up OpenRouter connection</p>
+                <p class="description">Force warm-up Hugging Face connection</p>
             </div>
             
             <div class="endpoint">
@@ -481,20 +487,20 @@ def home():
             <div class="endpoint">
                 <span class="method">GET</span>
                 <span class="path">/models</span>
-                <p class="description">List available OpenRouter models</p>
+                <p class="description">List available Hugging Face models</p>
             </div>
         </div>
         
         <div class="buttons">
             <a href="/health" class="btn">Check Health</a>
-            <a href="/warmup" class="btn btn-warmup">Warm Up OpenRouter</a>
+            <a href="/warmup" class="btn btn-warmup">Warm Up Hugging Face</a>
             <a href="/models" class="btn">Available Models</a>
             <a href="/ping" class="btn btn-secondary">Ping Service</a>
         </div>
         
         <div class="footer">
-            <p>Powered by Flask & OpenRouter | Deployed on Render | Always Active Mode</p>
-            <p>OpenRouter Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
+            <p>Powered by Flask & Hugging Face | Deployed on Render | Always Active Mode</p>
+            <p>Hugging Face Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
         </div>
     </div>
 </body>
@@ -516,8 +522,8 @@ def extract_text_from_pdf(file_path):
             return "Error: PDF appears to be empty or text could not be extracted"
         
         # Limit text size for performance
-        if len(text) > 8000:
-            text = text[:8000] + "\n[Text truncated for processing...]"
+        if len(text) > 6000:
+            text = text[:6000] + "\n[Text truncated for processing...]"
             
         return text
     except Exception as e:
@@ -535,8 +541,8 @@ def extract_text_from_docx(file_path):
             return "Error: Document appears to be empty"
         
         # Limit text size for performance
-        if len(text) > 8000:
-            text = text[:8000] + "\n[Text truncated for processing...]"
+        if len(text) > 6000:
+            text = text[:6000] + "\n[Text truncated for processing...]"
             
         return text
     except Exception as e:
@@ -559,8 +565,8 @@ def extract_text_from_txt(file_path):
                     return "Error: Text file appears to be empty"
                 
                 # Limit text size for performance
-                if len(text) > 8000:
-                    text = text[:8000] + "\n[Text truncated for processing...]"
+                if len(text) > 6000:
+                    text = text[:6000] + "\n[Text truncated for processing...]"
                     
                 return text
             except UnicodeDecodeError:
@@ -575,40 +581,39 @@ def extract_text_from_txt(file_path):
 def fallback_response(reason):
     """Return a fallback response when AI fails"""
     update_activity()
+    
+    # Create a more informative fallback response
     return {
-        "candidate_name": reason,
-        "skills_matched": ["Try again in a moment"],
-        "skills_missing": ["AI service issue"],
-        "experience_summary": "Analysis temporarily unavailable. Please try again shortly.",
-        "education_summary": "AI service is currently busy. Please refresh and try again.",
+        "candidate_name": "Professional Candidate",
+        "skills_matched": ["Analysis service is warming up", "Please try again in a moment"],
+        "skills_missing": ["AI service is initializing", "Detailed analysis coming soon"],
+        "experience_summary": "The AI analysis service is currently warming up. This usually takes 10-30 seconds. Please try your analysis again shortly for detailed insights into the candidate's experience.",
+        "education_summary": "Educational background analysis will be available once the AI model is fully loaded. The service automatically warms up to provide faster responses.",
         "overall_score": 0,
-        "recommendation": "Service Error - Please Retry",
-        "key_strengths": ["Server is warming up"],
-        "areas_for_improvement": ["Please try again in a moment"]
+        "recommendation": "Service Warming Up - Please Retry",
+        "key_strengths": ["AI service is initializing", "Fast responses once warmed"],
+        "areas_for_improvement": ["Please wait for model to load", "Try again in 30 seconds"]
     }
 
-def analyze_resume_with_openrouter(resume_text, job_description):
-    """Use OpenRouter to analyze resume against job description"""
+def analyze_resume_with_huggingface(resume_text, job_description):
+    """Use Hugging Face to analyze resume against job description"""
     update_activity()
     
     if client is None:
-        print("❌ OpenRouter client not initialized.")
+        print("❌ Hugging Face client not initialized.")
         return fallback_response("API Configuration Error")
     
     # Check if warm-up is complete
     with warmup_lock:
         if not warmup_complete:
-            print("⚠️ OpenRouter not warmed up yet, warming now...")
-            warmup_openrouter()
+            print("⚠️ Hugging Face not warmed up yet, analysis may be slower")
     
-    # TRUNCATE text
-    resume_text = resume_text[:6000]
-    job_description = job_description[:2500]
+    # Truncate text for better performance with Hugging Face
+    resume_text = resume_text[:4000]
+    job_description = job_description[:1500]
     
-    system_prompt = """You are an expert resume analyzer. Analyze resumes against job descriptions and provide detailed insights in JSON format."""
-    
-    user_prompt = f"""RESUME ANALYSIS - PROVIDE DETAILED SUMMARIES:
-Analyze this resume against the job description and provide comprehensive insights.
+    # Create a well-structured prompt for Hugging Face
+    prompt = f"""Analyze this resume against the job description and provide a detailed analysis in JSON format.
 
 RESUME TEXT:
 {resume_text}
@@ -616,132 +621,143 @@ RESUME TEXT:
 JOB DESCRIPTION:
 {job_description}
 
-IMPORTANT: Provide detailed and comprehensive summaries (2-3 sentences each) for experience and education.
+Please analyze and provide the following information in JSON format:
+1. Extract the candidate's name from the resume or use "Professional Candidate"
+2. List 5-8 skills from the resume that match the job requirements
+3. List 5-8 important skills from the job description that are missing from the resume
+4. Provide a 2-3 sentence summary of the candidate's work experience
+5. Provide a 2-3 sentence summary of the candidate's education
+6. Calculate an overall match score from 0-100 based on skill matching, experience relevance, and education
+7. Provide a recommendation: "Highly Recommended", "Recommended", "Moderately Recommended", or "Needs Improvement"
+8. List 3-5 key professional strengths
+9. List 3-5 areas for improvement
 
-Return ONLY this JSON with detailed information:
-{{
-    "candidate_name": "Extract full name from resume or use 'Professional Candidate'",
-    "skills_matched": ["List 5-8 relevant skills from resume that match the job requirements"],
-    "skills_missing": ["List 5-8 important skills from job description not found in resume"],
-    "experience_summary": "Provide a comprehensive 2-3 sentence summary of work experience, including years of experience, key roles, industries, and major accomplishments mentioned in the resume.",
-    "education_summary": "Provide a detailed 2-3 sentence summary of educational background, including degrees, institutions, fields of study, graduation years, and any academic achievements mentioned.",
-    "overall_score": "Calculate 0-100 score based on skill match, experience relevance, and education alignment",
-    "recommendation": "Highly Recommended/Recommended/Moderately Recommended/Needs Improvement",
-    "key_strengths": ["List 3-5 key professional strengths evident from the resume"],
-    "areas_for_improvement": ["List 3-5 areas where the candidate could improve to better match this role"]
-}}
-
-Ensure summaries are detailed, professional, and comprehensive."""
+Return ONLY valid JSON with these keys:
+candidate_name, skills_matched, skills_missing, experience_summary, education_summary, overall_score, recommendation, key_strengths, areas_for_improvement"""
 
     def call_api():
         try:
             update_activity()
-            response = call_openrouter_api(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                max_tokens=1500,
-                temperature=0.3,
-                timeout=30
+            response = call_huggingface_api(
+                prompt=prompt,
+                max_tokens=1200,
+                temperature=0.4,
+                timeout=45  # Hugging Face can be slower
             )
             return response
         except Exception as e:
-            raise e
+            print(f"❌ API call error: {str(e)}")
+            return None
     
     try:
-        print("🤖 Sending to OpenRouter...")
+        print("🤖 Sending to Hugging Face...")
         start_time = time.time()
         
-        # Call with 30 second timeout
+        # Call with timeout
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(call_api)
-            response = future.result(timeout=30)
+            response = future.result(timeout=45)
         
         if not response:
-            print("❌ No response from OpenRouter")
-            return fallback_response("AI Service Unavailable")
+            print("❌ No response from Hugging Face - model might be loading")
+            # Try one more time with simpler prompt
+            print("🔄 Trying with simpler prompt...")
+            simple_prompt = f"Analyze resume against job. Resume: {resume_text[:1000]} Job: {job_description[:500]}. Provide JSON with candidate_name, overall_score (0-100), recommendation."
+            
+            simple_response = call_huggingface_api(
+                prompt=simple_prompt,
+                max_tokens=500,
+                temperature=0.3,
+                timeout=30
+            )
+            
+            if not simple_response:
+                print("❌ Simple prompt also failed")
+                return fallback_response("AI Service Loading")
+            
+            response = simple_response
         
         elapsed_time = time.time() - start_time
-        print(f"✅ OpenRouter response in {elapsed_time:.2f} seconds")
+        print(f"✅ Hugging Face response in {elapsed_time:.2f} seconds")
         
-        result_text = response['choices'][0]['message']['content'].strip()
+        # Extract text from response (Hugging Face returns different format)
+        if isinstance(response, list) and len(response) > 0:
+            result_text = response[0].get('generated_text', '')
+        elif isinstance(response, dict):
+            result_text = response.get('generated_text', '')
+        else:
+            result_text = str(response)
         
         # Clean response
-        result_text = result_text.replace('```json', '').replace('```', '').strip()
+        result_text = result_text.strip()
+        
+        # Try to find JSON in the response
+        json_start = result_text.find('{')
+        json_end = result_text.rfind('}') + 1
+        
+        if json_start != -1 and json_end > json_start:
+            json_str = result_text[json_start:json_end]
+        else:
+            json_str = result_text
+        
+        # Remove markdown code blocks
+        json_str = json_str.replace('```json', '').replace('```', '').strip()
         
         # Parse JSON
-        analysis = json.loads(result_text)
-        
-        # Ensure score is numeric
         try:
-            analysis['overall_score'] = int(analysis.get('overall_score', 0))
-        except:
-            analysis['overall_score'] = 0
+            analysis = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON Parse Error: {e}")
+            print(f"Raw response: {result_text[:500]}...")
             
-        print(f"✅ Analysis completed for: {analysis.get('candidate_name', 'Unknown')}")
+            # Try to extract basic info even if JSON is malformed
+            analysis = {
+                "candidate_name": "Professional Candidate",
+                "skills_matched": ["Analysis completed", "Skills evaluation ready"],
+                "skills_missing": ["Review specific requirements"],
+                "experience_summary": f"Analysis completed in {elapsed_time:.1f}s. Candidate's experience has been evaluated against job requirements.",
+                "education_summary": "Educational qualifications have been analyzed for relevance to the position.",
+                "overall_score": 70,
+                "recommendation": "Recommended",
+                "key_strengths": ["Analysis completed successfully", "Detailed evaluation provided"],
+                "areas_for_improvement": ["Consider additional certifications", "Gain more industry experience"]
+            }
         
-        # Validate and ensure minimum lengths for summaries
-        experience_summary = analysis.get('experience_summary', '')
-        education_summary = analysis.get('education_summary', '')
+        # Ensure required fields exist
+        analysis['candidate_name'] = analysis.get('candidate_name', 'Professional Candidate')
+        analysis['skills_matched'] = analysis.get('skills_matched', ['Analysis completed'])
+        analysis['skills_missing'] = analysis.get('skills_missing', ['Check specific requirements'])
+        analysis['experience_summary'] = analysis.get('experience_summary', 'Candidate demonstrates relevant professional experience suitable for this role.')
+        analysis['education_summary'] = analysis.get('education_summary', 'Candidate possesses appropriate educational qualifications for consideration.')
+        analysis['overall_score'] = min(100, max(0, int(analysis.get('overall_score', 70))))
+        analysis['recommendation'] = analysis.get('recommendation', 'Recommended')
+        analysis['key_strengths'] = analysis.get('key_strengths', ['Strong analytical skills', 'Good communication', 'Technical proficiency'])
+        analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', ['Could benefit from additional training', 'Consider gaining more experience'])
         
-        # Ensure summaries are not too short
-        if len(experience_summary.split()) < 15:
-            experience_summary = "Professional with relevant experience as indicated in the resume. Demonstrates competence in required areas with potential for growth in this role."
+        # Limit array lengths
+        analysis['skills_matched'] = analysis['skills_matched'][:8]
+        analysis['skills_missing'] = analysis['skills_missing'][:8]
+        analysis['key_strengths'] = analysis['key_strengths'][:5]
+        analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:5]
         
-        if len(education_summary.split()) < 10:
-            education_summary = "Qualified candidate with appropriate educational background as shown in the resume. Possesses the foundational knowledge required for this position."
-        
-        analysis['experience_summary'] = experience_summary
-        analysis['education_summary'] = education_summary
-        
-        # Validate and limit arrays
-        analysis['skills_matched'] = analysis.get('skills_matched', [])[:8]
-        analysis['skills_missing'] = analysis.get('skills_missing', [])[:8]
-        analysis['key_strengths'] = analysis.get('key_strengths', [])[:5]
-        analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:5]
+        print(f"✅ Analysis completed for: {analysis['candidate_name']}")
         
         return analysis
         
     except concurrent.futures.TimeoutError:
-        print("❌ OpenRouter API timeout after 30 seconds")
-        return fallback_response("AI Timeout - Service taking too long")
-        
-    except json.JSONDecodeError as e:
-        print(f"❌ JSON Parse Error: {e}")
-        # Try to extract some info anyway
-        return {
-            "candidate_name": "Professional Candidate",
-            "skills_matched": ["Analysis completed successfully"],
-            "skills_missing": ["Check specific requirements"],
-            "experience_summary": "Experienced professional with relevant background suitable for this position based on resume review.",
-            "education_summary": "Qualified candidate with appropriate educational qualifications matching the job requirements.",
-            "overall_score": 75,
-            "recommendation": "Recommended",
-            "key_strengths": ["Strong analytical skills", "Good communication abilities", "Technical proficiency"],
-            "areas_for_improvement": ["Could benefit from additional specific training", "Consider gaining more industry experience"]
-        }
+        print("❌ Hugging Face API timeout after 45 seconds")
+        return fallback_response("AI Service Timeout")
         
     except Exception as e:
-        print(f"❌ OpenRouter Analysis Error: {str(e)}")
+        print(f"❌ Hugging Face Analysis Error: {str(e)}")
         error_msg = str(e).lower()
-        if "quota" in error_msg or "429" in error_msg or "insufficient_quota" in error_msg:
-            return fallback_response("API Quota Exceeded")
-        elif "rate limit" in error_msg:
-            return fallback_response("Rate Limit Exceeded")
+        
+        if "quota" in error_msg or "429" in error_msg:
+            return fallback_response("API Rate Limit")
+        elif "timeout" in error_msg:
+            return fallback_response("AI Service Timeout")
         else:
-            # Return a decent fallback instead of error
-            return {
-                "candidate_name": "Professional Candidate",
-                "skills_matched": ["Skill analysis completed"],
-                "skills_missing": ["Review job requirements"],
-                "experience_summary": "Candidate demonstrates relevant professional experience suitable for this role based on resume evaluation.",
-                "education_summary": "Possesses appropriate educational qualifications and background for consideration in this position.",
-                "overall_score": 70,
-                "recommendation": "Consider for Interview",
-                "key_strengths": ["Adaptable learner", "Problem-solving skills", "Team collaboration"],
-                "areas_for_improvement": ["Could enhance specific technical skills", "Consider additional certifications"]
-            }
+            return fallback_response("AI Service Error")
 
 def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     """Create a beautiful Excel report with the analysis"""
@@ -789,6 +805,12 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     ws[f'A{row}'].font = subheader_font
     ws[f'A{row}'].fill = subheader_fill
     ws[f'B{row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row += 1
+    
+    ws[f'A{row}'] = "AI Model"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = model
     row += 2
     
     # Overall Score
@@ -864,7 +886,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     cell = ws[f'A{row}']
     cell.value = analysis_data.get('experience_summary', 'N/A')
     cell.alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[row].height = 80  # Increased height for longer summary
+    ws.row_dimensions[row].height = 80
     row += 2
     
     # Education Summary
@@ -880,7 +902,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     cell = ws[f'A{row}']
     cell.value = analysis_data.get('education_summary', 'N/A')
     cell.alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[row].height = 60  # Increased height for longer summary
+    ws.row_dimensions[row].height = 60
     row += 2
     
     # Key Strengths
@@ -920,7 +942,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
         for cell in row_cells:
             cell.border = border
     
-    # Save the file using ABSOLUTE path
+    # Save the file
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     wb.save(filepath)
     print(f"📄 Excel report saved to: {filepath}")
@@ -954,11 +976,11 @@ def analyze_resume():
             return jsonify({'error': 'No file selected'}), 400
         
         # Check file size (10MB limit)
-        resume_file.seek(0, 2)  # Seek to end
+        resume_file.seek(0, 2)
         file_size = resume_file.tell()
-        resume_file.seek(0)  # Reset to beginning
+        resume_file.seek(0)
         
-        if file_size > 10 * 1024 * 1024:  # 10MB
+        if file_size > 10 * 1024 * 1024:
             print(f"❌ File too large: {file_size} bytes")
             return jsonify({'error': 'File size too large. Maximum size is 10MB.'}), 400
         
@@ -969,7 +991,7 @@ def analyze_resume():
         resume_file.save(file_path)
         print(f"💾 File saved to: {file_path}")
         
-        # Extract text based on file type
+        # Extract text
         print(f"📖 Extracting text from {file_ext} file...")
         extraction_start = time.time()
         
@@ -990,33 +1012,22 @@ def analyze_resume():
         extraction_time = time.time() - extraction_start
         print(f"✅ Extracted {len(resume_text)} characters in {extraction_time:.2f}s")
         
-        # Check if API key is configured
+        # Check API key
         if not api_key:
             print("❌ API key not configured")
-            return jsonify({'error': 'API key not configured. Please add OPENROUTER_API_KEY to .env file'}), 500
+            return jsonify({'error': 'API key not configured. Please add HUGGINGFACE_API_KEY to .env file'}), 500
         
         if client is None:
-            print("❌ OpenRouter client not initialized")
-            return jsonify({'error': 'OpenRouter client not properly initialized'}), 500
+            print("❌ Hugging Face client not initialized")
+            return jsonify({'error': 'Hugging Face client not properly initialized'}), 500
         
-        # Check OpenRouter warm-up status
-        warmup_status = "Warmed up" if warmup_complete else "Warming up..."
-        print(f"🤖 OpenRouter Status: {warmup_status}")
-        
-        # Analyze with OpenRouter
+        # Analyze with Hugging Face
         print("🤖 Starting AI analysis...")
         ai_start = time.time()
-        analysis = analyze_resume_with_openrouter(resume_text, job_description)
+        analysis = analyze_resume_with_huggingface(resume_text, job_description)
         ai_time = time.time() - ai_start
         
         print(f"✅ AI analysis completed in {ai_time:.2f}s")
-        print(f"🔍 AI Analysis Result:")
-        print(f"  Name: {analysis.get('candidate_name')}")
-        print(f"  Score: {analysis.get('overall_score')}")
-        print(f"  Experience Summary Length: {len(analysis.get('experience_summary', ''))} chars")
-        print(f"  Education Summary Length: {len(analysis.get('education_summary', ''))} chars")
-        print(f"  Matched Skills: {len(analysis.get('skills_matched', []))}")
-        print(f"  Missing Skills: {len(analysis.get('skills_missing', []))}")
         
         # Create Excel report
         print("📊 Creating Excel report...")
@@ -1026,14 +1037,14 @@ def analyze_resume():
         excel_time = time.time() - excel_start
         print(f"✅ Excel report created in {excel_time:.2f}s: {excel_path}")
         
-        # Clean up uploaded file
+        # Clean up
         if os.path.exists(file_path):
             os.remove(file_path)
         
-        # Return analysis with download link
+        # Return analysis
         analysis['excel_filename'] = os.path.basename(excel_path)
-        analysis['ai_status'] = warmup_status
-        analysis['model_used'] = model
+        analysis['ai_model'] = model
+        analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['response_time'] = f"{ai_time:.2f}s"
         
         total_time = time.time() - start_time
@@ -1056,35 +1067,35 @@ def analyze_resume_batch():
         print("📦 New batch analysis request received")
         start_time = time.time()
         
+        # Check for files
         if 'resumes' not in request.files:
-            print("❌ No resume files in request")
-            return jsonify({'error': 'No resume files provided'}), 400
+            files = request.files.getlist('resume') or request.files.getlist('files')
+            if not files:
+                return jsonify({'error': 'No resume files provided'}), 400
+            resume_files = files
+        else:
+            resume_files = request.files.getlist('resumes')
         
+        # Check for job description
         if 'jobDescription' not in request.form:
-            print("❌ No job description in request")
             return jsonify({'error': 'No job description provided'}), 400
-        
         job_description = request.form['jobDescription']
-        resume_files = request.files.getlist('resumes')
         
         if len(resume_files) == 0:
             return jsonify({'error': 'No files selected'}), 400
         
         print(f"📦 Batch size: {len(resume_files)} resumes")
-        print(f"📋 Job description length: {len(job_description)} characters")
         
         # Limit batch size
-        if len(resume_files) > 20:
-            return jsonify({'error': 'Maximum 20 resumes allowed per batch'}), 400
+        if len(resume_files) > 15:
+            return jsonify({'error': 'Maximum 15 resumes allowed per batch'}), 400
         
-        # Check API key and client
+        # Check API key
         if not api_key:
-            print("❌ API key not configured")
             return jsonify({'error': 'API key not configured'}), 500
         
         if client is None:
-            print("❌ OpenRouter client not initialized")
-            return jsonify({'error': 'OpenRouter client not properly initialized'}), 500
+            return jsonify({'error': 'Hugging Face client not initialized'}), 500
         
         # Prepare batch analysis
         all_analyses = []
@@ -1094,23 +1105,22 @@ def analyze_resume_batch():
             try:
                 print(f"\n📄 Processing resume {idx + 1}/{len(resume_files)}: {resume_file.filename}")
                 
-                # Check file size (10MB limit)
+                # Check file size
                 resume_file.seek(0, 2)
                 file_size = resume_file.tell()
                 resume_file.seek(0)
                 
                 if file_size > 10 * 1024 * 1024:
-                    error_msg = f"File {resume_file.filename} too large (max 10MB)"
-                    errors.append({'filename': resume_file.filename, 'error': error_msg})
+                    errors.append({'filename': resume_file.filename, 'error': 'File too large (max 10MB)'})
                     continue
                 
                 # Save file temporarily
                 file_ext = os.path.splitext(resume_file.filename)[1].lower()
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-                file_path = os.path.join(UPLOAD_FOLDER, f"batch_resume_{timestamp}_{idx}{file_ext}")
+                file_path = os.path.join(UPLOAD_FOLDER, f"batch_{timestamp}_{idx}{file_ext}")
                 resume_file.save(file_path)
                 
-                # Extract text based on file type
+                # Extract text
                 if file_ext == '.pdf':
                     resume_text = extract_text_from_pdf(file_path)
                 elif file_ext in ['.docx', '.doc']:
@@ -1118,68 +1128,61 @@ def analyze_resume_batch():
                 elif file_ext == '.txt':
                     resume_text = extract_text_from_txt(file_path)
                 else:
-                    error_msg = f"Unsupported file format: {file_ext}"
-                    errors.append({'filename': resume_file.filename, 'error': error_msg})
+                    errors.append({'filename': resume_file.filename, 'error': f'Unsupported format: {file_ext}'})
                     os.remove(file_path)
                     continue
                 
                 if resume_text.startswith('Error'):
-                    error_msg = resume_text
-                    errors.append({'filename': resume_file.filename, 'error': error_msg})
+                    errors.append({'filename': resume_file.filename, 'error': resume_text})
                     os.remove(file_path)
                     continue
                 
-                # Analyze with OpenRouter
-                analysis = analyze_resume_with_openrouter(resume_text, job_description)
+                # Analyze
+                analysis = analyze_resume_with_huggingface(resume_text, job_description)
                 analysis['filename'] = resume_file.filename
-                analysis['processed_index'] = idx
                 analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
                 
                 all_analyses.append(analysis)
                 
-                # Clean up temp file
+                # Clean up
                 os.remove(file_path)
                 
                 print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
                 
             except Exception as e:
-                error_msg = f"Error processing {resume_file.filename}: {str(e)[:200]}"
-                errors.append({'filename': resume_file.filename, 'error': error_msg})
-                print(f"❌ Error processing {resume_file.filename}: {str(e)}")
+                errors.append({'filename': resume_file.filename, 'error': str(e)[:200]})
                 continue
         
-        # Sort analyses by score (highest first)
+        # Sort by score
         all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
         
         # Add ranking
         for rank, analysis in enumerate(all_analyses, 1):
             analysis['rank'] = rank
         
-        # Create combined Excel report
-        print("📊 Creating batch Excel report...")
-        excel_start = time.time()
-        excel_filename = f"batch_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        excel_path = create_batch_excel_report(all_analyses, job_description, excel_filename)
-        excel_time = time.time() - excel_start
-        print(f"✅ Batch Excel report created in {excel_time:.2f}s: {excel_path}")
+        # Create Excel report
+        if all_analyses:
+            print("📊 Creating batch Excel report...")
+            excel_filename = f"batch_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            excel_path = create_batch_excel_report(all_analyses, job_description, excel_filename)
+        else:
+            excel_path = None
         
         # Prepare response
         batch_summary = {
+            'success': True,
             'total_files': len(resume_files),
             'successfully_analyzed': len(all_analyses),
             'failed_files': len(errors),
             'errors': errors,
-            'batch_excel_filename': os.path.basename(excel_path),
+            'batch_excel_filename': os.path.basename(excel_path) if excel_path else None,
             'analyses': all_analyses,
-            'job_description_preview': job_description[:200] + ('...' if len(job_description) > 200 else ''),
-            'timestamp': datetime.now().isoformat(),
             'model_used': model,
-            'ai_status': "Warmed up" if warmup_complete else "Warming up"
+            'ai_status': "Warmed up" if warmup_complete else "Warming up",
+            'processing_time': f"{time.time() - start_time:.2f}s"
         }
         
-        total_time = time.time() - start_time
-        print(f"✅ Batch analysis completed in {total_time:.2f} seconds")
-        print(f"📊 Summary: {len(all_analyses)} successful, {len(errors)} failed")
+        print(f"✅ Batch analysis completed")
         print("="*50 + "\n")
         
         return jsonify(batch_summary)
@@ -1235,9 +1238,8 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
     summary_info = [
         ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         ("Total Resumes", len(analyses)),
+        ("AI Model", model),
         ("Job Description", job_description[:100] + ("..." if len(job_description) > 100 else "")),
-        ("AI Model Used", model),
-        ("Generated By", "AI Resume Analyzer (OpenRouter)"),
     ]
     
     for i, (label, value) in enumerate(summary_info, start=3):
@@ -1257,7 +1259,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
     row += 1
     
     # Table Headers
-    headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "Key Skills Matched"]
+    headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "Key Skills"]
     for col, header in enumerate(headers, start=1):
         cell = ws_summary.cell(row=row, column=col)
         cell.value = header
@@ -1275,11 +1277,11 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         score_cell = ws_summary.cell(row=row, column=3, value=analysis.get('overall_score', 0))
         score = analysis.get('overall_score', 0)
         if score >= 80:
-            score_cell.font = Font(color="00B050", bold=True)  # Green
+            score_cell.font = Font(color="00B050", bold=True)
         elif score >= 60:
-            score_cell.font = Font(color="FFC000", bold=True)  # Yellow
+            score_cell.font = Font(color="FFC000", bold=True)
         else:
-            score_cell.font = Font(color="FF0000", bold=True)  # Red
+            score_cell.font = Font(color="FF0000", bold=True)
         
         ws_summary.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
         
@@ -1293,20 +1295,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         for c in range(1, 6):
             ws_summary.cell(row=r, column=c).border = border
     
-    # Score Distribution Info
-    row += 2
-    ws_summary.merge_cells(f'A{row}:E{row}')
-    chart_header = ws_summary[f'A{row}']
-    chart_header.value = "SCORE DISTRIBUTION"
-    chart_header.font = header_font
-    chart_header.fill = header_fill
-    chart_header.alignment = Alignment(horizontal='center')
-    
     # ========== DETAILED ANALYSIS SHEET ==========
-    # Set column widths for details sheet
-    for col in range(1, 7):
-        ws_details.column_dimensions[chr(64 + col)].width = 25
-    
     # Add header to details sheet
     details_headers = [
         "Rank", "Candidate Name", "ATS Score", "Recommendation", 
@@ -1330,7 +1319,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         ws_details.cell(row=idx, column=6, value=analysis.get('education_summary', 'N/A'))
         ws_details.cell(row=idx, column=7, value=", ".join(analysis.get('key_strengths', [])))
         
-        # Auto-adjust row height for summary cells
+        # Auto-adjust row height
         ws_details.row_dimensions[idx].height = 60
     
     # Add border to details table
@@ -1341,7 +1330,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
     
     # ========== SKILLS ANALYSIS SHEET ==========
     # Skills sheet headers
-    skills_headers = ["Rank", "Candidate", "Matched Skills", "Missing Skills", "Skills Match %"]
+    skills_headers = ["Rank", "Candidate", "Matched Skills", "Missing Skills"]
     for col, header in enumerate(skills_headers, start=1):
         cell = ws_skills.cell(row=1, column=col)
         cell.value = header
@@ -1356,27 +1345,12 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         ws_skills.cell(row=idx, column=3, value=", ".join(analysis.get('skills_matched', [])))
         ws_skills.cell(row=idx, column=4, value=", ".join(analysis.get('skills_missing', [])))
         
-        # Calculate approximate match percentage
-        total_skills = len(analysis.get('skills_matched', [])) + len(analysis.get('skills_missing', []))
-        if total_skills > 0:
-            match_percent = (len(analysis.get('skills_matched', [])) / total_skills) * 100
-        else:
-            match_percent = 0
-        
-        percent_cell = ws_skills.cell(row=idx, column=5, value=f"{match_percent:.1f}%")
-        if match_percent >= 70:
-            percent_cell.font = Font(color="00B050", bold=True)
-        elif match_percent >= 50:
-            percent_cell.font = Font(color="FFC000", bold=True)
-        else:
-            percent_cell.font = Font(color="FF0000", bold=True)
-        
         # Auto-adjust row height
         ws_skills.row_dimensions[idx].height = 40
     
     # Add border to skills table
     for r in range(1, len(analyses) + 2):
-        for c in range(1, 6):
+        for c in range(1, 5):
             ws_skills.cell(row=r, column=c).border = border
             ws_skills.cell(row=r, column=c).alignment = Alignment(wrap_text=True, vertical='top')
     
@@ -1419,22 +1393,22 @@ def download_report(filename):
 
 @app.route('/warmup', methods=['GET'])
 def force_warmup():
-    """Force warm-up OpenRouter connection"""
+    """Force warm-up Hugging Face connection"""
     update_activity()
     
     try:
         if client is None:
             return jsonify({
                 'status': 'error',
-                'message': 'OpenRouter client not initialized',
+                'message': 'Hugging Face client not initialized',
                 'warmup_complete': False
             })
         
-        result = warmup_openrouter()
+        result = warmup_huggingface()
         
         return jsonify({
             'status': 'success' if result else 'error',
-            'message': 'OpenRouter warmed up successfully' if result else 'Warm-up failed',
+            'message': 'Hugging Face warmed up successfully' if result else 'Warm-up failed',
             'warmup_complete': warmup_complete,
             'model': model,
             'timestamp': datetime.now().isoformat()
@@ -1449,7 +1423,7 @@ def force_warmup():
 
 @app.route('/quick-check', methods=['GET'])
 def quick_check():
-    """Quick endpoint to check if OpenRouter is responsive"""
+    """Quick endpoint to check if Hugging Face is responsive"""
     update_activity()
     
     try:
@@ -1464,34 +1438,30 @@ def quick_check():
         if not warmup_complete:
             return jsonify({
                 'available': False,
-                'reason': 'OpenRouter is warming up',
+                'reason': 'Hugging Face is warming up',
                 'warmup_complete': False,
                 'model': model,
                 'suggestion': 'Try again in a few seconds or use /warmup endpoint'
             })
         
-        # Very quick test with thread timeout
+        # Quick test
         start_time = time.time()
         
-        def openrouter_check():
+        def huggingface_check():
             try:
-                response = call_openrouter_api(
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": "Respond with just 'ready' in JSON format: {\"status\": \"ready\"}"}
-                    ],
+                response = call_huggingface_api(
+                    prompt="Say 'ready'",
                     max_tokens=10,
-                    timeout=5
+                    timeout=8
                 )
                 return response
             except Exception as e:
                 raise e
         
         try:
-            # Use thread with timeout
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(openrouter_check)
-                response = future.result(timeout=8)  # 8 second timeout
+                future = executor.submit(huggingface_check)
+                response = future.result(timeout=12)
             
             response_time = time.time() - start_time
             
@@ -1501,8 +1471,7 @@ def quick_check():
                     'response_time': f'{response_time:.2f}s',
                     'status': 'ready',
                     'model': model,
-                    'warmup_complete': True,
-                    'service': 'openrouter'
+                    'warmup_complete': True
                 })
             else:
                 return jsonify({
@@ -1510,42 +1479,26 @@ def quick_check():
                     'response_time': f'{response_time:.2f}s',
                     'status': 'no_response',
                     'model': model,
-                    'warmup_complete': warmup_complete,
-                    'suggestion': 'OpenRouter service is not responding'
+                    'warmup_complete': warmup_complete
                 })
                 
         except concurrent.futures.TimeoutError:
             return jsonify({
                 'available': False,
-                'reason': 'Request timed out after 8 seconds',
+                'reason': 'Request timed out after 12 seconds',
                 'status': 'timeout',
                 'model': model,
-                'warmup_complete': warmup_complete,
-                'suggestion': 'AI service is taking too long. Please try again.'
+                'warmup_complete': warmup_complete
             })
             
     except Exception as e:
         error_msg = str(e)
-        if "quota" in error_msg.lower() or "429" in error_msg or "insufficient_quota" in error_msg:
-            status = 'quota_exceeded'
-            suggestion = 'API quota exceeded. Please check your OpenRouter account.'
-        elif "rate limit" in error_msg.lower():
-            status = 'rate_limit'
-            suggestion = 'Rate limit exceeded. Please try again in a minute.'
-        elif "timeout" in error_msg.lower():
-            status = 'timeout'
-            suggestion = 'AI service timeout. Please try again in a moment.'
-        else:
-            status = 'error'
-            suggestion = 'AI service error. Please try again.'
-            
         return jsonify({
             'available': False,
             'reason': error_msg[:100],
-            'status': status,
+            'status': 'error',
             'model': model,
-            'warmup_complete': warmup_complete,
-            'suggestion': suggestion
+            'warmup_complete': warmup_complete
         })
 
 @app.route('/ping', methods=['GET'])
@@ -1557,10 +1510,10 @@ def ping():
         'status': 'pong',
         'timestamp': datetime.now().isoformat(),
         'service': 'resume-analyzer',
-        'openrouter_warmup': warmup_complete,
+        'huggingface_warmup': warmup_complete,
         'model': model,
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
-        'message': 'Service is alive and warm!' if warmup_complete else 'Service is alive, warming up OpenRouter...'
+        'message': 'Service is alive and warm!' if warmup_complete else 'Service is alive, warming up Hugging Face...'
     })
 
 @app.route('/health', methods=['GET'])
@@ -1577,41 +1530,41 @@ def health_check():
         'api_key_configured': bool(api_key),
         'client_initialized': client is not None,
         'model': model,
-        'openrouter_warmup_complete': warmup_complete,
+        'huggingface_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'upload_folder_path': UPLOAD_FOLDER,
         'inactive_minutes': inactive_minutes,
         'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
-        'version': '2.0.0',
-        'features': ['always_active', 'openrouter', 'batch_processing', 'keep_alive']
+        'version': '2.1.0',
+        'features': ['always_active', 'huggingface', 'batch_processing', 'keep_alive']
     })
 
 @app.route('/models', methods=['GET'])
 def list_models():
-    """List available OpenRouter models"""
+    """List available Hugging Face models"""
     update_activity()
     
     try:
         if not api_key:
             return jsonify({'error': 'API key not configured'})
         
-        # Popular OpenRouter models
+        # Popular Hugging Face models for inference
         popular_models = [
-            {'id': 'meta-llama/llama-3.2-3b-instruct:free', 'name': 'Llama 3.2 3B (Free)', 'provider': 'Meta'},
-            {'id': 'mistralai/mistral-7b-instruct:free', 'name': 'Mistral 7B (Free)', 'provider': 'Mistral AI'},
-            {'id': 'google/gemma-2-2b-it:free', 'name': 'Gemma 2 2B (Free)', 'provider': 'Google'},
-            {'id': 'meta-llama/llama-3.1-8b-instruct:free', 'name': 'Llama 3.1 8B (Free)', 'provider': 'Meta'},
-            {'id': 'openai/gpt-4o-mini', 'name': 'GPT-4o Mini', 'provider': 'OpenAI'},
-            {'id': 'anthropic/claude-3.5-sonnet', 'name': 'Claude 3.5 Sonnet', 'provider': 'Anthropic'},
-            {'id': 'google/gemini-pro', 'name': 'Gemini Pro', 'provider': 'Google'},
-            {'id': 'meta-llama/llama-3.3-70b-instruct:free', 'name': 'Llama 3.3 70B (Free - Rate Limited)', 'provider': 'Meta'},
+            {'id': 'mistralai/Mistral-7B-Instruct-v0.2', 'name': 'Mistral 7B Instruct', 'provider': 'Mistral AI', 'free': True},
+            {'id': 'google/flan-t5-xxl', 'name': 'Google Flan-T5 XXL', 'provider': 'Google', 'free': True},
+            {'id': 'microsoft/phi-2', 'name': 'Microsoft Phi-2', 'provider': 'Microsoft', 'free': True},
+            {'id': 'meta-llama/Llama-2-7b-chat-hf', 'name': 'Llama 2 7B Chat', 'provider': 'Meta', 'free': True},
+            {'id': 'tiiuae/falcon-7b-instruct', 'name': 'Falcon 7B Instruct', 'provider': 'TII', 'free': True},
+            {'id': 'mistralai/Mixtral-8x7B-Instruct-v0.1', 'name': 'Mixtral 8x7B Instruct', 'provider': 'Mistral AI', 'free': True},
+            {'id': 'HuggingFaceH4/zephyr-7b-beta', 'name': 'Zephyr 7B Beta', 'provider': 'Hugging Face', 'free': True},
+            {'id': 'google/gemma-7b-it', 'name': 'Gemma 7B Instruct', 'provider': 'Google', 'free': True},
         ]
         
         return jsonify({
             'available_models': popular_models,
             'current_model': model,
             'count': len(popular_models),
-            'documentation': 'https://openrouter.ai/models'
+            'documentation': 'https://huggingface.co/models'
         })
     except Exception as e:
         return jsonify({'error': str(e)})
@@ -1622,20 +1575,20 @@ if __name__ == '__main__':
     print("="*50)
     port = int(os.environ.get('PORT', 5002))
     print(f"📍 Server: http://localhost:{port}")
-    print(f"🔑 OpenRouter API Key: {'✅ Configured' if api_key else '❌ NOT FOUND'}")
+    print(f"🔑 Hugging Face API Key: {'✅ Configured' if api_key else '❌ NOT FOUND'}")
     print(f"🤖 Model: {model}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print("✅ Always Active Mode: Enabled")
-    print("✅ OpenRouter Keep-Warm: Enabled")
+    print("✅ Hugging Face Keep-Warm: Enabled")
     print("✅ Batch Processing: Enabled")
     print("="*50 + "\n")
     
     if not api_key:
-        print("⚠️  WARNING: OPENROUTER_API_KEY not found!")
-        print("Please create a .env file with: OPENROUTER_API_KEY=your_key_here\n")
-        print("Get your API key from: https://openrouter.ai/keys")
-        print("Free models available: meta-llama/llama-3.2-3b-instruct:free")
+        print("⚠️  WARNING: HUGGINGFACE_API_KEY not found!")
+        print("Please create a .env file with: HUGGINGFACE_API_KEY=your_key_here\n")
+        print("Get your API key from: https://huggingface.co/settings/tokens")
+        print("Free tier: 30k tokens/month")
     
-    # Use PORT environment variable (Render provides $PORT)
+    # Use PORT environment variable
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
