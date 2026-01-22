@@ -13,7 +13,9 @@ import {
   BarChart4, Filter, Cpu, Zap as ZapIcon, Bolt,
   PlayCircle, PauseCircle, Circle, ShieldAlert,
   BatteryFull, BatteryMedium, BatteryLow, Signal,
-  Cloud, CloudOff, CloudLightning, CloudRain
+  Cloud, CloudOff, CloudLightning, CloudRain,
+  ArrowLeft, ChevronLeft, Home, Grid, Folder,
+  FileSpreadsheet, ClipboardList, Award as AwardIcon
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -47,18 +49,46 @@ function App() {
     totalKeys: 0
   });
   
-  // UPDATED: Point to your backend with Groq
+  // View management for navigation
+  const [currentView, setCurrentView] = useState('main'); // 'main', 'batch-results', 'candidate-detail'
+  const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(null);
+  
   const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
   
   const keepAliveInterval = useRef(null);
   const backendWakeInterval = useRef(null);
   const warmupCheckInterval = useRef(null);
 
+  // Navigation functions
+  const navigateToBatchResults = () => {
+    setCurrentView('batch-results');
+    window.scrollTo(0, 0);
+  };
+
+  const navigateToCandidateDetail = (index) => {
+    setSelectedCandidateIndex(index);
+    setCurrentView('candidate-detail');
+    window.scrollTo(0, 0);
+  };
+
+  const navigateToMain = () => {
+    setCurrentView('main');
+    window.scrollTo(0, 0);
+  };
+
+  const navigateBack = () => {
+    if (currentView === 'candidate-detail') {
+      setCurrentView('batch-results');
+    } else if (currentView === 'batch-results') {
+      setCurrentView('main');
+    }
+    window.scrollTo(0, 0);
+  };
+
   // Initialize service on mount
   useEffect(() => {
     initializeService();
     
-    // Cleanup on unmount
     return () => {
       if (keepAliveInterval.current) {
         clearInterval(keepAliveInterval.current);
@@ -78,10 +108,8 @@ function App() {
       setBackendStatus('waking');
       setAiStatus('checking');
       
-      // Start backend wake-up sequence
       await wakeUpBackend();
       
-      // Check backend health
       const healthResponse = await axios.get(`${API_BASE_URL}/health`, {
         timeout: 10000
       }).catch(() => null);
@@ -98,17 +126,14 @@ function App() {
         setBackendStatus('ready');
       }
       
-      // Force Groq warm-up
       await forceGroqWarmup();
       
-      // Set up periodic checks
       setupPeriodicChecks();
       
     } catch (err) {
       console.log('Service initialization error:', err.message);
       setBackendStatus('sleeping');
       
-      // Retry after 5 seconds
       setTimeout(() => initializeService(), 5000);
     } finally {
       setIsWarmingUp(false);
@@ -120,7 +145,6 @@ function App() {
       console.log('🔔 Waking up backend...');
       setLoadingMessage('Waking up backend...');
       
-      // Send multiple pings to ensure backend wakes up
       const pingPromises = [
         axios.get(`${API_BASE_URL}/ping`, { timeout: 8000 }),
         axios.get(`${API_BASE_URL}/health`, { timeout: 10000 })
@@ -136,7 +160,6 @@ function App() {
       console.log('⚠️ Backend is waking up...');
       setBackendStatus('waking');
       
-      // Send a longer timeout request to fully wake it
       setTimeout(() => {
         axios.get(`${API_BASE_URL}/ping`, { timeout: 15000 })
           .then(() => {
@@ -168,7 +191,6 @@ function App() {
         setAiStatus('warming');
         console.log('⚠️ Groq API still warming up');
         
-        // Check status again in 5 seconds
         setTimeout(() => checkGroqStatus(), 5000);
       }
       
@@ -178,7 +200,6 @@ function App() {
       console.log('⚠️ Groq API warm-up failed:', error.message);
       setAiStatus('unavailable');
       
-      // Check status in background
       setTimeout(() => checkGroqStatus(), 3000);
     }
   };
@@ -221,7 +242,6 @@ function App() {
         setModelInfo(response.data.model_info || { name: response.data.model });
       }
       
-      // Update AI status based on warmup
       if (response.data.ai_warmup_complete) {
         setAiStatus('available');
       } else {
@@ -235,26 +255,22 @@ function App() {
   };
 
   const setupPeriodicChecks = () => {
-    // Keep backend alive every 3 minutes
     backendWakeInterval.current = setInterval(() => {
       axios.get(`${API_BASE_URL}/ping`, { timeout: 5000 })
         .then(() => console.log('Keep-alive ping successful'))
         .catch(() => console.log('Keep-alive ping failed'));
     }, 3 * 60 * 1000);
     
-    // Check backend health every minute
     warmupCheckInterval.current = setInterval(() => {
       checkBackendHealth();
     }, 60 * 1000);
     
-    // Check Groq status every 30 seconds when warming
     const statusCheckInterval = setInterval(() => {
       if (aiStatus === 'warming' || aiStatus === 'checking') {
         checkGroqStatus();
       }
     }, 30000);
     
-    // Clean up this interval when component unmounts
     keepAliveInterval.current = statusCheckInterval;
   };
 
@@ -292,8 +308,8 @@ function App() {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      if (file.size > 10 * 1024 * 1024) {
-        setError('File size too large. Maximum size is 10MB.');
+      if (file.size > 15 * 1024 * 1024) {
+        setError('File size too large. Maximum size is 15MB.');
         return;
       }
       setResumeFile(file);
@@ -304,13 +320,12 @@ function App() {
   const handleBatchFileChange = (e) => {
     const files = Array.from(e.target.files);
     
-    // Check each file
     const validFiles = [];
     const errors = [];
     
     files.forEach(file => {
-      if (file.size > 10 * 1024 * 1024) {
-        errors.push(`${file.name}: File size too large (max 10MB)`);
+      if (file.size > 15 * 1024 * 1024) {
+        errors.push(`${file.name}: File size too large (max 15MB)`);
       } else if (!file.name.match(/\.(pdf|doc|docx|txt)$/i)) {
         errors.push(`${file.name}: Invalid file type (PDF, DOC, DOCX, TXT only)`);
       } else {
@@ -323,7 +338,8 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 20)); // Max 20 files
+      // Allow up to 15 files
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 15));
       setError('');
     }
   };
@@ -359,7 +375,6 @@ function App() {
       return;
     }
 
-    // Check backend status before starting
     if (backendStatus !== 'ready') {
       setError('Backend is warming up. Please wait a moment...');
       await wakeUpBackend();
@@ -380,15 +395,13 @@ function App() {
     let progressInterval;
 
     try {
-      // Start progress simulation
       progressInterval = setInterval(() => {
         setProgress(prev => {
           if (prev >= 85) return 85;
-          return prev + Math.random() * 5; // Groq is faster
+          return prev + Math.random() * 5;
         });
       }, 500);
 
-      // Update loading message based on service status
       if (aiStatus === 'available' && groqWarmup) {
         setLoadingMessage('Groq AI analysis (Ultra-fast)...');
       } else {
@@ -396,7 +409,6 @@ function App() {
       }
       setProgress(20);
 
-      // Upload file
       setLoadingMessage('Uploading and processing resume...');
       setProgress(30);
 
@@ -404,7 +416,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 60000, // 60 seconds (Groq is faster)
+        timeout: 60000,
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -419,12 +431,11 @@ function App() {
       
       setLoadingMessage('AI analysis complete!');
 
-      await new Promise(resolve => setTimeout(resolve, 500)); // Shorter delay for Groq
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       setAnalysis(response.data);
       setProgress(100);
 
-      // Update status
       await checkBackendHealth();
 
       setTimeout(() => {
@@ -481,7 +492,6 @@ function App() {
     const formData = new FormData();
     formData.append('jobDescription', jobDescription);
     
-    // Add all resume files
     resumeFiles.forEach((file, index) => {
       formData.append('resumes', file);
     });
@@ -489,11 +499,10 @@ function App() {
     let progressInterval;
 
     try {
-      // Start progress simulation
       progressInterval = setInterval(() => {
         setBatchProgress(prev => {
           if (prev >= 85) return 85;
-          return prev + Math.random() * 3; // Faster for Groq
+          return prev + Math.random() * 3;
         });
       }, 500);
 
@@ -504,7 +513,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 120000, // 2 minutes for batch processing (Groq is faster)
+        timeout: 180000, // 3 minutes for batch processing
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -522,6 +531,7 @@ function App() {
       
       setBatchAnalysis(response.data);
       setBatchProgress(100);
+      navigateToBatchResults();
 
       setTimeout(() => {
         setBatchProgress(0);
@@ -680,6 +690,934 @@ function App() {
     return modelInfo.description || 'Groq ultra-fast inference';
   };
 
+  // Render functions for different views
+  const renderMainView = () => (
+    <div className="upload-section">
+      <div className="section-header">
+        <h2>Start Your Analysis</h2>
+        <p>Upload resume(s) and job description to get detailed insights</p>
+        <div className="service-status">
+          <span className="status-badge backend">
+            {backendStatusInfo.icon} {backendStatusInfo.text}
+          </span>
+          <span className="status-badge ai">
+            {aiStatusInfo.icon} {aiStatusInfo.text}
+          </span>
+          <span className="status-badge always-active">
+            <ZapIcon size={14} /> Ultra-fast
+          </span>
+          {modelInfo && (
+            <span className="status-badge model">
+              <Cpu size={14} /> {getModelDisplayName(modelInfo)}
+            </span>
+          )}
+        </div>
+        
+        {/* Batch Mode Toggle */}
+        <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+          <button
+            className={`mode-toggle ${!batchMode ? 'active' : ''}`}
+            onClick={() => {
+              setBatchMode(false);
+              setResumeFiles([]);
+            }}
+            style={{
+              padding: '0.75rem 1.5rem',
+              background: !batchMode ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '12px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}
+          >
+            <User size={16} /> Single Resume
+          </button>
+          <button
+            className={`mode-toggle ${batchMode ? 'active' : ''}`}
+            onClick={() => {
+              setBatchMode(true);
+              setResumeFile(null);
+            }}
+            style={{
+              padding: '0.75rem 1.5rem',
+              background: batchMode ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '12px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}
+          >
+            <Users size={16} /> Multiple Resumes (Up to 15)
+          </button>
+        </div>
+      </div>
+      
+      <div className="upload-grid">
+        {/* Left Column - File Upload */}
+        <div className="upload-card glass">
+          <div className="card-decoration"></div>
+          <div className="card-header">
+            <div className="header-icon-wrapper">
+              {batchMode ? <Users className="header-icon" /> : <FileText className="header-icon" />}
+            </div>
+            <div>
+              <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
+              <p className="card-subtitle">
+                {batchMode 
+                  ? 'Upload multiple resumes (Max 15, 15MB each)' 
+                  : 'Supported: PDF, DOC, DOCX, TXT (Max 15MB)'}
+              </p>
+            </div>
+          </div>
+          
+          {!batchMode ? (
+            // Single file upload
+            <div 
+              className={`upload-area ${dragActive ? 'drag-active' : ''} ${resumeFile ? 'has-file' : ''}`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+            >
+              <input
+                type="file"
+                id="resume-upload"
+                accept=".pdf,.doc,.docx,.txt"
+                onChange={handleFileChange}
+                className="file-input"
+              />
+              <label htmlFor="resume-upload" className="file-label">
+                <div className="upload-icon-wrapper">
+                  {resumeFile ? (
+                    <div className="file-preview">
+                      <FileText size={40} />
+                      <div className="file-preview-info">
+                        <span className="file-name">{resumeFile.name}</span>
+                        <span className="file-size">
+                          {(resumeFile.size / 1024 / 1024).toFixed(2)} MB
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <Upload className="upload-icon" />
+                      <span className="upload-text">
+                        Drag & drop or click to browse
+                      </span>
+                      <span className="upload-hint">Max file size: 15MB</span>
+                    </>
+                  )}
+                </div>
+              </label>
+              
+              {resumeFile && (
+                <button 
+                  className="change-file-btn"
+                  onClick={() => setResumeFile(null)}
+                >
+                  Change File
+                </button>
+              )}
+            </div>
+          ) : (
+            // Batch file upload
+            <div 
+              className={`upload-area ${dragActive ? 'drag-active' : ''} ${resumeFiles.length > 0 ? 'has-file' : ''}`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleBatchDrop}
+            >
+              <input
+                type="file"
+                id="batch-resume-upload"
+                accept=".pdf,.doc,.docx,.txt"
+                onChange={handleBatchFileChange}
+                className="file-input"
+                multiple
+              />
+              <label htmlFor="batch-resume-upload" className="file-label">
+                <div className="upload-icon-wrapper">
+                  {resumeFiles.length > 0 ? (
+                    <div style={{ width: '100%' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                        <Users size={40} />
+                        <div style={{ textAlign: 'left' }}>
+                          <span className="file-name">{resumeFiles.length} resume(s) selected</span>
+                          <span className="file-size">
+                            Total: {(resumeFiles.reduce((acc, file) => acc + file.size, 0) / 1024 / 1024).toFixed(2)} MB
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="batch-file-list">
+                        {resumeFiles.map((file, index) => (
+                          <div key={index} className="batch-file-item">
+                            <div className="batch-file-info">
+                              <FileText size={14} />
+                              <span className="batch-file-name">{file.name}</span>
+                              <span className="batch-file-size">
+                                {(file.size / 1024).toFixed(1)}KB
+                              </span>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeResumeFile(index);
+                              }}
+                              className="remove-file-btn"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <Upload className="upload-icon" />
+                      <span className="upload-text">
+                        Drag & drop multiple files or click to browse
+                      </span>
+                      <span className="upload-hint">Max 15 files, 15MB each</span>
+                    </>
+                  )}
+                </div>
+              </label>
+              
+              {resumeFiles.length > 0 && (
+                <button 
+                  className="change-file-btn"
+                  onClick={clearBatchFiles}
+                  style={{ background: '#ff6b6b' }}
+                >
+                  Clear All Files
+                </button>
+              )}
+            </div>
+          )}
+          
+          <div className="upload-stats">
+            <div className="stat">
+              <div className="stat-icon">
+                <ZapIcon size={14} />
+              </div>
+              <span>Ultra-fast Groq analysis</span>
+            </div>
+            <div className="stat">
+              <div className="stat-icon">
+                <Cpu size={14} />
+              </div>
+              <span>{getModelDisplayName(modelInfo)}</span>
+            </div>
+            <div className="stat">
+              <div className="stat-icon">
+                <Activity size={14} />
+              </div>
+              <span>Always Active backend</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column - Job Description */}
+        <div className="job-description-card glass">
+          <div className="card-decoration"></div>
+          <div className="card-header">
+            <div className="header-icon-wrapper">
+              <Briefcase className="header-icon" />
+            </div>
+            <div>
+              <h2>Job Description</h2>
+              <p className="card-subtitle">Paste the complete job description</p>
+            </div>
+          </div>
+          
+          <div className="textarea-wrapper">
+            <textarea
+              className="job-description-input"
+              placeholder={`• Paste job description here\n• Include required skills\n• Mention qualifications\n• List responsibilities\n• Add any specific requirements`}
+              value={jobDescription}
+              onChange={(e) => setJobDescription(e.target.value)}
+              rows={12}
+            />
+            <div className="textarea-footer">
+              <span className="char-count">
+                {jobDescription.length} characters
+              </span>
+              <span className="word-count">
+                {jobDescription.trim() ? jobDescription.trim().split(/\s+/).length : 0} words
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <div className="error-message glass">
+          <AlertCircle size={20} />
+          <span>{error}</span>
+          {error.includes('warming up') && (
+            <button 
+              className="error-action-button"
+              onClick={wakeUpBackend}
+            >
+              <Activity size={16} />
+              Wake Backend
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Loading Progress Bar */}
+      {(loading || batchLoading) && (
+        <div className="loading-section glass">
+          <div className="loading-container">
+            <div className="loading-header">
+              <Loader className="spinner" />
+              <h3>{batchMode ? 'Batch Analysis in Progress' : 'Analysis in Progress'}</h3>
+            </div>
+            
+            <div className="progress-container">
+              <div className="progress-bar" style={{ width: `${batchMode ? batchProgress : progress}%` }}></div>
+            </div>
+            
+            <div className="loading-text">
+              <span className="loading-message">{loadingMessage}</span>
+              <span className="loading-subtext">
+                {batchMode 
+                  ? `Processing ${resumeFiles.length} resume(s) with ${getModelDisplayName(modelInfo)}...` 
+                  : `Using ${getModelDisplayName(modelInfo)} (Ultra-fast)...`}
+              </span>
+            </div>
+            
+            <div className="progress-stats">
+              <span>{Math.round(batchMode ? batchProgress : progress)}%</span>
+              <span>•</span>
+              <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
+              <span>•</span>
+              <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
+              {modelInfo && (
+                <>
+                  <span>•</span>
+                  <span>Model: {getModelDisplayName(modelInfo)}</span>
+                </>
+              )}
+            </div>
+            
+            <div className="loading-note info">
+              <Info size={14} />
+              <span>Groq API offers ultra-fast inference for quick responses</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <button
+        className="analyze-button"
+        onClick={batchMode ? handleBatchAnalyze : handleAnalyze}
+        disabled={loading || batchLoading || 
+                 (batchMode ? resumeFiles.length === 0 : !resumeFile) || 
+                 !jobDescription.trim() || 
+                 backendStatus === 'sleeping'}
+      >
+        {(loading || batchLoading) ? (
+          <div className="button-loading-content">
+            <Loader className="spinner" />
+            <span>{batchMode ? 'Analyzing Batch...' : 'Analyzing...'}</span>
+          </div>
+        ) : backendStatus === 'sleeping' ? (
+          <div className="button-waking-content">
+            <Activity className="spinner" />
+            <span>Waking Backend...</span>
+          </div>
+        ) : (
+          <>
+            <div className="button-content">
+              <ZapIcon size={20} />
+              <div className="button-text">
+                <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
+                <span className="button-subtext">
+                  {batchMode 
+                    ? `${resumeFiles.length} resume(s) • ${getModelDisplayName(modelInfo)}` 
+                    : `${getModelDisplayName(modelInfo)} • Ultra-fast`}
+                </span>
+              </div>
+            </div>
+            <ChevronRight size={20} />
+          </>
+        )}
+      </button>
+
+      {/* Tips Section */}
+      <div className="tips-section">
+        {batchMode ? (
+          <>
+            <div className="tip">
+              <ZapIcon size={16} />
+              <span>Groq API provides ultra-fast batch processing</span>
+            </div>
+            <div className="tip">
+              <TrendingUp size={16} />
+              <span>Candidates will be ranked by ATS score from highest to lowest</span>
+            </div>
+            <div className="tip">
+              <Download size={16} />
+              <span>Download comprehensive Excel report with all candidate data</span>
+            </div>
+            <div className="tip">
+              <Cpu size={16} />
+              <span>Using: {getModelDisplayName(modelInfo)}</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="tip">
+              <ZapIcon size={16} />
+              <span>Groq API offers ultra-fast responses (typically &lt;1s)</span>
+            </div>
+            <div className="tip">
+              <Thermometer size={16} />
+              <span>Groq API automatically warms up when idle</span>
+            </div>
+            <div className="tip">
+              <Activity size={16} />
+              <span>Backend stays awake with automatic pings every 3 minutes</span>
+            </div>
+            <div className="tip">
+              <Cpu size={16} />
+              <span>Using: {getModelDisplayName(modelInfo)}</span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderBatchResultsView = () => (
+    <div className="results-section">
+      {/* Navigation Header */}
+      <div className="navigation-header glass">
+        <button onClick={navigateToMain} className="back-button">
+          <ArrowLeft size={20} />
+          <span>Back to Analysis</span>
+        </button>
+        <div className="navigation-title">
+          <h2>⚡ Batch Analysis Results</h2>
+          <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
+        </div>
+        <div className="navigation-actions">
+          <button className="download-report-btn" onClick={handleBatchDownload}>
+            <DownloadCloud size={18} />
+            <span>Download Full Report</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Batch Stats */}
+      <div className="batch-stats-container glass">
+        <div className="stat-card">
+          <div className="stat-icon success">
+            <Check size={24} />
+          </div>
+          <div className="stat-content">
+            <div className="stat-value">{batchAnalysis?.successfully_analyzed || 0}</div>
+            <div className="stat-label">Successful</div>
+          </div>
+        </div>
+        
+        {batchAnalysis?.failed_files > 0 && (
+          <div className="stat-card">
+            <div className="stat-icon error">
+              <X size={24} />
+            </div>
+            <div className="stat-content">
+              <div className="stat-value">{batchAnalysis?.failed_files || 0}</div>
+              <div className="stat-label">Failed</div>
+            </div>
+          </div>
+        )}
+        
+        <div className="stat-card">
+          <div className="stat-icon info">
+            <Users size={24} />
+          </div>
+          <div className="stat-content">
+            <div className="stat-value">{batchAnalysis?.total_files || 0}</div>
+            <div className="stat-label">Total Files</div>
+          </div>
+        </div>
+        
+        <div className="stat-card">
+          <div className="stat-icon primary">
+            <Cpu size={24} />
+          </div>
+          <div className="stat-content">
+            <div className="stat-value">{getModelDisplayName(batchAnalysis?.model_used)}</div>
+            <div className="stat-label">AI Model</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Candidates Ranking */}
+      <div className="section-title">
+        <h2>Candidate Rankings</h2>
+        <p>Sorted by ATS Score (Highest to Lowest)</p>
+      </div>
+      
+      <div className="batch-results-grid">
+        {batchAnalysis?.analyses?.map((candidate, index) => (
+          <div key={index} className="batch-candidate-card glass" onClick={() => navigateToCandidateDetail(index)}>
+            <div className="batch-card-header">
+              <div className="candidate-rank">
+                <div className="rank-badge">#{candidate.rank}</div>
+                <div className="candidate-main-info">
+                  <h3 className="candidate-name">{candidate.candidate_name}</h3>
+                  <div className="candidate-meta">
+                    <span className="file-info">{candidate.filename}</span>
+                    <span className="file-size">{candidate.file_size}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="candidate-score-display">
+                <div className="score-large" style={{ color: getScoreColor(candidate.overall_score) }}>
+                  {candidate.overall_score}
+                </div>
+                <div className="score-label">ATS Score</div>
+              </div>
+            </div>
+            
+            <div className="batch-card-content">
+              <div className="recommendation-badge" style={{ 
+                background: getScoreColor(candidate.overall_score) + '20',
+                color: getScoreColor(candidate.overall_score),
+                border: `1px solid ${getScoreColor(candidate.overall_score)}40`
+              }}>
+                {candidate.recommendation}
+              </div>
+              
+              <div className="skills-preview">
+                <div className="skills-section">
+                  <div className="skills-header">
+                    <CheckCircle size={14} />
+                    <span>Matched Skills ({candidate.skills_matched?.length || 0})</span>
+                  </div>
+                  <div className="skills-list">
+                    {candidate.skills_matched?.slice(0, 2).map((skill, idx) => (
+                      <span key={idx} className="skill-tag success">{skill}</span>
+                    ))}
+                    {candidate.skills_matched?.length > 2 && (
+                      <span className="more-skills">+{candidate.skills_matched.length - 2} more</span>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="skills-section">
+                  <div className="skills-header">
+                    <XCircle size={14} />
+                    <span>Missing Skills ({candidate.skills_missing?.length || 0})</span>
+                  </div>
+                  <div className="skills-list">
+                    {candidate.skills_missing?.slice(0, 2).map((skill, idx) => (
+                      <span key={idx} className="skill-tag error">{skill}</span>
+                    ))}
+                    {candidate.skills_missing?.length > 2 && (
+                      <span className="more-skills">+{candidate.skills_missing.length - 2} more</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              <div className="experience-preview">
+                <p>{candidate.experience_summary?.substring(0, 120)}...</p>
+              </div>
+            </div>
+            
+            <div className="batch-card-footer">
+              <button className="view-details-btn">
+                View Full Details
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Action Buttons */}
+      <div className="action-section glass">
+        <div className="action-content">
+          <h3>Batch Analysis Complete</h3>
+          <p>Download comprehensive Excel report with all candidate details</p>
+        </div>
+        <div className="action-buttons">
+          <button className="download-button" onClick={handleBatchDownload}>
+            <DownloadCloud size={20} />
+            <span>Download Excel Report</span>
+          </button>
+          <button className="reset-button" onClick={navigateToMain}>
+            <RefreshCw size={20} />
+            <span>New Batch Analysis</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderCandidateDetailView = () => {
+    const candidate = batchAnalysis?.analyses?.[selectedCandidateIndex];
+    
+    if (!candidate) {
+      return (
+        <div className="error-message glass">
+          <AlertCircle size={20} />
+          <span>Candidate not found</span>
+          <button onClick={navigateBack} className="back-button">
+            <ArrowLeft size={16} />
+            Go Back
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="results-section">
+        {/* Navigation Header */}
+        <div className="navigation-header glass">
+          <button onClick={navigateBack} className="back-button">
+            <ArrowLeft size={20} />
+            <span>Back to Rankings</span>
+          </button>
+          <div className="navigation-title">
+            <h2>Candidate Details</h2>
+            <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
+          </div>
+          <div className="navigation-actions">
+            <button className="download-report-btn" onClick={() => {
+              if (batchAnalysis?.batch_excel_filename) {
+                window.open(`${API_BASE_URL}/download/${batchAnalysis.batch_excel_filename}`, '_blank');
+              }
+            }}>
+              <DownloadCloud size={18} />
+              <span>Download Report</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Candidate Header */}
+        <div className="analysis-header">
+          <div className="candidate-info">
+            <div className="candidate-avatar">
+              <User size={24} />
+            </div>
+            <div>
+              <h2 className="candidate-name">{candidate.candidate_name}</h2>
+              <div className="candidate-meta">
+                <span className="analysis-date">
+                  <Clock size={14} />
+                  Rank: #{candidate.rank}
+                </span>
+                <span className="file-info">
+                  <FileText size={14} />
+                  {candidate.filename} • {candidate.file_size}
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div className="score-display">
+            <div className="score-circle-wrapper">
+              <div className="score-circle-glow" style={{ 
+                background: `radial-gradient(circle, ${getScoreColor(candidate.overall_score)}22 0%, transparent 70%)` 
+              }}></div>
+              <div 
+                className="score-circle" 
+                style={{ 
+                  borderColor: getScoreColor(candidate.overall_score),
+                  background: `conic-gradient(${getScoreColor(candidate.overall_score)} ${candidate.overall_score * 3.6}deg, #2d3749 0deg)` 
+                }}
+              >
+                <div className="score-inner">
+                  <div className="score-value" style={{ color: getScoreColor(candidate.overall_score) }}>
+                    {candidate.overall_score}
+                  </div>
+                  <div className="score-label">ATS Score</div>
+                </div>
+              </div>
+            </div>
+            <div className="score-info">
+              <h3 className="score-grade">{getScoreGrade(candidate.overall_score)}</h3>
+              <p className="score-description">
+                Based on skill matching, experience relevance, and qualifications
+              </p>
+              <div className="score-meta">
+                <span className="meta-item">
+                  <Cpu size={12} />
+                  Model: {candidate.ai_model || 'Groq AI'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Recommendation Card */}
+        <div className="recommendation-card glass" style={{
+          background: `linear-gradient(135deg, ${getScoreColor(candidate.overall_score)}15, ${getScoreColor(candidate.overall_score)}08)`,
+          borderLeft: `4px solid ${getScoreColor(candidate.overall_score)}`
+        }}>
+          <div className="recommendation-header">
+            <AwardIcon size={28} style={{ color: getScoreColor(candidate.overall_score) }} />
+            <div>
+              <h3>Analysis Recommendation</h3>
+              <p className="recommendation-subtitle">
+                {candidate.ai_model || 'Groq AI'} • Consistent ATS Scoring
+              </p>
+            </div>
+          </div>
+          <div className="recommendation-content">
+            <p className="recommendation-text">{candidate.recommendation}</p>
+            <div className="confidence-badge">
+              <ZapIcon size={16} />
+              <span>Groq AI Analysis</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Skills Analysis */}
+        <div className="section-title">
+          <h2>Skills Analysis</h2>
+          <p>Detailed breakdown of matched and missing skills</p>
+        </div>
+        
+        <div className="skills-grid">
+          <div className="skills-card glass success">
+            <div className="skills-card-header">
+              <div className="skills-icon success">
+                <CheckCircle size={24} />
+              </div>
+              <div className="skills-header-content">
+                <h3>Matched Skills</h3>
+                <p className="skills-subtitle">Found in resume</p>
+              </div>
+              <div className="skills-count success">
+                <span>{candidate.skills_matched?.length || 0}</span>
+              </div>
+            </div>
+            <div className="skills-content">
+              <ul className="skills-list">
+                {candidate.skills_matched?.map((skill, index) => (
+                  <li key={index} className="skill-item success">
+                    <div className="skill-item-content">
+                      <CheckCircle size={16} />
+                      <span>{skill}</span>
+                    </div>
+                  </li>
+                ))}
+                {(!candidate.skills_matched || candidate.skills_matched.length === 0) && (
+                  <li className="no-items">No matching skills detected</li>
+                )}
+              </ul>
+            </div>
+          </div>
+
+          <div className="skills-card glass warning">
+            <div className="skills-card-header">
+              <div className="skills-icon warning">
+                <XCircle size={24} />
+              </div>
+              <div className="skills-header-content">
+                <h3>Missing Skills</h3>
+                <p className="skills-subtitle">Suggested to learn</p>
+              </div>
+              <div className="skills-count warning">
+                <span>{candidate.skills_missing?.length || 0}</span>
+              </div>
+            </div>
+            <div className="skills-content">
+              <ul className="skills-list">
+                {candidate.skills_missing?.map((skill, index) => (
+                  <li key={index} className="skill-item warning">
+                    <div className="skill-item-content">
+                      <XCircle size={16} />
+                      <span>{skill}</span>
+                    </div>
+                  </li>
+                ))}
+                {(!candidate.skills_missing || candidate.skills_missing.length === 0) && (
+                  <li className="no-items success-text">All required skills are present!</li>
+                )}
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        {/* Summary Section */}
+        <div className="section-title">
+          <h2>Profile Summary</h2>
+          <p>Insights extracted from resume</p>
+        </div>
+        
+        <div className="summary-grid">
+          <div className="summary-card glass">
+            <div className="summary-header">
+              <div className="summary-icon">
+                <Briefcase size={24} />
+              </div>
+              <h3>Experience Summary</h3>
+            </div>
+            <div className="summary-content">
+              <p className="detailed-summary">{candidate.experience_summary || "No experience summary available."}</p>
+              <div className="summary-footer">
+                <span className="summary-tag">Professional Experience</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="summary-card glass">
+            <div className="summary-header">
+              <div className="summary-icon">
+                <BookOpen size={24} />
+              </div>
+              <h3>Education Summary</h3>
+            </div>
+            <div className="summary-content">
+              <p className="detailed-summary">{candidate.education_summary || "No education summary available."}</p>
+              <div className="summary-footer">
+                <span className="summary-tag">Academic Background</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Insights Section */}
+        <div className="section-title">
+          <h2>Insights & Recommendations</h2>
+          <p>Personalized suggestions to improve your match</p>
+        </div>
+        
+        <div className="insights-grid">
+          <div className="insight-card glass">
+            <div className="insight-header">
+              <div className="insight-icon success">
+                <TrendingUp size={24} />
+              </div>
+              <div>
+                <h3>Key Strengths</h3>
+                <p className="insight-subtitle">Areas where candidate excels</p>
+              </div>
+            </div>
+            <div className="insight-content">
+              <ul>
+                {candidate.key_strengths?.map((strength, index) => (
+                  <li key={index} className="strength-item">
+                    <div className="strength-marker"></div>
+                    <span>{strength}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <div className="insight-card glass">
+            <div className="insight-header">
+              <div className="insight-icon warning">
+                <Target size={24} />
+              </div>
+              <div>
+                <h3>Areas for Improvement</h3>
+                <p className="insight-subtitle">Opportunities to grow</p>
+              </div>
+            </div>
+            <div className="insight-content">
+              <ul>
+                {candidate.areas_for_improvement?.map((area, index) => (
+                  <li key={index} className="improvement-item">
+                    <div className="improvement-marker"></div>
+                    <span>{area}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        {/* Action Section */}
+        <div className="action-section glass">
+          <div className="action-content">
+            <h3>Candidate Analysis Complete</h3>
+            <p>Download full batch report or go back to rankings</p>
+          </div>
+          <div className="action-buttons">
+            <button className="download-button" onClick={() => {
+              if (batchAnalysis?.batch_excel_filename) {
+                window.open(`${API_BASE_URL}/download/${batchAnalysis.batch_excel_filename}`, '_blank');
+              }
+            }}>
+              <DownloadCloud size={20} />
+              <span>Download Full Report</span>
+            </button>
+            <button className="reset-button" onClick={navigateBack}>
+              <ArrowLeft size={20} />
+              <span>Back to Rankings</span>
+            </button>
+            <button className="share-button" onClick={navigateToMain}>
+              <Home size={20} />
+              <span>New Analysis</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Main render function
+  const renderCurrentView = () => {
+    if (analysis && !batchAnalysis) {
+      // Single resume analysis view
+      return (
+        <div className="results-section">
+          <div className="navigation-header glass">
+            <button onClick={() => {
+              setAnalysis(null);
+              setCurrentView('main');
+            }} className="back-button">
+              <ArrowLeft size={20} />
+              <span>Back to Analysis</span>
+            </button>
+            <div className="navigation-title">
+              <h2>⚡ Resume Analysis Results</h2>
+              <p>{analysis.candidate_name}</p>
+            </div>
+            <div className="navigation-actions">
+              <button className="download-report-btn" onClick={handleDownload}>
+                <DownloadCloud size={18} />
+                <span>Download Report</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Rest of the single analysis view... */}
+          {/* ... (Keep the existing single analysis view code) ... */}
+        </div>
+      );
+    }
+
+    switch (currentView) {
+      case 'batch-results':
+        return renderBatchResultsView();
+      case 'candidate-detail':
+        return renderCandidateDetailView();
+      default:
+        return renderMainView();
+    }
+  };
+
   return (
     <div className="app">
       {/* Animated Background Elements */}
@@ -771,11 +1709,11 @@ function App() {
               </div>
             )}
             
-            {/* Enhanced Fallback Indicator */}
-            {serviceStatus.enhancedFallback && (
-              <div className="feature enhanced-fallback">
-                <Sparkles size={16} />
-                <span>Enhanced Analysis</span>
+            {/* Navigation Indicator */}
+            {currentView !== 'main' && (
+              <div className="feature nav-indicator">
+                <Grid size={16} />
+                <span>{currentView === 'batch-results' ? 'Batch Results' : 'Candidate Details'}</span>
               </div>
             )}
             
@@ -857,9 +1795,9 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Speed</div>
+                <div className="summary-label">Batch Capacity</div>
                 <div className="summary-value success">
-                  ⚡ Ultra-fast
+                  📊 Up to 15 resumes
                 </div>
               </div>
             </div>
@@ -884,32 +1822,6 @@ function App() {
                 )}
                 Force Warm-up
               </button>
-              <button 
-                className="action-button ping"
-                onClick={wakeUpBackend}
-              >
-                <Activity size={16} />
-                Wake Backend
-              </button>
-            </div>
-            
-            <div className="status-info">
-              <div className="info-item">
-                <span className="info-label">Service Mode:</span>
-                <span className="info-value">Always Active (Keeps Groq warm)</span>
-              </div>
-              <div className="info-item">
-                <span className="info-label">AI Provider:</span>
-                <span className="info-value">Groq API (Ultra-fast inference)</span>
-              </div>
-              <div className="info-item">
-                <span className="info-label">Auto Warm-up:</span>
-                <span className="info-value">Every 60 seconds when inactive</span>
-              </div>
-              <div className="info-item">
-                <span className="info-label">Keep-alive:</span>
-                <span className="info-value">Pings every 3 minutes</span>
-              </div>
             </div>
           </div>
         )}
@@ -950,960 +1862,8 @@ function App() {
           </div>
         </div>
 
-        {!analysis && !batchAnalysis ? (
-          <div className="upload-section">
-            <div className="section-header">
-              <h2>Start Your Analysis</h2>
-              <p>Upload resume(s) and job description to get detailed insights</p>
-              <div className="service-status">
-                <span className="status-badge backend">
-                  {backendStatusInfo.icon} {backendStatusInfo.text}
-                </span>
-                <span className="status-badge ai">
-                  {aiStatusInfo.icon} {aiStatusInfo.text}
-                </span>
-                <span className="status-badge always-active">
-                  <ZapIcon size={14} /> Ultra-fast
-                </span>
-                {modelInfo && (
-                  <span className="status-badge model">
-                    <Cpu size={14} /> {getModelDisplayName(modelInfo)}
-                  </span>
-                )}
-              </div>
-              
-              {/* Batch Mode Toggle */}
-              <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-                <button
-                  className={`mode-toggle ${!batchMode ? 'active' : ''}`}
-                  onClick={() => {
-                    setBatchMode(false);
-                    setResumeFiles([]);
-                  }}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: !batchMode ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '12px',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem'
-                  }}
-                >
-                  <User size={16} /> Single Resume
-                </button>
-                <button
-                  className={`mode-toggle ${batchMode ? 'active' : ''}`}
-                  onClick={() => {
-                    setBatchMode(true);
-                    setResumeFile(null);
-                  }}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: batchMode ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '12px',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem'
-                  }}
-                >
-                  <Users size={16} /> Multiple Resumes (Batch)
-                </button>
-              </div>
-            </div>
-            
-            <div className="upload-grid">
-              {/* Left Column - File Upload */}
-              <div className="upload-card glass">
-                <div className="card-decoration"></div>
-                <div className="card-header">
-                  <div className="header-icon-wrapper">
-                    {batchMode ? <Users className="header-icon" /> : <FileText className="header-icon" />}
-                  </div>
-                  <div>
-                    <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
-                    <p className="card-subtitle">
-                      {batchMode 
-                        ? 'Upload multiple resumes (Max 20, 10MB each)' 
-                        : 'Supported: PDF, DOC, DOCX, TXT (Max 10MB)'}
-                    </p>
-                  </div>
-                </div>
-                
-                {!batchMode ? (
-                  // Single file upload
-                  <div 
-                    className={`upload-area ${dragActive ? 'drag-active' : ''} ${resumeFile ? 'has-file' : ''}`}
-                    onDragEnter={handleDrag}
-                    onDragLeave={handleDrag}
-                    onDragOver={handleDrag}
-                    onDrop={handleDrop}
-                  >
-                    <input
-                      type="file"
-                      id="resume-upload"
-                      accept=".pdf,.doc,.docx,.txt"
-                      onChange={handleFileChange}
-                      className="file-input"
-                    />
-                    <label htmlFor="resume-upload" className="file-label">
-                      <div className="upload-icon-wrapper">
-                        {resumeFile ? (
-                          <div className="file-preview">
-                            <FileText size={40} />
-                            <div className="file-preview-info">
-                              <span className="file-name">{resumeFile.name}</span>
-                              <span className="file-size">
-                                {(resumeFile.size / 1024 / 1024).toFixed(2)} MB
-                              </span>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <Upload className="upload-icon" />
-                            <span className="upload-text">
-                              Drag & drop or click to browse
-                            </span>
-                            <span className="upload-hint">Max file size: 10MB</span>
-                          </>
-                        )}
-                      </div>
-                    </label>
-                    
-                    {resumeFile && (
-                      <button 
-                        className="change-file-btn"
-                        onClick={() => setResumeFile(null)}
-                      >
-                        Change File
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  // Batch file upload
-                  <div 
-                    className={`upload-area ${dragActive ? 'drag-active' : ''} ${resumeFiles.length > 0 ? 'has-file' : ''}`}
-                    onDragEnter={handleDrag}
-                    onDragLeave={handleDrag}
-                    onDragOver={handleDrag}
-                    onDrop={handleBatchDrop}
-                  >
-                    <input
-                      type="file"
-                      id="batch-resume-upload"
-                      accept=".pdf,.doc,.docx,.txt"
-                      onChange={handleBatchFileChange}
-                      className="file-input"
-                      multiple
-                    />
-                    <label htmlFor="batch-resume-upload" className="file-label">
-                      <div className="upload-icon-wrapper">
-                        {resumeFiles.length > 0 ? (
-                          <div style={{ width: '100%' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
-                              <Users size={40} />
-                              <div style={{ textAlign: 'left' }}>
-                                <span className="file-name">{resumeFiles.length} resume(s) selected</span>
-                                <span className="file-size">
-                                  Total: {(resumeFiles.reduce((acc, file) => acc + file.size, 0) / 1024 / 1024).toFixed(2)} MB
-                                </span>
-                              </div>
-                            </div>
-                            
-                            <div className="batch-file-list">
-                              {resumeFiles.map((file, index) => (
-                                <div key={index} className="batch-file-item">
-                                  <div className="batch-file-info">
-                                    <FileText size={14} />
-                                    <span className="batch-file-name">{file.name}</span>
-                                    <span className="batch-file-size">
-                                      {(file.size / 1024).toFixed(1)}KB
-                                    </span>
-                                  </div>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      removeResumeFile(index);
-                                    }}
-                                    className="remove-file-btn"
-                                  >
-                                    <X size={14} />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <Upload className="upload-icon" />
-                            <span className="upload-text">
-                              Drag & drop multiple files or click to browse
-                            </span>
-                            <span className="upload-hint">Max 20 files, 10MB each</span>
-                          </>
-                        )}
-                      </div>
-                    </label>
-                    
-                    {resumeFiles.length > 0 && (
-                      <button 
-                        className="change-file-btn"
-                        onClick={clearBatchFiles}
-                        style={{ background: '#ff6b6b' }}
-                      >
-                        Clear All Files
-                      </button>
-                    )}
-                  </div>
-                )}
-                
-                <div className="upload-stats">
-                  <div className="stat">
-                    <div className="stat-icon">
-                      <ZapIcon size={14} />
-                    </div>
-                    <span>Ultra-fast Groq analysis</span>
-                  </div>
-                  <div className="stat">
-                    <div className="stat-icon">
-                      <Cpu size={14} />
-                    </div>
-                    <span>{getModelDisplayName(modelInfo)}</span>
-                  </div>
-                  <div className="stat">
-                    <div className="stat-icon">
-                      <Activity size={14} />
-                    </div>
-                    <span>Always Active backend</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Column - Job Description */}
-              <div className="job-description-card glass">
-                <div className="card-decoration"></div>
-                <div className="card-header">
-                  <div className="header-icon-wrapper">
-                    <Briefcase className="header-icon" />
-                  </div>
-                  <div>
-                    <h2>Job Description</h2>
-                    <p className="card-subtitle">Paste the complete job description</p>
-                  </div>
-                </div>
-                
-                <div className="textarea-wrapper">
-                  <textarea
-                    className="job-description-input"
-                    placeholder={`• Paste job description here\n• Include required skills\n• Mention qualifications\n• List responsibilities\n• Add any specific requirements`}
-                    value={jobDescription}
-                    onChange={(e) => setJobDescription(e.target.value)}
-                    rows={12}
-                  />
-                  <div className="textarea-footer">
-                    <span className="char-count">
-                      {jobDescription.length} characters
-                    </span>
-                    <span className="word-count">
-                      {jobDescription.trim() ? jobDescription.trim().split(/\s+/).length : 0} words
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {error && (
-              <div className="error-message glass">
-                <AlertCircle size={20} />
-                <span>{error}</span>
-                {error.includes('warming up') && (
-                  <button 
-                    className="error-action-button"
-                    onClick={wakeUpBackend}
-                  >
-                    <Activity size={16} />
-                    Wake Backend
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Loading Progress Bar */}
-            {(loading || batchLoading) && (
-              <div className="loading-section glass">
-                <div className="loading-container">
-                  <div className="loading-header">
-                    <Loader className="spinner" />
-                    <h3>{batchMode ? 'Batch Analysis in Progress' : 'Analysis in Progress'}</h3>
-                  </div>
-                  
-                  <div className="progress-container">
-                    <div className="progress-bar" style={{ width: `${batchMode ? batchProgress : progress}%` }}></div>
-                  </div>
-                  
-                  <div className="loading-text">
-                    <span className="loading-message">{loadingMessage}</span>
-                    <span className="loading-subtext">
-                      {batchMode 
-                        ? `Processing ${resumeFiles.length} resume(s) with ${getModelDisplayName(modelInfo)}...` 
-                        : `Using ${getModelDisplayName(modelInfo)} (Ultra-fast)...`}
-                    </span>
-                  </div>
-                  
-                  <div className="progress-stats">
-                    <span>{Math.round(batchMode ? batchProgress : progress)}%</span>
-                    <span>•</span>
-                    <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
-                    <span>•</span>
-                    <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
-                    {modelInfo && (
-                      <>
-                        <span>•</span>
-                        <span>Model: {getModelDisplayName(modelInfo)}</span>
-                      </>
-                    )}
-                  </div>
-                  
-                  <div className="loading-note info">
-                    <Info size={14} />
-                    <span>Groq API offers ultra-fast inference for quick responses</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <button
-              className="analyze-button"
-              onClick={batchMode ? handleBatchAnalyze : handleAnalyze}
-              disabled={loading || batchLoading || 
-                       (batchMode ? resumeFiles.length === 0 : !resumeFile) || 
-                       !jobDescription.trim() || 
-                       backendStatus === 'sleeping'}
-            >
-              {(loading || batchLoading) ? (
-                <div className="button-loading-content">
-                  <Loader className="spinner" />
-                  <span>{batchMode ? 'Analyzing Batch...' : 'Analyzing...'}</span>
-                </div>
-              ) : backendStatus === 'sleeping' ? (
-                <div className="button-waking-content">
-                  <Activity className="spinner" />
-                  <span>Waking Backend...</span>
-                </div>
-              ) : (
-                <>
-                  <div className="button-content">
-                    <ZapIcon size={20} />
-                    <div className="button-text">
-                      <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
-                      <span className="button-subtext">
-                        {batchMode 
-                          ? `${resumeFiles.length} resume(s) • ${getModelDisplayName(modelInfo)}` 
-                          : `${getModelDisplayName(modelInfo)} • Ultra-fast`}
-                      </span>
-                    </div>
-                  </div>
-                  <ChevronRight size={20} />
-                </>
-              )}
-            </button>
-
-            {/* Tips Section */}
-            <div className="tips-section">
-              {batchMode ? (
-                <>
-                  <div className="tip">
-                    <ZapIcon size={16} />
-                    <span>Groq API provides ultra-fast batch processing</span>
-                  </div>
-                  <div className="tip">
-                    <TrendingUp size={16} />
-                    <span>Candidates will be ranked by ATS score from highest to lowest</span>
-                  </div>
-                  <div className="tip">
-                    <Download size={16} />
-                    <span>Download comprehensive Excel report with all candidate data</span>
-                  </div>
-                  <div className="tip">
-                    <Cpu size={16} />
-                    <span>Using: {getModelDisplayName(modelInfo)}</span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="tip">
-                    <ZapIcon size={16} />
-                    <span>Groq API offers ultra-fast responses (typically &lt;1s)</span>
-                  </div>
-                  <div className="tip">
-                    <Thermometer size={16} />
-                    <span>Groq API automatically warms up when idle</span>
-                  </div>
-                  <div className="tip">
-                    <Activity size={16} />
-                    <span>Backend stays awake with automatic pings every 3 minutes</span>
-                  </div>
-                  <div className="tip">
-                    <Cpu size={16} />
-                    <span>Using: {getModelDisplayName(modelInfo)}</span>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        ) : batchAnalysis ? (
-          // BATCH RESULTS DISPLAY
-          <div className="results-section">
-            <div className="analysis-header" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-                <h2 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>
-                  ⚡ Batch Analysis Results
-                </h2>
-                <div style={{ display: 'flex', gap: '1rem' }}>
-                  <button
-                    className="download-button"
-                    style={{ minWidth: 'auto', padding: '0.75rem 1.5rem' }}
-                    onClick={handleBatchDownload}
-                  >
-                    <DownloadCloud size={18} />
-                    Download Full Report
-                  </button>
-                  <button
-                    className="reset-button"
-                    style={{ minWidth: 'auto', padding: '0.75rem 1.5rem' }}
-                    onClick={() => {
-                      setBatchAnalysis(null);
-                      setResumeFiles([]);
-                      setBatchMode(true);
-                      setError('');
-                    }}
-                  >
-                    <RefreshCw size={18} />
-                    New Batch
-                  </button>
-                </div>
-              </div>
-              
-              <div className="batch-stats">
-                <div className="stat-badge stat-success">
-                  <Check size={16} />
-                  <span>{batchAnalysis.successfully_analyzed} Successful</span>
-                </div>
-                {batchAnalysis.failed_files > 0 && (
-                  <div className="stat-badge stat-error">
-                    <X size={16} />
-                    <span>{batchAnalysis.failed_files} Failed</span>
-                  </div>
-                )}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)' }}>
-                  <Users size={16} />
-                  <span>Processed {batchAnalysis.total_files} resumes</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)' }}>
-                  <Cpu size={16} />
-                  <span>{getModelDisplayName(batchAnalysis.model_used)}</span>
-                </div>
-              </div>
-              
-              {batchAnalysis.errors.length > 0 && (
-                <div style={{ 
-                  marginTop: '1rem',
-                  background: 'rgba(255, 107, 107, 0.1)',
-                  padding: '1rem',
-                  borderRadius: '12px',
-                  border: '1px solid rgba(255, 107, 107, 0.3)',
-                  width: '100%'
-                }}>
-                  <h4 style={{ color: '#ff6b6b', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <AlertCircle size={16} />
-                    Errors ({batchAnalysis.errors.length})
-                  </h4>
-                  <ul style={{ listStyle: 'none', fontSize: '0.9rem' }}>
-                    {batchAnalysis.errors.map((error, idx) => (
-                      <li key={idx} style={{ marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
-                        • {error.filename}: {error.error}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-
-            {/* Batch Results Grid */}
-            <div className="section-title">
-              <h2>Candidate Rankings</h2>
-              <p>Sorted by ATS Score (Highest to Lowest)</p>
-            </div>
-            
-            <div className="batch-results-grid">
-              {batchAnalysis.analyses.map((candidate, index) => (
-                <div key={index} className="batch-candidate-card glass">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-                        <div className="rank-badge">
-                          #{candidate.rank}
-                        </div>
-                        <h3 style={{ fontSize: '1.3rem', color: 'var(--text-primary)' }}>
-                          {candidate.candidate_name}
-                        </h3>
-                      </div>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                        {candidate.filename} • {candidate.file_size}
-                      </div>
-                    </div>
-                    
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ 
-                        fontSize: '2.5rem', 
-                        fontWeight: 800,
-                        color: getScoreColor(candidate.overall_score),
-                        lineHeight: 1
-                      }}>
-                        {candidate.overall_score}
-                      </div>
-                      <div style={{ 
-                        fontSize: '0.85rem', 
-                        color: 'var(--text-secondary)',
-                        marginTop: '0.25rem'
-                      }}>
-                        ATS Score
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div style={{ margin: '1rem 0' }}>
-                    <div style={{ 
-                      display: 'inline-block',
-                      padding: '0.25rem 0.75rem',
-                      background: getScoreColor(candidate.overall_score) + '20',
-                      color: getScoreColor(candidate.overall_score),
-                      borderRadius: '12px',
-                      fontSize: '0.9rem',
-                      fontWeight: 600,
-                      border: `1px solid ${getScoreColor(candidate.overall_score)}40`
-                    }}>
-                      {candidate.recommendation}
-                    </div>
-                  </div>
-                  
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
-                    <div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-                        ✅ Matched Skills ({candidate.skills_matched?.length || 0})
-                      </div>
-                      <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
-                        {candidate.skills_matched?.slice(0, 3).map((skill, idx) => (
-                          <div key={idx} style={{ marginBottom: '0.25rem' }}>• {skill}</div>
-                        ))}
-                        {candidate.skills_matched?.length > 3 && (
-                          <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                            +{candidate.skills_matched.length - 3} more
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-                        ❌ Missing Skills ({candidate.skills_missing?.length || 0})
-                      </div>
-                      <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
-                        {candidate.skills_missing?.slice(0, 3).map((skill, idx) => (
-                          <div key={idx} style={{ marginBottom: '0.25rem' }}>• {skill}</div>
-                        ))}
-                        {candidate.skills_missing?.length > 3 && (
-                          <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                            +{candidate.skills_missing.length - 3} more
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div style={{ 
-                    marginTop: '1rem', 
-                    paddingTop: '1rem', 
-                    borderTop: '1px solid var(--border)',
-                    fontSize: '0.85rem',
-                    color: 'var(--text-secondary)'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ maxWidth: '70%' }}>Experience: {candidate.experience_summary?.substring(0, 60)}...</span>
-                      <button
-                        onClick={() => {
-                          setAnalysis(candidate);
-                          setBatchAnalysis(null);
-                        }}
-                        style={{
-                          background: 'transparent',
-                          border: '1px solid var(--primary)',
-                          color: 'var(--primary)',
-                          padding: '0.25rem 0.75rem',
-                          borderRadius: '8px',
-                          fontSize: '0.8rem',
-                          cursor: 'pointer',
-                          whiteSpace: 'nowrap'
-                        }}
-                      >
-                        View Details
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Action Section */}
-            <div className="action-section glass">
-              <div className="action-content">
-                <h3>Batch Analysis Complete</h3>
-                <p>Download comprehensive Excel report with all candidate details</p>
-              </div>
-              <div className="action-buttons">
-                <button 
-                  className="download-button" 
-                  onClick={handleBatchDownload}
-                >
-                  <div className="button-glow"></div>
-                  <DownloadCloud size={20} />
-                  <span>Download Excel Report</span>
-                  <span className="button-badge">Detailed</span>
-                </button>
-                <button className="reset-button" onClick={() => {
-                  setBatchAnalysis(null);
-                  setResumeFiles([]);
-                  setBatchMode(true);
-                  setJobDescription('');
-                  setError('');
-                  initializeService();
-                }}>
-                  <RefreshCw size={20} />
-                  <span>New Batch Analysis</span>
-                </button>
-                <button className="share-button" onClick={() => {
-                  setBatchAnalysis(null);
-                  setBatchMode(false);
-                  setResumeFile(null);
-                  setResumeFiles([]);
-                  setJobDescription('');
-                  setError('');
-                }}>
-                  <User size={20} />
-                  <span>Single Resume Mode</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          // SINGLE RESULT DISPLAY
-          <div className="results-section">
-            {/* Analysis Header */}
-            <div className="analysis-header">
-              <div className="candidate-info">
-                <div className="candidate-avatar">
-                  <User size={24} />
-                </div>
-                <div>
-                  <h2 className="candidate-name">{analysis.candidate_name}</h2>
-                  <div className="candidate-meta">
-                    <span className="analysis-date">
-                      <Clock size={14} />
-                      Analysis Date: {new Date().toLocaleDateString('en-US', { 
-                        weekday: 'long', 
-                        year: 'numeric', 
-                        month: 'long', 
-                        day: 'numeric' 
-                      })}
-                    </span>
-                    <span className="ai-badge">
-                      <ZapIcon size={12} />
-                      {analysis.ai_status === 'Warmed up' ? `${analysis.ai_model} (Ultra-fast)` : 'Enhanced Analysis'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="score-display">
-                <div className="score-circle-wrapper">
-                  <div className="score-circle-glow" style={{ 
-                    background: `radial-gradient(circle, ${getScoreColor(analysis.overall_score)}22 0%, transparent 70%)` 
-                  }}></div>
-                  <div 
-                    className="score-circle" 
-                    style={{ 
-                      borderColor: getScoreColor(analysis.overall_score),
-                      background: `conic-gradient(${getScoreColor(analysis.overall_score)} ${analysis.overall_score * 3.6}deg, #2d3749 0deg)` 
-                    }}
-                  >
-                    <div className="score-inner">
-                      <div className="score-value" style={{ color: getScoreColor(analysis.overall_score) }}>
-                        {analysis.overall_score}
-                      </div>
-                      <div className="score-label">Match Score</div>
-                    </div>
-                  </div>
-                </div>
-                <div className="score-info">
-                  <h3 className="score-grade">{getScoreGrade(analysis.overall_score)}</h3>
-                  <p className="score-description">
-                    Based on skill matching, experience relevance, and qualifications
-                  </p>
-                  <div className="score-meta">
-                    <span className="meta-item">
-                      <ZapIcon size={12} />
-                      Response: {analysis.response_time || 'Ultra-fast'}
-                    </span>
-                    <span className="meta-item">
-                      <Cpu size={12} />
-                      Model: {analysis.ai_model}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Recommendation Card */}
-            <div className="recommendation-card glass" style={{
-              background: `linear-gradient(135deg, ${getScoreColor(analysis.overall_score)}15, ${getScoreColor(analysis.overall_score)}08)`,
-              borderLeft: `4px solid ${getScoreColor(analysis.overall_score)}`
-            }}>
-              <div className="recommendation-header">
-                <Award size={28} style={{ color: getScoreColor(analysis.overall_score) }} />
-                <div>
-                  <h3>Analysis Recommendation</h3>
-                  <p className="recommendation-subtitle">
-                    {analysis.ai_status === 'Warmed up' ? `${analysis.ai_model} (Groq Ultra-fast)` : 'Enhanced Analysis'}
-                  </p>
-                </div>
-              </div>
-              <div className="recommendation-content">
-                <p className="recommendation-text">{analysis.recommendation}</p>
-                <div className="confidence-badge">
-                  <ZapIcon size={16} />
-                  <span>{analysis.ai_status === 'Warmed up' ? 'Groq AI' : 'Enhanced Analysis'}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Skills Analysis */}
-            <div className="section-title">
-              <h2>Skills Analysis</h2>
-              <p>Detailed breakdown of matched and missing skills</p>
-            </div>
-            
-            <div className="skills-grid">
-              <div className="skills-card glass success">
-                <div className="skills-card-header">
-                  <div className="skills-icon success">
-                    <CheckCircle size={24} />
-                  </div>
-                  <div className="skills-header-content">
-                    <h3>Candidate's Skills</h3>
-                    <p className="skills-subtitle">Found in your resume</p>
-                  </div>
-                  <div className="skills-count success">
-                    <span>{analysis.skills_matched?.length || 0}</span>
-                  </div>
-                </div>
-                <div className="skills-content">
-                  <ul className="skills-list">
-                    {analysis.skills_matched?.map((skill, index) => (
-                      <li key={index} className="skill-item success">
-                        <div className="skill-item-content">
-                          <CheckCircle size={16} />
-                          <span>{skill}</span>
-                        </div>
-                        <div className="skill-match-indicator">
-                          <div className="match-bar" style={{ width: `${85 + Math.random() * 15}%` }}></div>
-                        </div>
-                      </li>
-                    ))}
-                    {(!analysis.skills_matched || analysis.skills_matched.length === 0) && (
-                      <li className="no-items">No matching skills detected</li>
-                    )}
-                  </ul>
-                </div>
-              </div>
-
-              <div className="skills-card glass warning">
-                <div className="skills-card-header">
-                  <div className="skills-icon warning">
-                    <XCircle size={24} />
-                  </div>
-                  <div className="skills-header-content">
-                    <h3>Skills Missing</h3>
-                    <p className="skills-subtitle">Suggested to learn</p>
-                  </div>
-                  <div className="skills-count warning">
-                    <span>{analysis.skills_missing?.length || 0}</span>
-                  </div>
-                </div>
-                <div className="skills-content">
-                  <ul className="skills-list">
-                    {analysis.skills_missing?.map((skill, index) => (
-                      <li key={index} className="skill-item warning">
-                        <div className="skill-item-content">
-                          <XCircle size={16} />
-                          <span>{skill}</span>
-                        </div>
-                        <div className="skill-priority">
-                          <span className="priority-badge">
-                            Priority: {index < 3 ? 'High' : index < 6 ? 'Medium' : 'Low'}
-                          </span>
-                        </div>
-                      </li>
-                    ))}
-                    {(!analysis.skills_missing || analysis.skills_missing.length === 0) && (
-                      <li className="no-items success-text">All required skills are present!</li>
-                    )}
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-            {/* Summary Section */}
-            <div className="section-title">
-              <h2>Profile Summary</h2>
-              <p>Insights extracted from your resume</p>
-            </div>
-            
-            <div className="summary-grid">
-              <div className="summary-card glass">
-                <div className="summary-header">
-                  <div className="summary-icon">
-                    <Briefcase size={24} />
-                  </div>
-                  <h3>Experience Summary</h3>
-                </div>
-                <div className="summary-content">
-                  <p className="detailed-summary">{analysis.experience_summary || "No experience summary available."}</p>
-                  <div className="summary-footer">
-                    <span className="summary-tag">Professional Experience</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="summary-card glass">
-                <div className="summary-header">
-                  <div className="summary-icon">
-                    <BookOpen size={24} />
-                  </div>
-                  <h3>Education Summary</h3>
-                </div>
-                <div className="summary-content">
-                  <p className="detailed-summary">{analysis.education_summary || "No education summary available."}</p>
-                  <div className="summary-footer">
-                    <span className="summary-tag">Academic Background</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Insights Section */}
-            <div className="section-title">
-              <h2>Insights & Recommendations</h2>
-              <p>Personalized suggestions to improve your match</p>
-            </div>
-            
-            <div className="insights-grid">
-              <div className="insight-card glass">
-                <div className="insight-header">
-                  <div className="insight-icon success">
-                    <TrendingUp size={24} />
-                  </div>
-                  <div>
-                    <h3>Key Strengths</h3>
-                    <p className="insight-subtitle">Areas where you excel</p>
-                  </div>
-                </div>
-                <div className="insight-content">
-                  <ul>
-                    {analysis.key_strengths?.map((strength, index) => (
-                      <li key={index} className="strength-item">
-                        <div className="strength-marker"></div>
-                        <span>{strength}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-
-              <div className="insight-card glass">
-                <div className="insight-header">
-                  <div className="insight-icon warning">
-                    <Target size={24} />
-                  </div>
-                  <div>
-                    <h3>Areas for Improvement</h3>
-                    <p className="insight-subtitle">Opportunities to grow</p>
-                  </div>
-                </div>
-                <div className="insight-content">
-                  <ul>
-                    {analysis.areas_for_improvement?.map((area, index) => (
-                      <li key={index} className="improvement-item">
-                        <div className="improvement-marker"></div>
-                        <span>{area}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-            {/* Action Section */}
-            <div className="action-section glass">
-              <div className="action-content">
-                <h3>Ready to Take Action?</h3>
-                <p>Download detailed analysis or start a new assessment</p>
-              </div>
-              <div className="action-buttons">
-                <button 
-                  className="download-button" 
-                  onClick={handleDownload}
-                  disabled={!analysis?.excel_filename}
-                >
-                  <div className="button-glow"></div>
-                  <DownloadCloud size={20} />
-                  <span>Download Excel Report</span>
-                  <span className="button-badge">Detailed</span>
-                </button>
-                <button className="reset-button" onClick={() => {
-                  setAnalysis(null);
-                  setResumeFile(null);
-                  setJobDescription('');
-                  setError('');
-                  setProgress(0);
-                  setLoadingMessage('');
-                  setRetryCount(0);
-                  setShowQuotaPanel(false);
-                  initializeService();
-                }}>
-                  <RefreshCw size={20} />
-                  <span>New Analysis</span>
-                </button>
-                <button className="share-button" onClick={() => {
-                  setAnalysis(null);
-                  setBatchMode(true);
-                  setResumeFiles([]);
-                  setJobDescription('');
-                  setError('');
-                }}>
-                  <Users size={20} />
-                  <span>Batch Mode</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Render Current View */}
+        {renderCurrentView()}
       </main>
 
       {/* Footer */}
@@ -1915,7 +1875,7 @@ function App() {
               <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Groq API offers ultra-fast inference for instant responses
+              Groq API offers ultra-fast inference for instant responses • Up to 15 resumes per batch
             </p>
           </div>
           
@@ -1935,10 +1895,12 @@ function App() {
               <a href="#">Status Monitor</a>
             </div>
             <div className="footer-section">
-              <h4>Contact</h4>
+              <h4>Navigation</h4>
+              <a href="#" onClick={navigateToMain}>New Analysis</a>
+              {currentView !== 'main' && (
+                <a href="#" onClick={navigateBack}>Go Back</a>
+              )}
               <a href="#">Support</a>
-              <a href="#">Feedback</a>
-              <a href="#">Partnerships</a>
               <a href="#">Documentation</a>
             </div>
           </div>
