@@ -10,7 +10,10 @@ import {
   Battery, Crown, Users, Coffee, ShieldCheck,
   Lock, DownloadCloud, Edit3, FileDown, Info,
   Wifi, WifiOff, Activity, Thermometer, ListOrdered,
-  BarChart4, Filter, Cpu
+  BarChart4, Filter, Cpu, Zap as ZapIcon, Bolt,
+  PlayCircle, PauseCircle, Circle, ShieldAlert,
+  BatteryFull, BatteryMedium, BatteryLow, Signal,
+  Cloud, CloudOff, CloudLightning, CloudRain
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -30,7 +33,7 @@ function App() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [aiStatus, setAiStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState('checking');
-  const [huggingfaceWarmup, setHuggingfaceWarmup] = useState(false);
+  const [groqWarmup, setGroqWarmup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -44,7 +47,7 @@ function App() {
     totalKeys: 0
   });
   
-  // UPDATED: Point to your Hugging Face backend
+  // UPDATED: Point to your backend with Groq
   const API_BASE_URL = 'https://resugo.onrender.com';
   
   const keepAliveInterval = useRef(null);
@@ -90,13 +93,13 @@ function App() {
           totalKeys: healthResponse.data.api_key_configured ? 1 : 0
         });
         
-        setHuggingfaceWarmup(healthResponse.data.huggingface_warmup_complete || false);
-        setModelInfo(healthResponse.data.model);
+        setGroqWarmup(healthResponse.data.ai_warmup_complete || false);
+        setModelInfo(healthResponse.data.model_info || { name: healthResponse.data.model });
         setBackendStatus('ready');
       }
       
-      // Force Hugging Face warm-up
-      await forceHuggingFaceWarmup();
+      // Force Groq warm-up
+      await forceGroqWarmup();
       
       // Set up periodic checks
       setupPeriodicChecks();
@@ -114,8 +117,8 @@ function App() {
 
   const wakeUpBackend = async () => {
     try {
-      console.log('🔔 Waking up Hugging Face backend...');
-      setLoadingMessage('Waking up Hugging Face backend...');
+      console.log('🔔 Waking up backend...');
+      setLoadingMessage('Waking up backend...');
       
       // Send multiple pings to ensure backend wakes up
       const pingPromises = [
@@ -125,12 +128,12 @@ function App() {
       
       await Promise.allSettled(pingPromises);
       
-      console.log('✅ Hugging Face backend is responding');
+      console.log('✅ Backend is responding');
       setBackendStatus('ready');
       setLoadingMessage('');
       
     } catch (error) {
-      console.log('⚠️ Hugging Face backend is waking up...');
+      console.log('⚠️ Backend is waking up...');
       setBackendStatus('waking');
       
       // Send a longer timeout request to fully wake it
@@ -138,20 +141,20 @@ function App() {
         axios.get(`${API_BASE_URL}/ping`, { timeout: 15000 })
           .then(() => {
             setBackendStatus('ready');
-            console.log('✅ Hugging Face backend fully awake');
+            console.log('✅ Backend fully awake');
           })
           .catch(() => {
             setBackendStatus('sleeping');
-            console.log('❌ Hugging Face backend still sleeping');
+            console.log('❌ Backend still sleeping');
           });
       }, 3000);
     }
   };
 
-  const forceHuggingFaceWarmup = async () => {
+  const forceGroqWarmup = async () => {
     try {
       setAiStatus('warming');
-      setLoadingMessage('Warming up Hugging Face...');
+      setLoadingMessage('Warming up Groq API...');
       
       const response = await axios.get(`${API_BASE_URL}/warmup`, {
         timeout: 15000
@@ -159,28 +162,28 @@ function App() {
       
       if (response.data.warmup_complete) {
         setAiStatus('available');
-        setHuggingfaceWarmup(true);
-        console.log('✅ Hugging Face warmed up successfully');
+        setGroqWarmup(true);
+        console.log('✅ Groq API warmed up successfully');
       } else {
         setAiStatus('warming');
-        console.log('⚠️ Hugging Face still warming up');
+        console.log('⚠️ Groq API still warming up');
         
         // Check status again in 5 seconds
-        setTimeout(() => checkHuggingFaceStatus(), 5000);
+        setTimeout(() => checkGroqStatus(), 5000);
       }
       
       setLoadingMessage('');
       
     } catch (error) {
-      console.log('⚠️ Hugging Face warm-up failed:', error.message);
+      console.log('⚠️ Groq API warm-up failed:', error.message);
       setAiStatus('unavailable');
       
       // Check status in background
-      setTimeout(() => checkHuggingFaceStatus(), 3000);
+      setTimeout(() => checkGroqStatus(), 3000);
     }
   };
 
-  const checkHuggingFaceStatus = async () => {
+  const checkGroqStatus = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/quick-check`, {
         timeout: 10000
@@ -188,20 +191,20 @@ function App() {
       
       if (response.data.available) {
         setAiStatus('available');
-        setHuggingfaceWarmup(true);
+        setGroqWarmup(true);
         if (response.data.model) {
-          setModelInfo(response.data.model);
+          setModelInfo(response.data.model_info || { name: response.data.model });
         }
       } else if (response.data.warmup_complete) {
         setAiStatus('available');
-        setHuggingfaceWarmup(true);
+        setGroqWarmup(true);
       } else {
         setAiStatus('warming');
-        setHuggingfaceWarmup(false);
+        setGroqWarmup(false);
       }
       
     } catch (error) {
-      console.log('Hugging Face status check failed:', error.message);
+      console.log('Groq API status check failed:', error.message);
       setAiStatus('unavailable');
     }
   };
@@ -213,13 +216,13 @@ function App() {
       });
       
       setBackendStatus('ready');
-      setHuggingfaceWarmup(response.data.huggingface_warmup_complete || false);
-      if (response.data.model) {
-        setModelInfo(response.data.model);
+      setGroqWarmup(response.data.ai_warmup_complete || false);
+      if (response.data.model_info || response.data.model) {
+        setModelInfo(response.data.model_info || { name: response.data.model });
       }
       
       // Update AI status based on warmup
-      if (response.data.huggingface_warmup_complete) {
+      if (response.data.ai_warmup_complete) {
         setAiStatus('available');
       } else {
         setAiStatus('warming');
@@ -244,10 +247,10 @@ function App() {
       checkBackendHealth();
     }, 60 * 1000);
     
-    // Check Hugging Face status every 30 seconds when warming
+    // Check Groq status every 30 seconds when warming
     const statusCheckInterval = setInterval(() => {
       if (aiStatus === 'warming' || aiStatus === 'checking') {
-        checkHuggingFaceStatus();
+        checkGroqStatus();
       }
     }, 30000);
     
@@ -381,15 +384,15 @@ function App() {
       progressInterval = setInterval(() => {
         setProgress(prev => {
           if (prev >= 85) return 85;
-          return prev + Math.random() * 3;
+          return prev + Math.random() * 5; // Groq is faster
         });
       }, 500);
 
       // Update loading message based on service status
-      if (aiStatus === 'available' && huggingfaceWarmup) {
-        setLoadingMessage('Hugging Face AI analysis (Always Active)...');
+      if (aiStatus === 'available' && groqWarmup) {
+        setLoadingMessage('Groq AI analysis (Ultra-fast)...');
       } else {
-        setLoadingMessage('Enhanced analysis (Warming up AI)...');
+        setLoadingMessage('Enhanced analysis (Warming up Groq)...');
       }
       setProgress(20);
 
@@ -401,7 +404,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 90000, // 90 seconds
+        timeout: 60000, // 60 seconds (Groq is faster)
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -416,7 +419,7 @@ function App() {
       
       setLoadingMessage('AI analysis complete!');
 
-      await new Promise(resolve => setTimeout(resolve, 800));
+      await new Promise(resolve => setTimeout(resolve, 500)); // Shorter delay for Groq
       
       setAnalysis(response.data);
       setProgress(100);
@@ -427,7 +430,7 @@ function App() {
       setTimeout(() => {
         setProgress(0);
         setLoadingMessage('');
-      }, 1000);
+      }, 800);
 
     } catch (err) {
       if (progressInterval) clearInterval(progressInterval);
@@ -437,9 +440,9 @@ function App() {
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('Rate limit reached. Enhanced analysis is still available.');
+        setError('Rate limit reached. Groq API has limits. Please try again later.');
       } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
-        setError('Hugging Face service quota/rate limit exceeded. Enhanced analysis will extract information from your resume.');
+        setError('Groq API rate limit exceeded. Please wait a minute and try again.');
         setAiStatus('unavailable');
       } else {
         setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
@@ -490,7 +493,7 @@ function App() {
       progressInterval = setInterval(() => {
         setBatchProgress(prev => {
           if (prev >= 85) return 85;
-          return prev + Math.random() * 2;
+          return prev + Math.random() * 3; // Faster for Groq
         });
       }, 500);
 
@@ -501,7 +504,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 180000, // 3 minutes for batch processing
+        timeout: 120000, // 2 minutes for batch processing (Groq is faster)
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -515,7 +518,7 @@ function App() {
       setBatchProgress(95);
       setLoadingMessage('Batch analysis complete!');
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 800));
       
       setBatchAnalysis(response.data);
       setBatchProgress(100);
@@ -523,7 +526,7 @@ function App() {
       setTimeout(() => {
         setBatchProgress(0);
         setLoadingMessage('');
-      }, 1000);
+      }, 800);
 
     } catch (err) {
       if (progressInterval) clearInterval(progressInterval);
@@ -533,7 +536,7 @@ function App() {
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('Rate limit reached. Please try again later.');
+        setError('Groq API rate limit reached. Please try again later.');
       } else {
         setError(err.response?.data?.error || 'An error occurred during batch analysis.');
       }
@@ -580,19 +583,19 @@ function App() {
       case 'ready': return { 
         text: 'Backend Active', 
         color: '#00ff9d', 
-        icon: <Wifi size={16} />,
+        icon: <CloudLightning size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
       };
       case 'waking': return { 
         text: 'Backend Waking', 
         color: '#ffd166', 
-        icon: <Activity size={16} />,
+        icon: <CloudRain size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       case 'sleeping': return { 
         text: 'Backend Sleeping', 
         color: '#ff6b6b', 
-        icon: <WifiOff size={16} />,
+        icon: <CloudOff size={16} />,
         bgColor: 'rgba(255, 107, 107, 0.1)'
       };
       default: return { 
@@ -607,21 +610,21 @@ function App() {
   const getAiStatusMessage = () => {
     switch(aiStatus) {
       case 'checking': return { 
-        text: 'Checking Hugging Face...', 
+        text: 'Checking Groq...', 
         color: '#ffd166', 
-        icon: <Cpu size={16} />,
+        icon: <Bolt size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       case 'warming': return { 
-        text: 'Hugging Face Warming', 
+        text: 'Groq Warming', 
         color: '#ff9800', 
         icon: <Thermometer size={16} />,
         bgColor: 'rgba(255, 152, 0, 0.1)'
       };
       case 'available': return { 
-        text: 'Hugging Face Ready', 
+        text: 'Groq Ready ⚡', 
         color: '#00ff9d', 
-        icon: <Check size={16} />,
+        icon: <ZapIcon size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
       };
       case 'unavailable': return { 
@@ -654,10 +657,10 @@ function App() {
 
   const handleForceWarmup = async () => {
     setIsWarmingUp(true);
-    setLoadingMessage('Forcing Hugging Face warm-up...');
+    setLoadingMessage('Forcing Groq API warm-up...');
     
     try {
-      await forceHuggingFaceWarmup();
+      await forceGroqWarmup();
       setLoadingMessage('');
     } catch (error) {
       console.log('Force warm-up failed:', error);
@@ -666,15 +669,15 @@ function App() {
     }
   };
 
-  const getModelDisplayName = (modelId) => {
-    if (!modelId) return 'Hugging Face AI';
-    const modelMap = {
-      'mistralai/Mistral-7B-Instruct-v0.2': 'Mistral 7B (Hugging Face)',
-      'google/flan-t5-xxl': 'Google Flan-T5 (Hugging Face)',
-      'microsoft/phi-2': 'Microsoft Phi-2 (Hugging Face)',
-      'meta-llama/Llama-2-7b-chat-hf': 'Llama 2 7B (Hugging Face)',
-    };
-    return modelMap[modelId] || modelId;
+  const getModelDisplayName = (modelInfo) => {
+    if (!modelInfo) return 'Groq AI';
+    if (typeof modelInfo === 'string') return modelInfo;
+    return modelInfo.name || 'Groq AI';
+  };
+
+  const getModelDescription = (modelInfo) => {
+    if (!modelInfo || typeof modelInfo === 'string') return 'Ultra-fast inference';
+    return modelInfo.description || 'Groq ultra-fast inference';
   };
 
   return (
@@ -691,15 +694,15 @@ function App() {
             {/* Logo and Title */}
             <div className="logo">
               <div className="logo-glow">
-                <Sparkles className="logo-icon" />
+                <ZapIcon className="logo-icon" />
               </div>
               <div className="logo-text">
                 <h1>AI Resume Analyzer</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
-                  <span className="huggingface-badge">🤗 Hugging Face</span>
+                  <span className="groq-badge">⚡ Groq</span>
                   <span className="divider">•</span>
-                  <span className="tagline">Always Active • Batch Processing</span>
+                  <span className="tagline">Ultra-fast • Always Active</span>
                 </div>
               </div>
             </div>
@@ -840,9 +843,9 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Hugging Face Status</div>
+                <div className="summary-label">Groq API Status</div>
                 <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
-                  {aiStatus === 'available' ? '✅ Ready' : 
+                  {aiStatus === 'available' ? '⚡ Ready' : 
                    aiStatus === 'warming' ? '🔥 Warming' : 
                    '⚠️ Enhanced Mode'}
                 </div>
@@ -854,9 +857,9 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Always Active</div>
+                <div className="summary-label">Speed</div>
                 <div className="summary-value success">
-                  ✅ Enabled
+                  ⚡ Ultra-fast
                 </div>
               </div>
             </div>
@@ -893,11 +896,11 @@ function App() {
             <div className="status-info">
               <div className="info-item">
                 <span className="info-label">Service Mode:</span>
-                <span className="info-value">Always Active (Keeps Hugging Face warm)</span>
+                <span className="info-value">Always Active (Keeps Groq warm)</span>
               </div>
               <div className="info-item">
                 <span className="info-label">AI Provider:</span>
-                <span className="info-value">Hugging Face Inference API</span>
+                <span className="info-value">Groq API (Ultra-fast inference)</span>
               </div>
               <div className="info-item">
                 <span className="info-label">Auto Warm-up:</span>
@@ -921,11 +924,11 @@ function App() {
               </div>
               <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
                 <div className="indicator-dot"></div>
-                <span>Hugging Face: {aiStatus === 'available' ? 'Ready' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
+                <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
               </div>
               {modelInfo && (
                 <div className="status-indicator active">
-                  <div className="indicator-dot" style={{ background: '#6366f1' }}></div>
+                  <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
                   <span>Model: {getModelDisplayName(modelInfo)}</span>
                 </div>
               )}
@@ -941,7 +944,7 @@ function App() {
             {aiStatus === 'warming' && (
               <div className="wakeup-message">
                 <Thermometer size={16} />
-                <span>Hugging Face is warming up. This ensures fast responses.</span>
+                <span>Groq API is warming up. This ensures ultra-fast responses.</span>
               </div>
             )}
           </div>
@@ -960,7 +963,7 @@ function App() {
                   {aiStatusInfo.icon} {aiStatusInfo.text}
                 </span>
                 <span className="status-badge always-active">
-                  <Activity size={14} /> Always Active
+                  <ZapIcon size={14} /> Ultra-fast
                 </span>
                 {modelInfo && (
                   <span className="status-badge model">
@@ -1164,15 +1167,15 @@ function App() {
                 <div className="upload-stats">
                   <div className="stat">
                     <div className="stat-icon">
-                      <Clock size={14} />
+                      <ZapIcon size={14} />
                     </div>
-                    <span>{batchMode ? 'Batch analysis' : 'Fast analysis'} with warm AI</span>
+                    <span>Ultra-fast Groq analysis</span>
                   </div>
                   <div className="stat">
                     <div className="stat-icon">
                       <Cpu size={14} />
                     </div>
-                    <span>Hugging Face AI</span>
+                    <span>{getModelDisplayName(modelInfo)}</span>
                   </div>
                   <div className="stat">
                     <div className="stat-icon">
@@ -1250,7 +1253,7 @@ function App() {
                     <span className="loading-subtext">
                       {batchMode 
                         ? `Processing ${resumeFiles.length} resume(s) with ${getModelDisplayName(modelInfo)}...` 
-                        : `Using ${getModelDisplayName(modelInfo)}...`}
+                        : `Using ${getModelDisplayName(modelInfo)} (Ultra-fast)...`}
                     </span>
                   </div>
                   
@@ -1259,7 +1262,7 @@ function App() {
                     <span>•</span>
                     <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
                     <span>•</span>
-                    <span>Hugging Face: {aiStatus === 'available' ? 'Ready' : 'Warming...'}</span>
+                    <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
                     {modelInfo && (
                       <>
                         <span>•</span>
@@ -1270,7 +1273,7 @@ function App() {
                   
                   <div className="loading-note info">
                     <Info size={14} />
-                    <span>Always Active mode keeps Hugging Face warm for faster responses</span>
+                    <span>Groq API offers ultra-fast inference for quick responses</span>
                   </div>
                 </div>
               </div>
@@ -1297,13 +1300,13 @@ function App() {
               ) : (
                 <>
                   <div className="button-content">
-                    <Zap size={20} />
+                    <ZapIcon size={20} />
                     <div className="button-text">
                       <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                       <span className="button-subtext">
                         {batchMode 
                           ? `${resumeFiles.length} resume(s) • ${getModelDisplayName(modelInfo)}` 
-                          : `${getModelDisplayName(modelInfo)} • Always Active`}
+                          : `${getModelDisplayName(modelInfo)} • Ultra-fast`}
                       </span>
                     </div>
                   </div>
@@ -1317,8 +1320,8 @@ function App() {
               {batchMode ? (
                 <>
                   <div className="tip">
-                    <Sparkles size={16} />
-                    <span>Upload up to 20 resumes for batch processing</span>
+                    <ZapIcon size={16} />
+                    <span>Groq API provides ultra-fast batch processing</span>
                   </div>
                   <div className="tip">
                     <TrendingUp size={16} />
@@ -1336,12 +1339,12 @@ function App() {
               ) : (
                 <>
                   <div className="tip">
-                    <Sparkles size={16} />
-                    <span>Always Active mode keeps Hugging Face warm for instant responses</span>
+                    <ZapIcon size={16} />
+                    <span>Groq API offers ultra-fast responses (typically &lt;1s)</span>
                   </div>
                   <div className="tip">
                     <Thermometer size={16} />
-                    <span>Hugging Face automatically warms up when idle for 2 minutes</span>
+                    <span>Groq API automatically warms up when idle</span>
                   </div>
                   <div className="tip">
                     <Activity size={16} />
@@ -1361,7 +1364,7 @@ function App() {
             <div className="analysis-header" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
                 <h2 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>
-                  📊 Batch Analysis Results
+                  ⚡ Batch Analysis Results
                 </h2>
                 <div style={{ display: 'flex', gap: '1rem' }}>
                   <button
@@ -1621,8 +1624,8 @@ function App() {
                       })}
                     </span>
                     <span className="ai-badge">
-                      <Cpu size={12} />
-                      {analysis.ai_status === 'Warmed up' ? `${getModelDisplayName(analysis.ai_model)} (Always Active)` : 'Enhanced Analysis'}
+                      <ZapIcon size={12} />
+                      {analysis.ai_status === 'Warmed up' ? `${analysis.ai_model} (Ultra-fast)` : 'Enhanced Analysis'}
                     </span>
                   </div>
                 </div>
@@ -1655,12 +1658,12 @@ function App() {
                   </p>
                   <div className="score-meta">
                     <span className="meta-item">
-                      <Activity size={12} />
-                      Response: {analysis.response_time || 'Fast'}
+                      <ZapIcon size={12} />
+                      Response: {analysis.response_time || 'Ultra-fast'}
                     </span>
                     <span className="meta-item">
                       <Cpu size={12} />
-                      Model: {getModelDisplayName(analysis.ai_model)}
+                      Model: {analysis.ai_model}
                     </span>
                   </div>
                 </div>
@@ -1677,15 +1680,15 @@ function App() {
                 <div>
                   <h3>Analysis Recommendation</h3>
                   <p className="recommendation-subtitle">
-                    {analysis.ai_status === 'Warmed up' ? `${getModelDisplayName(analysis.ai_model)} (Always Active)` : 'Enhanced Analysis'}
+                    {analysis.ai_status === 'Warmed up' ? `${analysis.ai_model} (Groq Ultra-fast)` : 'Enhanced Analysis'}
                   </p>
                 </div>
               </div>
               <div className="recommendation-content">
                 <p className="recommendation-text">{analysis.recommendation}</p>
                 <div className="confidence-badge">
-                  <Cpu size={16} />
-                  <span>{analysis.ai_status === 'Warmed up' ? 'Hugging Face AI' : 'Enhanced Analysis'}</span>
+                  <ZapIcon size={16} />
+                  <span>{analysis.ai_status === 'Warmed up' ? 'Groq AI' : 'Enhanced Analysis'}</span>
                 </div>
               </div>
             </div>
@@ -1908,19 +1911,19 @@ function App() {
         <div className="footer-content">
           <div className="footer-brand">
             <div className="footer-logo">
-              <Sparkles size={20} />
+              <ZapIcon size={20} />
               <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Always Active mode keeps Hugging Face warm for instant responses
+              Groq API offers ultra-fast inference for instant responses
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
               <h4>Features</h4>
-              <a href="#">Always Active AI</a>
-              <a href="#">Hugging Face Warm-up</a>
+              <a href="#">Ultra-fast AI</a>
+              <a href="#">Groq API</a>
               <a href="#">Batch Processing</a>
               <a href="#">Excel Reports</a>
             </div>
@@ -1942,15 +1945,15 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Hugging Face. Always Active Mode.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq API. Ultra-fast Mode.</p>
           <div className="footer-stats">
             <span className="stat">
-              <Activity size={12} />
+              <CloudLightning size={12} />
               Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
             </span>
             <span className="stat">
-              <Thermometer size={12} />
-              Hugging Face: {aiStatus === 'available' ? 'Warmed' : 'Warming'}
+              <ZapIcon size={12} />
+              Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming'}
             </span>
             <span className="stat">
               <Cpu size={12} />
