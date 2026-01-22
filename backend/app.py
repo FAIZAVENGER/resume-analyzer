@@ -21,40 +21,39 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Configure Hugging Face Router API
-api_key = os.getenv('HUGGINGFACE_API_KEY')
-# Use Together AI as fallback
-together_api_key = os.getenv('TOGETHER_API_KEY')
-model = os.getenv('HUGGINGFACE_MODEL', 'mistralai/Mistral-7B-Instruct-v0.2')
+# Configure Groq API
+GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL = os.getenv('GROQ_MODEL', 'mixtral-8x7b-32768')  # or 'llama2-70b-4096', 'gemma-7b-it'
 
-# Track which API is available
-api_provider = None
-api_config = {}
+# Available Groq models
+GROQ_MODELS = {
+    'mixtral-8x7b-32768': {
+        'name': 'Mixtral 8x7B',
+        'context_length': 32768,
+        'provider': 'Groq',
+        'description': 'Fast 8x7B MoE model with 32K context'
+    },
+    'llama2-70b-4096': {
+        'name': 'Llama 2 70B',
+        'context_length': 4096,
+        'provider': 'Groq',
+        'description': 'High-quality 70B parameter model'
+    },
+    'gemma-7b-it': {
+        'name': 'Gemma 7B',
+        'context_length': 8192,
+        'provider': 'Groq',
+        'description': 'Google\'s lightweight 7B model'
+    }
+}
 
-if api_key:
-    print(f"✅ Hugging Face API Key loaded: {api_key[:10]}...")
-    print(f"✅ Using model: {model}")
-    # Try Hugging Face Router API first
-    api_config['huggingface'] = {
-        'api_key': api_key,
-        'model': model,
-        'api_url': 'https://router.huggingface.co/huggingface'
-    }
-    api_provider = 'huggingface'
-elif together_api_key:
-    print(f"✅ Together AI API Key loaded: {together_api_key[:10]}...")
-    print(f"✅ Using Together AI with model: {model}")
-    api_config['together'] = {
-        'api_key': together_api_key,
-        'model': model,
-        'api_url': 'https://api.together.xyz/v1/chat/completions'
-    }
-    api_provider = 'together'
-else:
-    print("⚠️ WARNING: No API key found!")
-    print("Please set either HUGGINGFACE_API_KEY or TOGETHER_API_KEY in .env file")
-    print("Get Hugging Face token: https://huggingface.co/settings/tokens")
-    print("Get Together AI key: https://api.together.ai")
+# Track API status
+api_available = False
+warmup_complete = False
+last_activity_time = datetime.now()
+keep_warm_thread = None
+warmup_lock = threading.Lock()
 
 # Get absolute path for uploads folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -62,206 +61,149 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 print(f"📁 Upload folder: {UPLOAD_FOLDER}")
 
-# Warm-up state
-warmup_complete = False
-last_activity_time = datetime.now()
-keep_warm_thread = None
-warmup_lock = threading.Lock()
-
-def call_huggingface_router_api(prompt, max_tokens=800, temperature=0.3, timeout=60):
-    """Call Hugging Face Router API"""
-    if not api_config.get('huggingface'):
-        return None
+def call_groq_api(prompt, max_tokens=800, temperature=0.3, timeout=30):
+    """Call Groq API with the given prompt"""
+    if not GROQ_API_KEY:
+        print("❌ No Groq API key configured")
+        return {'error': 'no_api_key', 'status': 500}
     
-    config = api_config['huggingface']
     headers = {
-        'Authorization': f'Bearer {config["api_key"]}',
+        'Authorization': f'Bearer {GROQ_API_KEY}',
         'Content-Type': 'application/json'
     }
     
     payload = {
-        'inputs': prompt,
-        'parameters': {
-            'max_new_tokens': max_tokens,
-            'temperature': temperature,
-            'return_full_text': False,
-            'do_sample': True,
-            'top_p': 0.95,
-            'repetition_penalty': 1.2
-        }
-    }
-    
-    try:
-        response = requests.post(
-            config['api_url'],
-            headers=headers,
-            json=payload,
-            timeout=timeout
-        )
-        
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 503:
-            print(f"⏳ Model is loading...")
-            return {'error': 'model_loading', 'status': 503}
-        elif response.status_code == 429:
-            print(f"❌ Rate limit exceeded")
-            return {'error': 'rate_limit', 'status': 429}
-        else:
-            print(f"❌ Hugging Face Router API Error {response.status_code}")
-            try:
-                error_data = response.json()
-                print(f"Error details: {json.dumps(error_data)[:200]}")
-            except:
-                print(f"Response text: {response.text[:200]}")
-            return {'error': f'api_error_{response.status_code}', 'status': response.status_code}
-            
-    except requests.exceptions.Timeout:
-        print(f"❌ Hugging Face Router API timeout")
-        return {'error': 'timeout', 'status': 408}
-    except Exception as e:
-        print(f"❌ Hugging Face Router API Exception: {str(e)}")
-        return {'error': str(e), 'status': 500}
-
-def call_together_api(prompt, max_tokens=800, temperature=0.3, timeout=60):
-    """Call Together AI API"""
-    if not api_config.get('together'):
-        return None
-    
-    config = api_config['together']
-    headers = {
-        'Authorization': f'Bearer {config["api_key"]}',
-        'Content-Type': 'application/json'
-    }
-    
-    payload = {
-        'model': config['model'],
+        'model': GROQ_MODEL,
         'messages': [
-            {"role": "user", "content": prompt}
+            {
+                'role': 'user',
+                'content': prompt
+            }
         ],
         'max_tokens': max_tokens,
         'temperature': temperature,
         'top_p': 0.95,
-        'repetition_penalty': 1.2,
-        'stop': ['</s>', '[/INST]', '</end>']
+        'stream': False,
+        'stop': None
     }
     
     try:
+        start_time = time.time()
         response = requests.post(
-            config['api_url'],
+            GROQ_API_URL,
             headers=headers,
             json=payload,
             timeout=timeout
         )
         
+        response_time = time.time() - start_time
+        
         if response.status_code == 200:
             data = response.json()
             if 'choices' in data and len(data['choices']) > 0:
-                return data['choices'][0]['message']['content']
-            return None
+                result = data['choices'][0]['message']['content']
+                print(f"✅ Groq API response in {response_time:.2f}s")
+                return result
+            else:
+                print(f"❌ Unexpected Groq API response format")
+                return {'error': 'invalid_response', 'status': response.status_code}
+        elif response.status_code == 401:
+            print(f"❌ Invalid Groq API key")
+            return {'error': 'invalid_api_key', 'status': 401}
         elif response.status_code == 429:
-            print(f"❌ Together AI rate limit exceeded")
+            print(f"❌ Groq API rate limit exceeded")
             return {'error': 'rate_limit', 'status': 429}
+        elif response.status_code == 503:
+            print(f"❌ Groq API service unavailable")
+            return {'error': 'service_unavailable', 'status': 503}
         else:
-            print(f"❌ Together AI API Error {response.status_code}")
-            try:
-                error_data = response.json()
-                print(f"Error details: {json.dumps(error_data)[:200]}")
-            except:
-                print(f"Response text: {response.text[:200]}")
+            print(f"❌ Groq API Error {response.status_code}: {response.text[:200]}")
             return {'error': f'api_error_{response.status_code}', 'status': response.status_code}
             
     except requests.exceptions.Timeout:
-        print(f"❌ Together AI API timeout")
+        print(f"❌ Groq API timeout after {timeout}s")
         return {'error': 'timeout', 'status': 408}
+    except requests.exceptions.ConnectionError:
+        print(f"❌ Groq API connection error")
+        return {'error': 'connection_error', 'status': 503}
     except Exception as e:
-        print(f"❌ Together AI API Exception: {str(e)}")
+        print(f"❌ Groq API Exception: {str(e)}")
         return {'error': str(e), 'status': 500}
 
-def call_ai_api(prompt, max_tokens=800, temperature=0.3, timeout=60):
-    """Call AI API with fallback between providers"""
-    # First try the current provider
-    if api_provider == 'huggingface':
-        response = call_huggingface_router_api(prompt, max_tokens, temperature, timeout)
-        if isinstance(response, dict) and 'error' in response:
-            if response.get('error') == 'api_error_410' or response.get('status') == 410:
-                print("⚠️ Hugging Face Router API failed, trying Together AI...")
-                # Switch to Together AI if available
-                if api_config.get('together'):
-                    global api_provider
-                    api_provider = 'together'
-                    return call_together_api(prompt, max_tokens, temperature, timeout)
-        return response
-    elif api_provider == 'together':
-        return call_together_api(prompt, max_tokens, temperature, timeout)
+def warmup_groq_service():
+    """Warm up Groq service connection"""
+    global warmup_complete, api_available
     
-    return None
-
-def warmup_ai_service():
-    """Warm up AI service connection"""
-    global warmup_complete, api_provider
-    
-    if not api_config:
-        print("⚠️ Skipping AI warm-up: No API configured")
+    if not GROQ_API_KEY:
+        print("⚠️ Skipping Groq warm-up: No API key configured")
         return False
     
     try:
-        print(f"🔥 Warming up {api_provider.upper()} connection...")
+        print(f"🔥 Warming up Groq connection...")
+        print(f"📊 Using model: {GROQ_MODEL}")
         start_time = time.time()
         
         # Simple test request
-        response = call_ai_api(
+        response = call_groq_api(
             prompt="Hello, are you ready? Respond with just 'ready'.",
             max_tokens=10,
             temperature=0.1,
-            timeout=30
+            timeout=10
         )
         
         if isinstance(response, dict) and 'error' in response:
-            print(f"⚠️ Warm-up attempt failed: {response.get('error')}")
-            # Try again in 30 seconds
-            threading.Timer(30.0, warmup_ai_service).start()
+            error_type = response.get('error')
+            if error_type == 'rate_limit':
+                print(f"⚠️ Rate limited, will retry later")
+            elif error_type == 'invalid_api_key':
+                print(f"❌ Invalid Groq API key")
+            else:
+                print(f"⚠️ Warm-up attempt failed: {error_type}")
+            
+            # Try again in 15 seconds
+            threading.Timer(15.0, warmup_groq_service).start()
             return False
-        elif response:
+        elif response and 'ready' in response.lower():
             elapsed = time.time() - start_time
-            print(f"✅ {api_provider.upper()} warmed up in {elapsed:.2f}s")
+            print(f"✅ Groq warmed up in {elapsed:.2f}s")
             
             with warmup_lock:
                 warmup_complete = True
+                api_available = True
                 
             return True
         else:
-            print("⚠️ Warm-up attempt failed: No response")
-            threading.Timer(30.0, warmup_ai_service).start()
+            print("⚠️ Warm-up attempt failed: Unexpected response")
+            threading.Timer(15.0, warmup_groq_service).start()
             return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        threading.Timer(30.0, warmup_ai_service).start()
+        threading.Timer(15.0, warmup_groq_service).start()
         return False
 
-def keep_ai_warm():
-    """Periodically send requests to keep AI service alive"""
+def keep_service_warm():
+    """Periodically send requests to keep Groq service responsive"""
     global last_activity_time
     
     while True:
-        time.sleep(300)  # Check every 5 minutes
+        time.sleep(180)  # Check every 3 minutes
         
         try:
-            # Check if we've been inactive for more than 10 minutes
+            # Check if we've been inactive for more than 5 minutes
             inactive_time = datetime.now() - last_activity_time
             
-            if api_config and inactive_time.total_seconds() > 600:  # 10 minutes
-                print(f"♨️ Keeping {api_provider.upper()} warm...")
+            if GROQ_API_KEY and inactive_time.total_seconds() > 300:  # 5 minutes
+                print(f"♨️ Keeping Groq warm...")
                 
                 try:
                     # Send a minimal request
-                    response = call_ai_api(
+                    response = call_groq_api(
                         prompt="Ping - just say 'pong'",
                         max_tokens=5,
-                        timeout=20
+                        timeout=15
                     )
-                    if response and not isinstance(response, dict):
+                    if response and 'pong' in response.lower():
                         print("✅ Keep-alive ping successful")
                     else:
                         print("⚠️ Keep-alive ping got unexpected response")
@@ -277,20 +219,25 @@ def update_activity():
     last_activity_time = datetime.now()
 
 # Start warm-up on app start
-if api_config:
-    print(f"🚀 Starting {api_provider.upper()} warm-up...")
-    warmup_thread = threading.Thread(target=warmup_ai_service, daemon=True)
+if GROQ_API_KEY:
+    print(f"🚀 Starting Groq warm-up...")
+    print(f"🤖 Using model: {GROQ_MODEL}")
+    warmup_thread = threading.Thread(target=warmup_groq_service, daemon=True)
     warmup_thread.start()
     
     # Start keep-warm thread
-    keep_warm_thread = threading.Thread(target=keep_ai_warm, daemon=True)
+    keep_warm_thread = threading.Thread(target=keep_service_warm, daemon=True)
     keep_warm_thread.start()
     print("✅ Keep-warm thread started")
+else:
+    print("⚠️ WARNING: No Groq API key found!")
+    print("Please set GROQ_API_KEY in .env file")
+    print("Get your API key from: https://console.groq.com/keys")
 
 @app.route('/')
 def home():
     """Root route - API landing page"""
-    global warmup_complete, last_activity_time, api_provider, model
+    global warmup_complete, last_activity_time
     
     update_activity()
     
@@ -298,7 +245,7 @@ def home():
     inactive_minutes = int(inactive_time.total_seconds() / 60)
     
     warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
-    provider_display = api_provider.upper() if api_provider else "Not Configured"
+    model_info = GROQ_MODELS.get(GROQ_MODEL, {'name': GROQ_MODEL, 'provider': 'Groq'})
     
     return f'''
     <!DOCTYPE html>
@@ -507,21 +454,31 @@ def home():
             color: #2196f3;
             font-weight: 600;
         }}
+        
+        .model-badge {{
+            display: inline-block;
+            background: linear-gradient(90deg, #00b09b, #96c93d);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            margin-left: 10px;
+        }}
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🤖 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis • Always Active</p>
+        <h1>🚀 Resume Analyzer API</h1>
+        <p class="subtitle">AI-powered resume analysis • Ultra-fast Groq API • Always Active</p>
         
         <div class="api-status">
-            ✅ API IS RUNNING
+            ⚡ GROQ API IS RUNNING
         </div>
         
         <div class="warmup-status">
             <div class="warmup-dot"></div>
             <div>
-                <strong>AI Service Status:</strong> {warmup_status}
+                <strong>Groq Service Status:</strong> {warmup_status}
                 <br>
                 <small>Last activity: {inactive_minutes} minute(s) ago</small>
             </div>
@@ -530,19 +487,23 @@ def home():
         <div class="status-card">
             <div class="status-item">
                 <span class="status-label">Service Status:</span>
-                <span class="status-value">Always Active ♨️</span>
+                <span class="status-value">Always Active ⚡</span>
             </div>
             <div class="status-item">
                 <span class="status-label">AI Provider:</span>
-                <span class="status-value info">{provider_display}</span>
+                <span class="status-value info">GROQ</span>
             </div>
             <div class="status-item">
                 <span class="status-label">Model:</span>
-                <span class="status-value">{model}</span>
+                <span class="status-value">{model_info['name']} <span class="model-badge">{model_info['provider']}</span></span>
             </div>
             <div class="status-item">
-                <span class="status-label">AI Service Status:</span>
-                {'<span class="success">✅ Warmed Up</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
+                <span class="status-label">API Status:</span>
+                {'<span class="success">✅ Available</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
+            </div>
+            <div class="status-item">
+                <span class="status-label">Context Length:</span>
+                <span class="status-value">{model_info['context_length']:,} tokens</span>
             </div>
             <div class="status-item">
                 <span class="status-label">Upload Folder:</span>
@@ -568,13 +529,13 @@ def home():
             <div class="endpoint">
                 <span class="method">GET</span>
                 <span class="path">/quick-check</span>
-                <p class="description">Quick AI service availability check</p>
+                <p class="description">Quick Groq API availability check</p>
             </div>
             
             <div class="endpoint">
                 <span class="method">GET</span>
                 <span class="path">/warmup</span>
-                <p class="description">Force warm-up AI service connection</p>
+                <p class="description">Force warm-up Groq API connection</p>
             </div>
             
             <div class="endpoint">
@@ -598,20 +559,20 @@ def home():
             <div class="endpoint">
                 <span class="method">GET</span>
                 <span class="path">/models</span>
-                <p class="description">List available AI models</p>
+                <p class="description">List available Groq models</p>
             </div>
         </div>
         
         <div class="buttons">
             <a href="/health" class="btn">Check Health</a>
-            <a href="/warmup" class="btn btn-warmup">Warm Up AI Service</a>
+            <a href="/warmup" class="btn btn-warmup">Warm Up Groq API</a>
             <a href="/models" class="btn">Available Models</a>
             <a href="/ping" class="btn btn-secondary">Ping Service</a>
         </div>
         
         <div class="footer">
-            <p>Powered by Flask & AI Services | Deployed on Render | Always Active Mode</p>
-            <p>AI Service: {provider_display} | Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
+            <p>Powered by Flask & Groq API | Deployed on Render | Always Active Mode</p>
+            <p>AI Service: GROQ | Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
         </div>
     </div>
 </body>
@@ -690,7 +651,7 @@ def extract_text_from_txt(file_path):
         return f"Error reading TXT: {str(e)}"
 
 def fallback_response(reason, filename=None):
-    """Return a fallback response when AI fails"""
+    """Return a fallback response when Groq API fails"""
     update_activity()
     
     # Try to extract name from filename
@@ -707,35 +668,36 @@ def fallback_response(reason, filename=None):
         "candidate_name": candidate_name,
         "skills_matched": ["AI service is initializing", "Please try again in a moment"],
         "skills_missing": ["Detailed analysis coming soon", "Service warming up"],
-        "experience_summary": f"The AI analysis service is currently warming up. The {api_provider} model ({model}) is loading and will be ready shortly.",
-        "education_summary": f"Educational background analysis will be available once the {model} model is fully loaded.",
+        "experience_summary": f"The Groq AI analysis service is currently warming up. The {GROQ_MODEL} model is loading and will be ready shortly.",
+        "education_summary": f"Educational background analysis will be available once the {GROQ_MODEL} model is fully loaded.",
         "overall_score": 50,
         "recommendation": "Service Warming Up - Please Retry",
-        "key_strengths": ["Fast analysis once model is loaded", "Accurate skill matching"],
-        "areas_for_improvement": ["Please wait for model to load", "Try again in 30 seconds"],
-        "ai_provider": api_provider,
+        "key_strengths": ["Ultra-fast analysis once model is loaded", "Accurate skill matching"],
+        "areas_for_improvement": ["Please wait for model to load", "Try again in 15 seconds"],
+        "ai_provider": "groq",
         "ai_status": "Warming up"
     }
 
 def analyze_resume_with_ai(resume_text, job_description, filename=None):
-    """Use AI to analyze resume against job description"""
+    """Use Groq API to analyze resume against job description"""
     update_activity()
     
-    if not api_config:
-        print("❌ No AI service configured.")
+    if not GROQ_API_KEY:
+        print("❌ No Groq API key configured.")
         return fallback_response("API Configuration Error", filename)
     
     # Check if warm-up is complete
     with warmup_lock:
         if not warmup_complete:
-            print(f"⚠️ {api_provider.upper()} not warmed up yet, analysis may be slower")
+            print(f"⚠️ Groq API not warmed up yet, analysis may be slower")
     
     # Truncate text for better performance
-    resume_text = resume_text[:3000]
-    job_description = job_description[:1000]
+    resume_text = resume_text[:4000]  # Groq can handle more context
+    job_description = job_description[:1500]
     
-    # Create a well-structured prompt
-    prompt = f"""Analyze this resume against the job description and provide analysis in JSON format.
+    # Create a well-structured prompt for Groq
+    prompt = f"""You are an expert resume analyzer and recruitment specialist. 
+Analyze this resume against the job description and provide a comprehensive analysis.
 
 RESUME:
 {resume_text}
@@ -747,62 +709,53 @@ Provide analysis in this exact JSON format with these keys:
 {{
     "candidate_name": "Extract name from resume or use 'Professional Candidate'",
     "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5"],
-    "skills_missing": ["skill1", "skill2", "skill3", "skill4"],
-    "experience_summary": "2-3 sentence summary of work experience",
-    "education_summary": "2-3 sentence summary of education",
+    "skills_missing": ["skill1", "skill2", "skill3"],
+    "experience_summary": "2-3 sentence summary of work experience relevance to the job",
+    "education_summary": "1-2 sentence summary of education and certifications",
     "overall_score": 75,
     "recommendation": "Highly Recommended/Recommended/Moderately Recommended/Needs Improvement",
     "key_strengths": ["strength1", "strength2", "strength3"],
     "areas_for_improvement": ["improvement1", "improvement2"]
 }}
 
-IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown formatting."""
+IMPORTANT: 
+1. Extract the candidate name from the resume if possible
+2. Be specific about skills - match them exactly to job requirements
+3. Overall score should reflect how well the resume matches the job description (0-100)
+4. Return ONLY the JSON object, no other text or markdown formatting."""
 
     try:
-        print(f"🤖 Sending to {api_provider.upper()}...")
+        print(f"⚡ Sending to Groq API ({GROQ_MODEL})...")
         start_time = time.time()
         
-        # Try to get response
-        response = call_ai_api(
+        # Call Groq API
+        response = call_groq_api(
             prompt=prompt,
-            max_tokens=600,
-            temperature=0.4,
-            timeout=90
+            max_tokens=800,
+            temperature=0.3,
+            timeout=45  # Groq is typically faster
         )
         
         if isinstance(response, dict) and 'error' in response:
             error_type = response.get('error')
-            if error_type == 'model_loading':
-                print("❌ Model is still loading, returning fallback")
-                return fallback_response("Model Loading", filename)
-            elif error_type == 'timeout':
-                print("❌ AI service timeout")
-                return fallback_response("AI Service Timeout", filename)
-            elif error_type == 'rate_limit':
+            if error_type == 'rate_limit':
                 print("❌ Rate limit exceeded")
                 return fallback_response("Rate Limit Exceeded", filename)
+            elif error_type == 'timeout':
+                print("❌ Groq API timeout")
+                return fallback_response("Groq API Timeout", filename)
+            elif error_type == 'invalid_api_key':
+                print("❌ Invalid Groq API key")
+                return fallback_response("Invalid API Key", filename)
             else:
-                print(f"❌ AI service error: {error_type}")
-                return fallback_response(f"AI Service Error: {error_type}", filename)
+                print(f"❌ Groq API error: {error_type}")
+                return fallback_response(f"Groq API Error: {error_type}", filename)
         
         elapsed_time = time.time() - start_time
-        print(f"✅ {api_provider.upper()} response in {elapsed_time:.2f} seconds")
-        
-        # Extract text from response
-        if isinstance(response, list) and len(response) > 0:
-            if isinstance(response[0], dict) and 'generated_text' in response[0]:
-                result_text = response[0]['generated_text']
-            else:
-                result_text = str(response[0])
-        elif isinstance(response, dict) and 'generated_text' in response:
-            result_text = response['generated_text']
-        elif isinstance(response, str):
-            result_text = response
-        else:
-            result_text = str(response)
+        print(f"✅ Groq API response in {elapsed_time:.2f} seconds")
         
         # Clean response
-        result_text = result_text.strip()
+        result_text = response.strip()
         print(f"📝 Raw response (first 500 chars): {result_text[:500]}...")
         
         # Try to find JSON in the response
@@ -831,14 +784,14 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
                     "candidate_name": "Professional Candidate",
                     "skills_matched": ["AI analysis completed", "Check specific match details"],
                     "skills_missing": ["Review detailed analysis for missing skills"],
-                    "experience_summary": f"Analysis completed using {api_provider.upper()}. The AI has processed your resume and job description.",
+                    "experience_summary": f"Analysis completed using Groq {GROQ_MODEL}. The AI has processed your resume and job description.",
                     "education_summary": "Educational qualifications have been evaluated by the AI model.",
                     "overall_score": 65,
                     "recommendation": "Consider for Review",
-                    "key_strengths": ["AI-powered analysis", "Quick processing", "Comprehensive evaluation"],
+                    "key_strengths": ["AI-powered analysis", "Ultra-fast processing", "Comprehensive evaluation"],
                     "areas_for_improvement": ["Review specific skill requirements"],
-                    "ai_provider": api_provider,
-                    "ai_status": "Warmed up"
+                    "ai_provider": "groq",
+                    "ai_status": "Warmed up" if warmup_complete else "Warming up"
                 }
             else:
                 return fallback_response("JSON Parse Error", filename)
@@ -884,17 +837,19 @@ IMPORTANT: Return ONLY the JSON object, no other text. Do not include markdown f
                 analysis[field] = str(analysis[field])
         
         # Add AI provider info
-        analysis['ai_provider'] = api_provider
+        analysis['ai_provider'] = "groq"
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
+        analysis['ai_model'] = GROQ_MODEL
+        analysis['response_time'] = f"{elapsed_time:.2f}s"
         
         print(f"✅ Analysis completed for: {analysis['candidate_name']} (Score: {analysis['overall_score']})")
         
         return analysis
         
     except Exception as e:
-        print(f"❌ AI Analysis Error: {str(e)}")
+        print(f"❌ Groq Analysis Error: {str(e)}")
         traceback.print_exc()
-        return fallback_response(f"AI Service Error: {str(e)[:100]}", filename)
+        return fallback_response(f"Groq API Error: {str(e)[:100]}", filename)
 
 def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     """Create a beautiful Excel report with the analysis"""
@@ -909,6 +864,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     header_font = Font(bold=True, color="FFFFFF", size=12)
     subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
     subheader_font = Font(bold=True, size=11)
+    groq_fill = PatternFill(start_color="00B09B", end_color="96C93D", fill_type="solid")  # Groq gradient
     border = Border(
         left=Side(style='thin'),
         right=Side(style='thin'),
@@ -925,9 +881,9 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     # Title
     ws.merge_cells(f'A{row}:B{row}')
     cell = ws[f'A{row}']
-    cell.value = "RESUME ANALYSIS REPORT"
+    cell.value = "⚡ GROQ RESUME ANALYSIS REPORT"
     cell.font = Font(bold=True, size=16, color="FFFFFF")
-    cell.fill = PatternFill(start_color="203864", end_color="203864", fill_type="solid")
+    cell.fill = groq_fill
     cell.alignment = Alignment(horizontal='center', vertical='center')
     row += 2
     
@@ -944,16 +900,16 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     ws[f'B{row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     row += 1
     
-    ws[f'A{row}'] = "AI Model"
-    ws[f'A{row}'].font = subheader_font
-    ws[f'A{row}'].fill = subheader_fill
-    ws[f'B{row}'] = model
-    row += 1
-    
     ws[f'A{row}'] = "AI Provider"
     ws[f'A{row}'].font = subheader_font
     ws[f'A{row}'].fill = subheader_fill
-    ws[f'B{row}'] = api_provider.upper() if api_provider else 'N/A'
+    ws[f'B{row}'] = "GROQ"
+    row += 1
+    
+    ws[f'A{row}'] = "AI Model"
+    ws[f'A{row}'].font = subheader_font
+    ws[f'A{row}'].fill = subheader_fill
+    ws[f'B{row}'] = GROQ_MODEL
     row += 2
     
     # Overall Score
@@ -1156,17 +1112,17 @@ def analyze_resume():
         print(f"✅ Extracted {len(resume_text)} characters in {extraction_time:.2f}s")
         
         # Check API configuration
-        if not api_config:
-            print("❌ No AI service configured")
-            return jsonify({'error': 'AI service not configured. Please set API keys in environment variables'}), 500
+        if not GROQ_API_KEY:
+            print("❌ No Groq API key configured")
+            return jsonify({'error': 'Groq API not configured. Please set GROQ_API_KEY in environment variables'}), 500
         
-        # Analyze with AI
-        print("🤖 Starting AI analysis...")
+        # Analyze with Groq API
+        print(f"⚡ Starting Groq API analysis ({GROQ_MODEL})...")
         ai_start = time.time()
         analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename)
         ai_time = time.time() - ai_start
         
-        print(f"✅ AI analysis completed in {ai_time:.2f}s")
+        print(f"✅ Groq API analysis completed in {ai_time:.2f}s")
         
         # Create Excel report
         print("📊 Creating Excel report...")
@@ -1182,7 +1138,8 @@ def analyze_resume():
         
         # Return analysis
         analysis['excel_filename'] = os.path.basename(excel_path)
-        analysis['ai_model'] = model
+        analysis['ai_model'] = GROQ_MODEL
+        analysis['ai_provider'] = "groq"
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['response_time'] = f"{ai_time:.2f}s"
         
@@ -1233,9 +1190,9 @@ def analyze_resume_batch():
             return jsonify({'error': 'Maximum 5 resumes allowed per batch for free tier'}), 400
         
         # Check API configuration
-        if not api_config:
-            print("❌ No AI service configured")
-            return jsonify({'error': 'AI service not configured'}), 500
+        if not GROQ_API_KEY:
+            print("❌ No Groq API key configured")
+            return jsonify({'error': 'Groq API not configured'}), 500
         
         # Prepare batch analysis
         all_analyses = []
@@ -1287,7 +1244,7 @@ def analyze_resume_batch():
                     os.remove(file_path)
                     continue
                 
-                # Analyze
+                # Analyze with Groq API
                 analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename)
                 analysis['filename'] = resume_file.filename
                 analysis['original_filename'] = resume_file.filename
@@ -1300,9 +1257,9 @@ def analyze_resume_batch():
                 
                 print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
                 
-                # Add delay between requests to avoid rate limiting
+                # Add small delay between requests to avoid rate limiting
                 if idx < len(resume_files) - 1:
-                    time.sleep(2)
+                    time.sleep(1)
                 
             except Exception as e:
                 error_msg = f"Processing error: {str(e)[:100]}"
@@ -1339,8 +1296,8 @@ def analyze_resume_batch():
             'errors': errors,
             'batch_excel_filename': os.path.basename(excel_path) if excel_path else None,
             'analyses': all_analyses,
-            'model_used': model,
-            'ai_provider': api_provider,
+            'model_used': GROQ_MODEL,
+            'ai_provider': "groq",
             'ai_status': "Warmed up" if warmup_complete else "Warming up",
             'processing_time': f"{time.time() - start_time:.2f}s"
         }
@@ -1375,6 +1332,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
     header_font = Font(bold=True, color="FFFFFF", size=12)
     subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
     subheader_font = Font(bold=True, size=11)
+    groq_fill = PatternFill(start_color="00B09B", end_color="96C93D", fill_type="solid")
     border = Border(
         left=Side(style='thin'),
         right=Side(style='thin'),
@@ -1392,17 +1350,17 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
     # Title
     ws_summary.merge_cells('A1:E1')
     title_cell = ws_summary['A1']
-    title_cell.value = "BATCH RESUME ANALYSIS REPORT"
+    title_cell.value = "⚡ GROQ BATCH RESUME ANALYSIS"
     title_cell.font = Font(bold=True, size=16, color="FFFFFF")
-    title_cell.fill = PatternFill(start_color="203864", end_color="203864", fill_type="solid")
+    title_cell.fill = groq_fill
     title_cell.alignment = Alignment(horizontal='center', vertical='center')
     
     # Summary Information
     summary_info = [
         ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         ("Total Resumes", len(analyses)),
-        ("AI Model", model),
-        ("AI Provider", api_provider.upper() if api_provider else "Unknown"),
+        ("AI Provider", "GROQ"),
+        ("AI Model", GROQ_MODEL),
         ("Job Description", job_description[:100] + ("..." if len(job_description) > 100 else "")),
     ]
     
@@ -1557,25 +1515,25 @@ def download_report(filename):
 
 @app.route('/warmup', methods=['GET'])
 def force_warmup():
-    """Force warm-up AI service"""
+    """Force warm-up Groq API"""
     update_activity()
     
     try:
-        if not api_config:
+        if not GROQ_API_KEY:
             return jsonify({
                 'status': 'error',
-                'message': 'AI service not configured',
+                'message': 'Groq API not configured',
                 'warmup_complete': False
             })
         
-        result = warmup_ai_service()
+        result = warmup_groq_service()
         
         return jsonify({
             'status': 'success' if result else 'error',
-            'message': f'{api_provider.upper()} warmed up successfully' if result else 'Warm-up failed',
+            'message': f'Groq API warmed up successfully' if result else 'Warm-up failed',
             'warmup_complete': warmup_complete,
-            'ai_provider': api_provider,
-            'model': model,
+            'ai_provider': 'groq',
+            'model': GROQ_MODEL,
             'timestamp': datetime.now().isoformat()
         })
         
@@ -1588,14 +1546,14 @@ def force_warmup():
 
 @app.route('/quick-check', methods=['GET'])
 def quick_check():
-    """Quick endpoint to check if AI service is responsive"""
+    """Quick endpoint to check if Groq API is responsive"""
     update_activity()
     
     try:
-        if not api_config:
+        if not GROQ_API_KEY:
             return jsonify({
                 'available': False, 
-                'reason': 'AI service not configured',
+                'reason': 'Groq API not configured',
                 'warmup_complete': warmup_complete
             })
         
@@ -1603,22 +1561,22 @@ def quick_check():
         if not warmup_complete:
             return jsonify({
                 'available': False,
-                'reason': f'{api_provider.upper()} is warming up',
+                'reason': 'Groq API is warming up',
                 'warmup_complete': False,
-                'ai_provider': api_provider,
-                'model': model,
+                'ai_provider': 'groq',
+                'model': GROQ_MODEL,
                 'suggestion': 'Try again in a few seconds or use /warmup endpoint'
             })
         
         # Quick test
         start_time = time.time()
         
-        def ai_service_check():
+        def groq_service_check():
             try:
-                response = call_ai_api(
+                response = call_groq_api(
                     prompt="Say 'ready'",
                     max_tokens=10,
-                    timeout=20
+                    timeout=10
                 )
                 return response
             except Exception as e:
@@ -1626,8 +1584,8 @@ def quick_check():
         
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(ai_service_check)
-                response = future.result(timeout=30)
+                future = executor.submit(groq_service_check)
+                response = future.result(timeout=15)
             
             response_time = time.time() - start_time
             
@@ -1637,17 +1595,17 @@ def quick_check():
                     'response_time': f'{response_time:.2f}s',
                     'status': 'error',
                     'error': response.get('error'),
-                    'ai_provider': api_provider,
-                    'model': model,
+                    'ai_provider': 'groq',
+                    'model': GROQ_MODEL,
                     'warmup_complete': warmup_complete
                 })
-            elif response:
+            elif response and 'ready' in response.lower():
                 return jsonify({
                     'available': True,
                     'response_time': f'{response_time:.2f}s',
                     'status': 'ready',
-                    'ai_provider': api_provider,
-                    'model': model,
+                    'ai_provider': 'groq',
+                    'model': GROQ_MODEL,
                     'warmup_complete': True
                 })
             else:
@@ -1655,18 +1613,18 @@ def quick_check():
                     'available': False,
                     'response_time': f'{response_time:.2f}s',
                     'status': 'no_response',
-                    'ai_provider': api_provider,
-                    'model': model,
+                    'ai_provider': 'groq',
+                    'model': GROQ_MODEL,
                     'warmup_complete': warmup_complete
                 })
                 
         except concurrent.futures.TimeoutError:
             return jsonify({
                 'available': False,
-                'reason': 'Request timed out after 30 seconds',
+                'reason': 'Request timed out after 15 seconds',
                 'status': 'timeout',
-                'ai_provider': api_provider,
-                'model': model,
+                'ai_provider': 'groq',
+                'model': GROQ_MODEL,
                 'warmup_complete': warmup_complete
             })
             
@@ -1676,8 +1634,8 @@ def quick_check():
             'available': False,
             'reason': error_msg[:100],
             'status': 'error',
-            'ai_provider': api_provider,
-            'model': model,
+            'ai_provider': 'groq',
+            'model': GROQ_MODEL,
             'warmup_complete': warmup_complete
         })
 
@@ -1690,11 +1648,11 @@ def ping():
         'status': 'pong',
         'timestamp': datetime.now().isoformat(),
         'service': 'resume-analyzer',
-        'ai_provider': api_provider,
+        'ai_provider': 'groq',
         'ai_warmup': warmup_complete,
-        'model': model,
+        'model': GROQ_MODEL,
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
-        'message': f'Service is alive and {api_provider} is warm!' if warmup_complete else f'Service is alive, warming up {api_provider}...'
+        'message': f'Service is alive and Groq is warm!' if warmup_complete else f'Service is alive, warming up Groq...'
     })
 
 @app.route('/health', methods=['GET'])
@@ -1708,51 +1666,59 @@ def health_check():
     return jsonify({
         'status': 'Backend is running!', 
         'timestamp': datetime.now().isoformat(),
-        'ai_provider': api_provider,
-        'ai_provider_configured': bool(api_config),
-        'model': model,
+        'ai_provider': 'groq',
+        'ai_provider_configured': bool(GROQ_API_KEY),
+        'model': GROQ_MODEL,
+        'model_info': GROQ_MODELS.get(GROQ_MODEL, {}),
         'ai_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'upload_folder_path': UPLOAD_FOLDER,
         'inactive_minutes': inactive_minutes,
         'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
-        'version': '4.0.0',
-        'features': ['always_active', 'multi_provider_support', 'batch_processing', 'keep_alive']
+        'version': '5.0.0',
+        'features': ['always_active', 'groq_api_support', 'batch_processing', 'keep_alive', 'ultra_fast']
     })
 
 @app.route('/models', methods=['GET'])
 def list_models():
-    """List available AI models"""
+    """List available Groq models"""
     update_activity()
     
     try:
-        # Available models for different providers
-        huggingface_models = [
-            {'id': 'mistralai/Mistral-7B-Instruct-v0.2', 'name': 'Mistral 7B Instruct', 'provider': 'Hugging Face'},
-            {'id': 'google/flan-t5-xxl', 'name': 'Google Flan-T5 XXL', 'provider': 'Hugging Face'},
-            {'id': 'microsoft/phi-2', 'name': 'Microsoft Phi-2', 'provider': 'Hugging Face'},
-        ]
-        
-        together_models = [
-            {'id': 'mistralai/Mixtral-8x7B-Instruct-v0.1', 'name': 'Mixtral 8x7B Instruct', 'provider': 'Together AI'},
-            {'id': 'meta-llama/Llama-2-70b-chat-hf', 'name': 'Llama 2 70B Chat', 'provider': 'Together AI'},
-            {'id': 'togethercomputer/CodeLlama-34b-Instruct', 'name': 'CodeLlama 34B Instruct', 'provider': 'Together AI'},
-        ]
-        
         return jsonify({
-            'available_models': {
-                'huggingface': huggingface_models,
-                'together': together_models
-            },
-            'current_provider': api_provider,
-            'current_model': model,
-            'documentation': {
-                'huggingface': 'https://huggingface.co/models',
-                'together': 'https://docs.together.ai/docs/models-inference'
-            }
+            'available_models': GROQ_MODELS,
+            'current_model': GROQ_MODEL,
+            'current_model_info': GROQ_MODELS.get(GROQ_MODEL, {}),
+            'documentation': 'https://console.groq.com/docs/models'
         })
     except Exception as e:
         return jsonify({'error': str(e)})
+
+@app.route('/switch-model/<model_name>', methods=['POST'])
+def switch_model(model_name):
+    """Switch to a different Groq model (for testing)"""
+    update_activity()
+    
+    if model_name not in GROQ_MODELS:
+        return jsonify({
+            'status': 'error',
+            'message': f'Model {model_name} not available',
+            'available_models': list(GROQ_MODELS.keys())
+        })
+    
+    global GROQ_MODEL
+    GROQ_MODEL = model_name
+    
+    # Restart warmup with new model
+    warmup_groq_service()
+    
+    return jsonify({
+        'status': 'success',
+        'message': f'Switched to model: {model_name}',
+        'model': GROQ_MODEL,
+        'model_info': GROQ_MODELS[model_name],
+        'timestamp': datetime.now().isoformat()
+    })
 
 if __name__ == '__main__':
     print("\n" + "="*50)
@@ -1760,20 +1726,20 @@ if __name__ == '__main__':
     print("="*50)
     port = int(os.environ.get('PORT', 5002))
     print(f"📍 Server: http://localhost:{port}")
-    print(f"🤖 AI Provider: {api_provider.upper() if api_provider else 'NOT CONFIGURED'}")
-    print(f"🧠 Model: {model}")
+    print(f"⚡ AI Provider: GROQ")
+    print(f"🤖 Model: {GROQ_MODEL}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print("✅ Always Active Mode: Enabled")
-    print("✅ AI Keep-Warm: Enabled")
+    print("✅ Groq Keep-Warm: Enabled")
     print("✅ Batch Processing: Enabled")
+    print("✅ Ultra-fast Inference: Enabled")
     print("="*50 + "\n")
     
-    if not api_config:
-        print("⚠️  WARNING: No API key found!")
-        print("Please set one of the following in Render environment variables:")
-        print("1. HUGGINGFACE_API_KEY (Get from: https://huggingface.co/settings/tokens)")
-        print("2. TOGETHER_API_KEY (Get from: https://api.together.ai)")
-        print("\nNote: Hugging Face Router API may require payment for some models")
+    if not GROQ_API_KEY:
+        print("⚠️  WARNING: No Groq API key found!")
+        print("Please set GROQ_API_KEY in Render environment variables")
+        print("Get your API key from: https://console.groq.com/keys")
+        print("\nGroq offers free tier with 25 requests per minute")
     
     # Use PORT environment variable
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
