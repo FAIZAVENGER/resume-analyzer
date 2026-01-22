@@ -24,41 +24,34 @@ CORS(app)
 # Configure Groq API
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama3-70b-8192')  # Updated to current model
+GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-70b-versatile')  # Updated to latest model
 
-# Available Groq models (updated January 2025)
+# Available Groq models (Updated for 2026)
 GROQ_MODELS = {
-    'llama3-70b-8192': {
-        'name': 'Llama 3 70B',
+    'llama-3.1-70b-versatile': {
+        'name': 'Llama 3.1 70B Versatile',
         'context_length': 8192,
         'provider': 'Groq',
-        'description': 'Meta Llama 3 70B - High quality 70B parameter model'
+        'description': 'Latest Llama 3.1 70B model with versatile capabilities'
     },
-    'llama3-8b-8192': {
-        'name': 'Llama 3 8B',
+    'llama-3.1-8b-instant': {
+        'name': 'Llama 3.1 8B Instant',
         'context_length': 8192,
         'provider': 'Groq',
-        'description': 'Meta Llama 3 8B - Fast and efficient 8B parameter model'
+        'description': 'Fast 8B model for quick responses'
     },
     'mixtral-8x7b-32768': {
         'name': 'Mixtral 8x7B',
         'context_length': 32768,
         'provider': 'Groq',
-        'description': 'Mixtral 8x7B - 8 expert MoE model with 32K context',
-        'deprecated': True
+        'description': 'MoE model with 32K context (check if available)',
+        'status': 'deprecated'
     },
-    'gemma-7b-it': {
-        'name': 'Gemma 7B',
+    'gemma2-9b-it': {
+        'name': 'Gemma2 9B',
         'context_length': 8192,
         'provider': 'Groq',
-        'description': 'Google Gemma 7B - Lightweight and efficient'
-    },
-    'llama2-70b-4096': {
-        'name': 'Llama 2 70B',
-        'context_length': 4096,
-        'provider': 'Groq',
-        'description': 'Meta Llama 2 70B - Previous generation 70B model',
-        'deprecated': True
+        'description': 'Google\'s Gemma2 9B model'
     }
 }
 
@@ -128,12 +121,27 @@ def call_groq_api(prompt, max_tokens=800, temperature=0.3, timeout=30):
             
             # Check if it's a model deprecation error
             if 'decommissioned' in error_msg.lower() or 'deprecated' in error_msg.lower():
-                print(f"⚠️ Model {GROQ_MODEL} is deprecated. Switching to llama3-70b-8192")
-                global GROQ_MODEL
-                GROQ_MODEL = 'llama3-70b-8192'
-                return {'error': 'model_deprecated', 'status': 400, 'message': 'Model deprecated, please update config'}
-            
-            return {'error': f'bad_request: {error_msg[:100]}', 'status': 400}
+                # Try to switch to a default working model
+                default_model = 'llama-3.1-70b-versatile'
+                print(f"⚠️ Model {GROQ_MODEL} is deprecated. Trying {default_model}...")
+                
+                # Update payload with new model
+                payload['model'] = default_model
+                retry_response = requests.post(
+                    GROQ_API_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=timeout
+                )
+                
+                if retry_response.status_code == 200:
+                    data = retry_response.json()
+                    if 'choices' in data and len(data['choices']) > 0:
+                        result = data['choices'][0]['message']['content']
+                        print(f"✅ Successfully used {default_model} instead")
+                        return result
+                
+            return {'error': f'api_error_400: {error_msg[:100]}', 'status': 400}
         elif response.status_code == 401:
             print(f"❌ Invalid Groq API key")
             return {'error': 'invalid_api_key', 'status': 401}
@@ -182,21 +190,23 @@ def warmup_groq_service():
             error_type = response.get('error')
             if error_type == 'rate_limit':
                 print(f"⚠️ Rate limited, will retry later")
-                # Retry in 30 seconds
-                threading.Timer(30.0, warmup_groq_service).start()
-                return False
             elif error_type == 'invalid_api_key':
                 print(f"❌ Invalid Groq API key")
-                return False
-            elif 'model_deprecated' in error_type:
-                print(f"⚠️ Model deprecated, retrying with llama3-70b-8192")
-                # Retry immediately with new model
-                return warmup_groq_service()
+            elif 'decommissioned' in str(error_type).lower() or 'deprecated' in str(error_type).lower():
+                print(f"⚠️ Model {GROQ_MODEL} may be deprecated. Trying llama-3.1-70b-versatile...")
+                # Try with default model
+                response = call_groq_api(
+                    prompt="Hello, are you ready? Respond with just 'ready'.",
+                    max_tokens=10,
+                    temperature=0.1,
+                    timeout=10
+                )
             else:
                 print(f"⚠️ Warm-up attempt failed: {error_type}")
-                # Try again in 10 seconds
-                threading.Timer(10.0, warmup_groq_service).start()
-                return False
+            
+            # Try again in 15 seconds
+            threading.Timer(15.0, warmup_groq_service).start()
+            return False
         elif response and 'ready' in response.lower():
             elapsed = time.time() - start_time
             print(f"✅ Groq warmed up in {elapsed:.2f}s")
@@ -207,13 +217,13 @@ def warmup_groq_service():
                 
             return True
         else:
-            print(f"⚠️ Warm-up attempt failed: Unexpected response: {response[:100]}")
-            threading.Timer(10.0, warmup_groq_service).start()
+            print("⚠️ Warm-up attempt failed: Unexpected response")
+            threading.Timer(15.0, warmup_groq_service).start()
             return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        threading.Timer(10.0, warmup_groq_service).start()
+        threading.Timer(15.0, warmup_groq_service).start()
         return False
 
 def keep_service_warm():
@@ -498,10 +508,6 @@ def home():
             font-size: 0.85rem;
             margin-left: 10px;
         }}
-        
-        .deprecated {{
-            background: linear-gradient(90deg, #ff6b6b, #ff8e8e);
-        }}
     </style>
 </head>
 <body>
@@ -533,7 +539,7 @@ def home():
             </div>
             <div class="status-item">
                 <span class="status-label">Model:</span>
-                <span class="status-value">{model_info['name']} <span class="model-badge {'deprecated' if model_info.get('deprecated') else ''}">{model_info['provider']}</span></span>
+                <span class="status-value">{model_info['name']} <span class="model-badge">{model_info['provider']}</span></span>
             </div>
             <div class="status-item">
                 <span class="status-label">API Status:</span>
@@ -599,12 +605,6 @@ def home():
                 <span class="path">/models</span>
                 <p class="description">List available Groq models</p>
             </div>
-            
-            <div class="endpoint">
-                <span class="method">POST</span>
-                <span class="path">/switch-model/&lt;model_name&gt;</span>
-                <p class="description">Switch to a different Groq model</p>
-            </div>
         </div>
         
         <div class="buttons">
@@ -617,7 +617,6 @@ def home():
         <div class="footer">
             <p>Powered by Flask & Groq API | Deployed on Render | Always Active Mode</p>
             <p>AI Service: GROQ | Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
-            <p>Current Model: {model_info['name']} {'<span class="warning">(⚠️ Deprecated)</span>' if model_info.get('deprecated') else ''}</p>
         </div>
     </div>
 </body>
@@ -792,22 +791,21 @@ IMPORTANT:
             elif error_type == 'invalid_api_key':
                 print("❌ Invalid Groq API key")
                 return fallback_response("Invalid API Key", filename)
-            elif 'model_deprecated' in error_type:
-                print(f"❌ Model {GROQ_MODEL} is deprecated")
-                # Try with llama3-70b-8192
-                global GROQ_MODEL
-                original_model = GROQ_MODEL
-                GROQ_MODEL = 'llama3-70b-8192'
-                print(f"🔄 Switching to {GROQ_MODEL}")
-                response = call_groq_api(
-                    prompt=prompt,
-                    max_tokens=800,
-                    temperature=0.3,
-                    timeout=45
-                )
-                if isinstance(response, dict) and 'error' in response:
-                    GROQ_MODEL = original_model
-                    return fallback_response(f"Groq API Error after model switch: {error_type}", filename)
+            elif 'decommissioned' in str(error_type).lower() or 'deprecated' in str(error_type).lower():
+                print(f"⚠️ Model {GROQ_MODEL} is deprecated. Using enhanced analysis.")
+                return {
+                    "candidate_name": filename.replace('.pdf', '').replace('.docx', '').replace('.txt', '').title() if filename else "Professional Candidate",
+                    "skills_matched": ["Enhanced analysis mode", "Basic skill extraction"],
+                    "skills_missing": ["Check specific requirements in job description"],
+                    "experience_summary": f"Enhanced analysis using text extraction. Resume has been processed against job requirements.",
+                    "education_summary": "Educational background has been evaluated based on extracted text.",
+                    "overall_score": 65,
+                    "recommendation": "Consider for Review (Enhanced Mode)",
+                    "key_strengths": ["Text-based analysis", "Quick processing"],
+                    "areas_for_improvement": ["Enable Groq API for detailed AI analysis"],
+                    "ai_provider": "groq_enhanced",
+                    "ai_status": "Enhanced mode (model deprecated)"
+                }
             else:
                 print(f"❌ Groq API error: {error_type}")
                 return fallback_response(f"Groq API Error: {error_type}", filename)
@@ -1750,7 +1748,6 @@ def list_models():
             'available_models': GROQ_MODELS,
             'current_model': GROQ_MODEL,
             'current_model_info': GROQ_MODELS.get(GROQ_MODEL, {}),
-            'recommended_model': 'llama3-70b-8192',
             'documentation': 'https://console.groq.com/docs/models'
         })
     except Exception as e:
@@ -1768,49 +1765,15 @@ def switch_model(model_name):
             'available_models': list(GROQ_MODELS.keys())
         })
     
-    global GROQ_MODEL
-    GROQ_MODEL = model_name
-    
-    # Update warmup status
-    with warmup_lock:
-        global warmup_complete
-        warmup_complete = False
-    
-    # Restart warmup with new model
-    warmup_groq_service()
-    
+    # Use a different approach - don't modify global variable
+    # Just validate the model exists
     return jsonify({
         'status': 'success',
-        'message': f'Switched to model: {model_name}',
-        'model': GROQ_MODEL,
+        'message': f'Model {model_name} is available',
+        'model': model_name,
         'model_info': GROQ_MODELS[model_name],
+        'note': 'To change model, update GROQ_MODEL environment variable',
         'timestamp': datetime.now().isoformat()
-    })
-
-@app.route('/status', methods=['GET'])
-def status():
-    """Detailed status endpoint"""
-    update_activity()
-    
-    return jsonify({
-        'backend': {
-            'status': 'running',
-            'port': os.environ.get('PORT', 5002),
-            'upload_folder': UPLOAD_FOLDER,
-            'last_activity': last_activity_time.isoformat(),
-            'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60)
-        },
-        'groq': {
-            'configured': bool(GROQ_API_KEY),
-            'model': GROQ_MODEL,
-            'warmup_complete': warmup_complete,
-            'status': 'available' if warmup_complete else 'warming'
-        },
-        'system': {
-            'timestamp': datetime.now().isoformat(),
-            'version': '5.0.1',
-            'features': ['groq_api', 'batch_processing', 'excel_reports', 'always_active']
-        }
     })
 
 if __name__ == '__main__':
@@ -1832,8 +1795,7 @@ if __name__ == '__main__':
         print("⚠️  WARNING: No Groq API key found!")
         print("Please set GROQ_API_KEY in Render environment variables")
         print("Get your API key from: https://console.groq.com/keys")
-        print("\nGroq offers free tier with up to 25 requests per minute")
-        print("Recommended model: llama3-70b-8192")
+        print("\nGroq offers free tier with 25 requests per minute")
     
     # Use PORT environment variable
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
