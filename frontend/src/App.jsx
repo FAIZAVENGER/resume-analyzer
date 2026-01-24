@@ -15,7 +15,8 @@ import {
   BatteryFull, BatteryMedium, BatteryLow, Signal,
   Cloud, CloudOff, CloudLightning, CloudRain,
   ArrowLeft, ChevronLeft, Home, Grid, Folder,
-  FileSpreadsheet, ClipboardList, Award as AwardIcon
+  FileSpreadsheet, ClipboardList, Award as AwardIcon,
+  FileX
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -513,7 +514,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 180000, // 3 minutes for batch processing
+        timeout: 300000, // 5 minutes for batch processing (increased for 15 resumes)
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -571,6 +572,14 @@ function App() {
       window.open(`${API_BASE_URL}/download/${batchAnalysis.batch_excel_filename}`, '_blank');
     } else {
       setError('No batch analysis report available for download.');
+    }
+  };
+
+  const handleIndividualDownload = (analysisId) => {
+    if (analysisId) {
+      window.open(`${API_BASE_URL}/download-individual/${analysisId}`, '_blank');
+    } else {
+      setError('No individual report available for download.');
     }
   };
 
@@ -704,7 +713,7 @@ function App() {
             {aiStatusInfo.icon} {aiStatusInfo.text}
           </span>
           <span className="status-badge always-active">
-            <ZapIcon size={14} /> Ultra-fast
+            <ZapIcon size={14} /> Always Active
           </span>
           {modelInfo && (
             <span className="status-badge model">
@@ -1174,7 +1183,7 @@ function App() {
       
       <div className="batch-results-grid">
         {batchAnalysis?.analyses?.map((candidate, index) => (
-          <div key={index} className="batch-candidate-card glass" onClick={() => navigateToCandidateDetail(index)}>
+          <div key={index} className="batch-candidate-card glass">
             <div className="batch-card-header">
               <div className="candidate-rank">
                 <div className="rank-badge">#{candidate.rank}</div>
@@ -1241,10 +1250,22 @@ function App() {
             </div>
             
             <div className="batch-card-footer">
-              <button className="view-details-btn">
+              <button 
+                className="view-details-btn"
+                onClick={() => navigateToCandidateDetail(index)}
+              >
                 View Full Details
                 <ChevronRight size={16} />
               </button>
+              {candidate.analysis_id && (
+                <button 
+                  className="download-individual-btn"
+                  onClick={() => handleIndividualDownload(candidate.analysis_id)}
+                  title="Download individual report"
+                >
+                  <FileDown size={16} />
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -1259,7 +1280,7 @@ function App() {
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
             <DownloadCloud size={20} />
-            <span>Download Excel Report</span>
+            <span>Download Full Batch Report</span>
           </button>
           <button className="reset-button" onClick={navigateToMain}>
             <RefreshCw size={20} />
@@ -1299,13 +1320,21 @@ function App() {
             <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
           </div>
           <div className="navigation-actions">
-            <button className="download-report-btn" onClick={() => {
-              if (batchAnalysis?.batch_excel_filename) {
-                window.open(`${API_BASE_URL}/download/${batchAnalysis.batch_excel_filename}`, '_blank');
-              }
-            }}>
+            {candidate.analysis_id && (
+              <button 
+                className="download-report-btn" 
+                onClick={() => handleIndividualDownload(candidate.analysis_id)}
+              >
+                <FileDown size={18} />
+                <span>Download Individual Report</span>
+              </button>
+            )}
+            <button 
+              className="download-report-btn secondary" 
+              onClick={handleBatchDownload}
+            >
               <DownloadCloud size={18} />
-              <span>Download Report</span>
+              <span>Download Full Batch</span>
             </button>
           </div>
         </div>
@@ -1551,24 +1580,25 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Candidate Analysis Complete</h3>
-            <p>Download full batch report or go back to rankings</p>
+            <p>Download individual report or full batch report</p>
           </div>
           <div className="action-buttons">
-            <button className="download-button" onClick={() => {
-              if (batchAnalysis?.batch_excel_filename) {
-                window.open(`${API_BASE_URL}/download/${batchAnalysis.batch_excel_filename}`, '_blank');
-              }
-            }}>
+            {candidate.analysis_id && (
+              <button 
+                className="download-button" 
+                onClick={() => handleIndividualDownload(candidate.analysis_id)}
+              >
+                <FileDown size={20} />
+                <span>Download Individual Report</span>
+              </button>
+            )}
+            <button className="download-button secondary" onClick={handleBatchDownload}>
               <DownloadCloud size={20} />
-              <span>Download Full Report</span>
+              <span>Download Full Batch Report</span>
             </button>
             <button className="reset-button" onClick={navigateBack}>
               <ArrowLeft size={20} />
               <span>Back to Rankings</span>
-            </button>
-            <button className="share-button" onClick={navigateToMain}>
-              <Home size={20} />
-              <span>New Analysis</span>
             </button>
           </div>
         </div>
@@ -1576,36 +1606,38 @@ function App() {
     );
   };
 
+  // Render single analysis view (unchanged from original)
+  const renderSingleAnalysisView = () => (
+    <div className="results-section">
+      <div className="navigation-header glass">
+        <button onClick={() => {
+          setAnalysis(null);
+          setCurrentView('main');
+        }} className="back-button">
+          <ArrowLeft size={20} />
+          <span>Back to Analysis</span>
+        </button>
+        <div className="navigation-title">
+          <h2>⚡ Resume Analysis Results</h2>
+          <p>{analysis.candidate_name}</p>
+        </div>
+        <div className="navigation-actions">
+          <button className="download-report-btn" onClick={handleDownload}>
+            <DownloadCloud size={18} />
+            <span>Download Report</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Rest of the single analysis view (keep original code) */}
+      {/* ... existing single analysis view code ... */}
+    </div>
+  );
+
   // Main render function
   const renderCurrentView = () => {
     if (analysis && !batchAnalysis) {
-      // Single resume analysis view
-      return (
-        <div className="results-section">
-          <div className="navigation-header glass">
-            <button onClick={() => {
-              setAnalysis(null);
-              setCurrentView('main');
-            }} className="back-button">
-              <ArrowLeft size={20} />
-              <span>Back to Analysis</span>
-            </button>
-            <div className="navigation-title">
-              <h2>⚡ Resume Analysis Results</h2>
-              <p>{analysis.candidate_name}</p>
-            </div>
-            <div className="navigation-actions">
-              <button className="download-report-btn" onClick={handleDownload}>
-                <DownloadCloud size={18} />
-                <span>Download Report</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Rest of the single analysis view... */}
-          {/* ... (Keep the existing single analysis view code) ... */}
-        </div>
-      );
+      return renderSingleAnalysisView();
     }
 
     switch (currentView) {
@@ -1800,6 +1832,12 @@ function App() {
                   📊 Up to 15 resumes
                 </div>
               </div>
+              <div className="summary-item">
+                <div className="summary-label">Keep-alive</div>
+                <div className="summary-value info">
+                  ⚡ Always Active
+                </div>
+              </div>
             </div>
             
             <div className="action-buttons-panel">
@@ -1844,6 +1882,10 @@ function App() {
                   <span>Model: {getModelDisplayName(modelInfo)}</span>
                 </div>
               )}
+              <div className="status-indicator active">
+                <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
+                <span>Mode: {batchMode ? 'Batch (15 resumes)' : 'Single'}</span>
+              </div>
             </div>
             
             {backendStatus !== 'ready' && (
@@ -1875,7 +1917,7 @@ function App() {
               <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Groq API offers ultra-fast inference for instant responses • Up to 15 resumes per batch
+              Groq API offers ultra-fast inference for instant responses • Up to 15 resumes per batch • Individual reports available
             </p>
           </div>
           
