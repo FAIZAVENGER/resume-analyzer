@@ -16,6 +16,9 @@ import atexit
 import requests
 import re
 from collections import defaultdict
+import queue
+import asyncio
+import hashlib
 
 # Load environment variables
 load_dotenv()
@@ -69,16 +72,27 @@ warmup_lock = threading.Lock()
 # Get absolute path for uploads folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+REPORTS_FOLDER = os.path.join(BASE_DIR, 'reports')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(REPORTS_FOLDER, exist_ok=True)
 print(f"📁 Upload folder: {UPLOAD_FOLDER}")
+print(f"📁 Reports folder: {REPORTS_FOLDER}")
 
 # Cache for consistent scoring (resume hash -> score)
 score_cache = {}
 cache_lock = threading.Lock()
 
+# Request queue for batch processing
+request_queue = queue.Queue()
+MAX_CONCURRENT_REQUESTS = 3  # Process 3 resumes at a time
+PROCESSING_SEMAPHORE = threading.Semaphore(MAX_CONCURRENT_REQUESTS)
+
+# Service keep-alive
+SERVICE_KEEP_ALIVE_INTERVAL = 60  # Keep alive every 60 seconds
+last_keep_alive = datetime.now()
+
 def calculate_resume_hash(resume_text, job_description):
     """Calculate a hash for caching consistent scores"""
-    import hashlib
     content = f"{resume_text[:500]}{job_description[:500]}".encode('utf-8')
     return hashlib.md5(content).hexdigest()
 
@@ -92,8 +106,34 @@ def set_cached_score(resume_hash, score):
     with cache_lock:
         score_cache[resume_hash] = score
 
-def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_override=None):
-    """Call Groq API with the given prompt"""
+def keep_service_active():
+    """Keep the service always active by making periodic requests"""
+    global last_keep_alive
+    
+    while True:
+        try:
+            time.sleep(SERVICE_KEEP_ALIVE_INTERVAL)
+            
+            # Make a simple request to keep the service active
+            health_check_url = f"http://localhost:{os.environ.get('PORT', 5002)}/ping"
+            try:
+                response = requests.get(health_check_url, timeout=10)
+                print(f"✅ Service keep-alive: {response.status_code}")
+            except:
+                # If we can't reach locally, try the external URL
+                try:
+                    response = requests.get(f"{request.host_url}/ping", timeout=10)
+                    print(f"✅ External keep-alive: {response.status_code}")
+                except Exception as e:
+                    print(f"⚠️ Keep-alive failed: {e}")
+            
+            last_keep_alive = datetime.now()
+            
+        except Exception as e:
+            print(f"⚠️ Keep-alive thread error: {e}")
+
+def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_override=None, retry_count=0):
+    """Call Groq API with the given prompt with retry logic"""
     if not GROQ_API_KEY:
         print("❌ No Groq API key configured")
         return {'error': 'no_api_key', 'status': 500}
@@ -152,9 +192,20 @@ def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_ov
             return {'error': f'api_error_400: {error_msg[:100]}', 'status': 400}
         elif response.status_code == 429:
             print(f"❌ Groq API rate limit exceeded")
+            # Exponential backoff for rate limiting
+            if retry_count < 3:
+                wait_time = (2 ** retry_count) * 5  # 5, 10, 20 seconds
+                print(f"⏳ Rate limited, retrying in {wait_time}s (attempt {retry_count + 1}/3)")
+                time.sleep(wait_time)
+                return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
             return {'error': 'rate_limit', 'status': 429}
         elif response.status_code == 503:
             print(f"❌ Groq API service unavailable")
+            if retry_count < 2:
+                wait_time = 10  # Wait 10 seconds before retry
+                print(f"⏳ Service unavailable, retrying in {wait_time}s")
+                time.sleep(wait_time)
+                return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
             return {'error': 'service_unavailable', 'status': 503}
         else:
             print(f"❌ Groq API Error {response.status_code}: {response.text[:200]}")
@@ -162,9 +213,17 @@ def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_ov
             
     except requests.exceptions.Timeout:
         print(f"❌ Groq API timeout after {timeout}s")
+        if retry_count < 2:
+            print(f"⏳ Timeout, retrying (attempt {retry_count + 1}/3)")
+            return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
         return {'error': 'timeout', 'status': 408}
     except requests.exceptions.ConnectionError:
         print(f"❌ Groq API connection error")
+        if retry_count < 2:
+            wait_time = 5
+            print(f"⏳ Connection error, retrying in {wait_time}s")
+            time.sleep(wait_time)
+            return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
         return {'error': 'connection_error', 'status': 503}
     except Exception as e:
         print(f"❌ Groq API Exception: {str(e)}")
@@ -226,12 +285,12 @@ def keep_service_warm():
     global last_activity_time
     
     while True:
-        time.sleep(180)
+        time.sleep(30)  # Reduced to 30 seconds for more frequent keep-alive
         
         try:
             inactive_time = datetime.now() - last_activity_time
             
-            if GROQ_API_KEY and inactive_time.total_seconds() > 300:
+            if GROQ_API_KEY:
                 print(f"♨️ Keeping Groq warm...")
                 
                 try:
@@ -260,12 +319,21 @@ if GROQ_API_KEY:
     print(f"🚀 Starting Groq warm-up...")
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
     print(f"🤖 Using model: {model_to_use}")
+    
+    # Start warm-up in a separate thread
     warmup_thread = threading.Thread(target=warmup_groq_service, daemon=True)
     warmup_thread.start()
     
+    # Start keep-warm thread
     keep_warm_thread = threading.Thread(target=keep_service_warm, daemon=True)
     keep_warm_thread.start()
+    
+    # Start service keep-alive thread
+    keep_alive_thread = threading.Thread(target=keep_service_active, daemon=True)
+    keep_alive_thread.start()
+    
     print("✅ Keep-warm thread started")
+    print("✅ Service keep-alive thread started")
 else:
     print("⚠️ WARNING: No Groq API key found!")
     print("Please set GROQ_API_KEY in Render environment variables")
@@ -273,12 +341,15 @@ else:
 @app.route('/')
 def home():
     """Root route - API landing page"""
-    global warmup_complete, last_activity_time
+    global warmup_complete, last_activity_time, last_keep_alive
     
     update_activity()
     
     inactive_time = datetime.now() - last_activity_time
     inactive_minutes = int(inactive_time.total_seconds() / 60)
+    
+    keep_alive_time = datetime.now() - last_keep_alive
+    keep_alive_seconds = int(keep_alive_time.total_seconds())
     
     warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
@@ -511,15 +582,31 @@ def home():
             font-size: 0.75rem;
             margin-left: 5px;
         }}
+        
+        .always-active-badge {{
+            display: inline-block;
+            background: linear-gradient(90deg, #ff6b6b, #ffa726);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            margin-left: 10px;
+            animation: pulse 2s infinite;
+        }}
+        
+        @keyframes pulse {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.7; }}
+        }}
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🚀 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis • Latest Groq Models • Always Active</p>
+        <p class="subtitle">AI-powered resume analysis • Latest Groq Models • <span class="always-active-badge">Always Active</span></p>
         
         <div class="api-status">
-            ⚡ GROQ API IS RUNNING
+            ⚡ GROQ API IS RUNNING • ALWAYS ACTIVE
         </div>
         
         <div class="warmup-status">
@@ -527,14 +614,14 @@ def home():
             <div>
                 <strong>Groq Service Status:</strong> {warmup_status}
                 <br>
-                <small>Last activity: {inactive_minutes} minute(s) ago</small>
+                <small>Last activity: {inactive_minutes} minute(s) ago • Keep-alive: {keep_alive_seconds}s ago</small>
             </div>
         </div>
         
         <div class="status-card">
             <div class="status-item">
                 <span class="status-label">Service Status:</span>
-                <span class="status-value">Always Active ⚡</span>
+                <span class="status-value"><span class="always-active-badge">⚡ Always Active</span></span>
             </div>
             <div class="status-item">
                 <span class="status-label">AI Provider:</span>
@@ -549,12 +636,16 @@ def home():
                 {'<span class="success">✅ Available</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
             </div>
             <div class="status-item">
+                <span class="status-label">Batch Capacity:</span>
+                <span class="status-value">15 resumes simultaneously</span>
+            </div>
+            <div class="status-item">
                 <span class="status-label">Context Length:</span>
                 <span class="status-value">{model_info.get('context_length', '8192'):,} tokens</span>
             </div>
             <div class="status-item">
-                <span class="status-label">Status:</span>
-                <span class="status-value">{model_info.get('status', 'production').title()}</span>
+                <span class="status-label">Keep-alive:</span>
+                <span class="status-value success">Every {SERVICE_KEEP_ALIVE_INTERVAL}s</span>
             </div>
             <div class="status-item">
                 <span class="status-label">Upload Folder:</span>
@@ -609,6 +700,12 @@ def home():
             
             <div class="endpoint">
                 <span class="method">GET</span>
+                <span class="path">/download-individual/&lt;analysis_id&gt;</span>
+                <p class="description">Download individual candidate report</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
                 <span class="path">/models</span>
                 <p class="description">List available Groq models</p>
             </div>
@@ -622,9 +719,9 @@ def home():
         </div>
         
         <div class="footer">
-            <p>Powered by Flask & Groq API | Deployed on Render | Always Active Mode</p>
+            <p>Powered by Flask & Groq API | Deployed on Render | <span class="always-active-badge">Always Active Mode</span></p>
             <p>AI Service: GROQ | Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
-            <p>Model: {model_info['name']} | Free Tier: {'✅ Available' if model_info.get('free_tier', False) else 'Check pricing'}</p>
+            <p>Model: {model_info['name']} | Batch Capacity: 15 resumes | Keep-alive: {SERVICE_KEEP_ALIVE_INTERVAL}s</p>
         </div>
     </div>
 </body>
@@ -723,7 +820,7 @@ def fallback_response(reason, filename=None):
         "ai_status": "Warming up"
     }
 
-def analyze_resume_with_ai(resume_text, job_description, filename=None):
+def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None):
     """Use Groq API to analyze resume against job description with consistent scoring"""
     update_activity()
     
@@ -931,6 +1028,10 @@ CRITICAL:
         analysis['response_time'] = f"{elapsed_time:.2f}s"
         analysis['resume_hash'] = resume_hash  # For debugging consistency
         
+        # Add analysis ID if provided
+        if analysis_id:
+            analysis['analysis_id'] = analysis_id
+        
         print(f"✅ Analysis completed for: {analysis['candidate_name']} (Score: {analysis['overall_score']})")
         
         return analysis
@@ -1132,7 +1233,7 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
             cell.border = border
     
     # Save the file
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    filepath = os.path.join(REPORTS_FOLDER, filename)
     wb.save(filepath)
     print(f"📄 Excel report saved to: {filepath}")
     return filepath
@@ -1210,7 +1311,10 @@ def analyze_resume():
         model_to_use = GROQ_MODEL or DEFAULT_MODEL
         print(f"⚡ Starting Groq API analysis ({model_to_use})...")
         ai_start = time.time()
-        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename)
+        
+        # Generate unique analysis ID
+        analysis_id = f"single_{timestamp}"
+        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id)
         ai_time = time.time() - ai_start
         
         print(f"✅ Groq API analysis completed in {ai_time:.2f}s")
@@ -1218,7 +1322,7 @@ def analyze_resume():
         # Create Excel report
         print("📊 Creating Excel report...")
         excel_start = time.time()
-        excel_filename = f"analysis_{timestamp}.xlsx"
+        excel_filename = f"analysis_{analysis_id}.xlsx"
         excel_path = create_excel_report(analysis, excel_filename)
         excel_time = time.time() - excel_start
         print(f"✅ Excel report created in {excel_time:.2f}s: {excel_path}")
@@ -1233,6 +1337,7 @@ def analyze_resume():
         analysis['ai_provider'] = "groq"
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['response_time'] = f"{ai_time:.2f}s"
+        analysis['analysis_id'] = analysis_id
         
         total_time = time.time() - start_time
         print(f"✅ Request completed in {total_time:.2f} seconds")
@@ -1243,6 +1348,86 @@ def analyze_resume():
     except Exception as e:
         print(f"❌ Unexpected error: {traceback.format_exc()}")
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
+
+def process_batch_resume(resume_file, job_description, index, total, batch_id):
+    """Process a single resume in batch mode"""
+    try:
+        with PROCESSING_SEMAPHORE:
+            print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
+            
+            # Save file temporarily
+            file_ext = os.path.splitext(resume_file.filename)[1].lower()
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+            file_path = os.path.join(UPLOAD_FOLDER, f"batch_{batch_id}_{index}{file_ext}")
+            resume_file.save(file_path)
+            
+            # Extract text
+            if file_ext == '.pdf':
+                resume_text = extract_text_from_pdf(file_path)
+            elif file_ext in ['.docx', '.doc']:
+                resume_text = extract_text_from_docx(file_path)
+            elif file_ext == '.txt':
+                resume_text = extract_text_from_txt(file_path)
+            else:
+                os.remove(file_path)
+                return {
+                    'filename': resume_file.filename,
+                    'error': f'Unsupported format: {file_ext}',
+                    'status': 'failed'
+                }
+            
+            if resume_text.startswith('Error'):
+                os.remove(file_path)
+                return {
+                    'filename': resume_file.filename,
+                    'error': resume_text,
+                    'status': 'failed'
+                }
+            
+            # Analyze with Groq API
+            analysis_id = f"{batch_id}_candidate_{index}"
+            analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id)
+            analysis['filename'] = resume_file.filename
+            analysis['original_filename'] = resume_file.filename
+            
+            # Get file size
+            resume_file.seek(0, 2)
+            file_size = resume_file.tell()
+            resume_file.seek(0)
+            analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
+            
+            # Add analysis ID
+            analysis['analysis_id'] = analysis_id
+            
+            # Create individual Excel report
+            try:
+                excel_filename = f"individual_{analysis_id}.xlsx"
+                excel_path = create_excel_report(analysis, excel_filename)
+                analysis['individual_excel_filename'] = os.path.basename(excel_path)
+            except Exception as e:
+                print(f"⚠️ Failed to create individual report: {str(e)}")
+                analysis['individual_excel_filename'] = None
+            
+            # Clean up
+            os.remove(file_path)
+            
+            print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
+            
+            # Add delay between requests to avoid rate limiting
+            time.sleep(1)
+            
+            return {
+                'analysis': analysis,
+                'status': 'success'
+            }
+            
+    except Exception as e:
+        print(f"❌ Error processing {resume_file.filename}: {str(e)}")
+        return {
+            'filename': resume_file.filename,
+            'error': f"Processing error: {str(e)[:100]}",
+            'status': 'failed'
+        }
 
 @app.route('/analyze-batch', methods=['POST'])
 def analyze_resume_batch():
@@ -1284,75 +1469,44 @@ def analyze_resume_batch():
             return jsonify({'error': 'Groq API not configured'}), 500
         
         # Prepare batch analysis
+        batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         all_analyses = []
         errors = []
         
-        for idx, resume_file in enumerate(resume_files):
-            try:
-                print(f"\n📄 Processing resume {idx + 1}/{len(resume_files)}: {resume_file.filename}")
-                
+        # Process resumes with ThreadPoolExecutor for parallel processing
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS) as executor:
+            futures = []
+            
+            for idx, resume_file in enumerate(resume_files):
                 if resume_file.filename == '':
-                    print(f"⚠️ Skipping empty file at index {idx}")
                     errors.append({'filename': 'Empty file', 'error': 'File has no name'})
                     continue
                 
-                resume_file.seek(0, 2)
-                file_size = resume_file.tell()
-                resume_file.seek(0)
-                
-                if file_size == 0:
-                    errors.append({'filename': resume_file.filename, 'error': 'File is empty'})
-                    continue
-                
-                if file_size > 15 * 1024 * 1024:
-                    errors.append({'filename': resume_file.filename, 'error': 'File too large (max 15MB)'})
-                    continue
-                
-                # Save file temporarily
-                file_ext = os.path.splitext(resume_file.filename)[1].lower()
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-                file_path = os.path.join(UPLOAD_FOLDER, f"batch_{timestamp}_{idx}{file_ext}")
-                resume_file.save(file_path)
-                
-                # Extract text
-                if file_ext == '.pdf':
-                    resume_text = extract_text_from_pdf(file_path)
-                elif file_ext in ['.docx', '.doc']:
-                    resume_text = extract_text_from_docx(file_path)
-                elif file_ext == '.txt':
-                    resume_text = extract_text_from_txt(file_path)
-                else:
-                    errors.append({'filename': resume_file.filename, 'error': f'Unsupported format: {file_ext}'})
-                    os.remove(file_path)
-                    continue
-                
-                if resume_text.startswith('Error'):
-                    errors.append({'filename': resume_file.filename, 'error': resume_text})
-                    os.remove(file_path)
-                    continue
-                
-                # Analyze with Groq API
-                analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename)
-                analysis['filename'] = resume_file.filename
-                analysis['original_filename'] = resume_file.filename
-                analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
-                
-                all_analyses.append(analysis)
-                
-                # Clean up
-                os.remove(file_path)
-                
-                print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
-                
-                # Add delay between requests to avoid rate limiting
-                if idx < len(resume_files) - 1:
-                    time.sleep(2)  # Increased delay for better rate limiting
-                
-            except Exception as e:
-                error_msg = f"Processing error: {str(e)[:100]}"
-                errors.append({'filename': resume_file.filename, 'error': error_msg})
-                print(f"❌ Error: {error_msg}")
-                continue
+                # Submit task to executor
+                future = executor.submit(
+                    process_batch_resume,
+                    resume_file,
+                    job_description,
+                    idx,
+                    len(resume_files),
+                    batch_id
+                )
+                futures.append((resume_file.filename, future))
+            
+            # Collect results
+            for filename, future in futures:
+                try:
+                    result = future.result(timeout=180)  # 3 minutes timeout per resume
+                    
+                    if result['status'] == 'success':
+                        all_analyses.append(result['analysis'])
+                    else:
+                        errors.append({'filename': filename, 'error': result.get('error', 'Unknown error')})
+                        
+                except concurrent.futures.TimeoutError:
+                    errors.append({'filename': filename, 'error': 'Processing timeout (180 seconds)'})
+                except Exception as e:
+                    errors.append({'filename': filename, 'error': f'Processing error: {str(e)[:100]}'})
         
         print(f"\n📊 Batch processing complete. Successful: {len(all_analyses)}, Failed: {len(errors)}")
         
@@ -1363,14 +1517,14 @@ def analyze_resume_batch():
         for rank, analysis in enumerate(all_analyses, 1):
             analysis['rank'] = rank
         
-        # Create Excel report if we have analyses
-        excel_path = None
+        # Create batch Excel report if we have analyses
+        batch_excel_path = None
         if all_analyses:
             try:
                 print("📊 Creating batch Excel report...")
-                excel_filename = f"batch_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-                excel_path = create_batch_excel_report(all_analyses, job_description, excel_filename)
-                print(f"✅ Excel report created: {excel_path}")
+                excel_filename = f"batch_analysis_{batch_id}.xlsx"
+                batch_excel_path = create_batch_excel_report(all_analyses, job_description, excel_filename)
+                print(f"✅ Excel report created: {batch_excel_path}")
             except Exception as e:
                 print(f"❌ Failed to create Excel report: {str(e)}")
         
@@ -1381,7 +1535,8 @@ def analyze_resume_batch():
             'successfully_analyzed': len(all_analyses),
             'failed_files': len(errors),
             'errors': errors,
-            'batch_excel_filename': os.path.basename(excel_path) if excel_path else None,
+            'batch_excel_filename': os.path.basename(batch_excel_path) if batch_excel_path else None,
+            'batch_id': batch_id,
             'analyses': all_analyses,
             'model_used': GROQ_MODEL or DEFAULT_MODEL,
             'ai_provider': "groq",
@@ -1566,7 +1721,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
             ws_skills.cell(row=r, column=c).alignment = Alignment(wrap_text=True, vertical='top')
     
     # Save the file
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    filepath = os.path.join(REPORTS_FOLDER, filename)
     wb.save(filepath)
     print(f"📊 Batch Excel report saved to: {filepath}")
     return filepath
@@ -1719,7 +1874,10 @@ def download_report(filename):
         import re
         safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
         
-        file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
+        # Check both upload and reports folders
+        file_path = os.path.join(REPORTS_FOLDER, safe_filename)
+        if not os.path.exists(file_path):
+            file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
         
         if not os.path.exists(file_path):
             print(f"❌ File not found: {file_path}")
@@ -1736,6 +1894,40 @@ def download_report(filename):
         
     except Exception as e:
         print(f"❌ Download error: {traceback.format_exc()}")
+        return jsonify({'error': f'Download failed: {str(e)}'}), 500
+
+@app.route('/download-individual/<analysis_id>', methods=['GET'])
+def download_individual_report(analysis_id):
+    """Download individual candidate report"""
+    update_activity()
+    
+    try:
+        print(f"📥 Download individual request for analysis ID: {analysis_id}")
+        
+        # Look for individual report file
+        filename = f"individual_{analysis_id}.xlsx"
+        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
+        
+        file_path = os.path.join(REPORTS_FOLDER, safe_filename)
+        
+        if not os.path.exists(file_path):
+            print(f"❌ Individual report not found: {file_path}")
+            return jsonify({'error': 'Individual report not found'}), 404
+        
+        print(f"✅ Individual file found! Size: {os.path.getsize(file_path)} bytes")
+        
+        # Get candidate name from filename if possible
+        download_name = f"candidate_report_{analysis_id}.xlsx"
+        
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=download_name,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        
+    except Exception as e:
+        print(f"❌ Individual download error: {traceback.format_exc()}")
         return jsonify({'error': f'Download failed: {str(e)}'}), 500
 
 @app.route('/warmup', methods=['GET'])
@@ -1867,6 +2059,9 @@ def ping():
     """Simple ping to keep service awake"""
     update_activity()
     
+    global last_keep_alive
+    last_keep_alive = datetime.now()
+    
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
     return jsonify({
         'status': 'pong',
@@ -1876,6 +2071,7 @@ def ping():
         'ai_warmup': warmup_complete,
         'model': model_to_use,
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
+        'keep_alive_active': True,
         'message': f'Service is alive and Groq is warm!' if warmup_complete else f'Service is alive, warming up Groq...'
     })
 
@@ -1886,6 +2082,9 @@ def health_check():
     
     inactive_time = datetime.now() - last_activity_time
     inactive_minutes = int(inactive_time.total_seconds() / 60)
+    
+    keep_alive_time = datetime.now() - last_keep_alive
+    keep_alive_seconds = int(keep_alive_time.total_seconds())
     
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
     model_info = GROQ_MODELS.get(model_to_use, {'name': model_to_use, 'provider': 'Groq'})
@@ -1899,11 +2098,14 @@ def health_check():
         'model_info': model_info,
         'ai_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
+        'reports_folder_exists': os.path.exists(REPORTS_FOLDER),
         'upload_folder_path': UPLOAD_FOLDER,
+        'reports_folder_path': REPORTS_FOLDER,
         'inactive_minutes': inactive_minutes,
+        'keep_alive_seconds': keep_alive_seconds,
         'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
-        'version': '7.0.0',
-        'features': ['always_active', 'groq_api_support', 'batch_processing_15', 'keep_alive', 'consistent_scoring', 'cache_system']
+        'version': '8.0.0',
+        'features': ['always_active', 'groq_api_support', 'batch_processing_15', 'keep_alive', 'consistent_scoring', 'cache_system', 'individual_reports', 'parallel_processing']
     })
 
 @app.route('/models', methods=['GET'])
@@ -1945,6 +2147,40 @@ def switch_model(model_name):
         'timestamp': datetime.now().isoformat()
     })
 
+@app.route('/cleanup-old-files', methods=['POST'])
+def cleanup_old_files():
+    """Cleanup old files (run periodically)"""
+    try:
+        cutoff_time = datetime.now() - timedelta(hours=24)
+        deleted_count = 0
+        
+        # Cleanup uploads folder
+        for filename in os.listdir(UPLOAD_FOLDER):
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            if os.path.isfile(file_path):
+                file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+                if file_time < cutoff_time:
+                    os.remove(file_path)
+                    deleted_count += 1
+        
+        # Cleanup reports folder
+        for filename in os.listdir(REPORTS_FOLDER):
+            file_path = os.path.join(REPORTS_FOLDER, filename)
+            if os.path.isfile(file_path):
+                file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+                if file_time < cutoff_time:
+                    os.remove(file_path)
+                    deleted_count += 1
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Cleaned up {deleted_count} old files',
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     print("\n" + "="*50)
     print("🚀 Resume Analyzer Backend Starting...")
@@ -1955,10 +2191,13 @@ if __name__ == '__main__':
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
     print(f"🤖 Model: {model_to_use}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
+    print(f"📁 Reports folder: {REPORTS_FOLDER}")
     print("✅ Always Active Mode: Enabled")
+    print(f"✅ Keep-alive Interval: {SERVICE_KEEP_ALIVE_INTERVAL} seconds")
+    print("✅ Parallel Processing: 3 resumes at once")
+    print("✅ Batch Capacity: Up to 15 resumes")
+    print("✅ Individual Reports: Each candidate gets separate Excel")
     print("✅ Consistent Scoring: Enabled")
-    print("✅ Batch Processing: Up to 15 resumes")
-    print("✅ Score Caching: Enabled")
     print("="*50 + "\n")
     
     if not GROQ_API_KEY:
