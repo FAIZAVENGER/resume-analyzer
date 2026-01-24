@@ -3015,7 +3015,161 @@ html, body {
   flex-direction: column;
   gap: 0.25rem;
 }
+/* Individual Report Download Button */
+.download-individual-btn {
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+}
 
+.download-individual-btn:hover {
+  background: var(--primary-dark);
+  transform: translateY(-2px);
+}
+
+.batch-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255,255,255,0.1);
+}
+
+/* Secondary Download Button */
+.download-report-btn.secondary {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+}
+
+.download-report-btn.secondary:hover {
+  background: rgba(255,255,255,0.15);
+}
+
+/* Batch Processing Status */
+.processing-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #ffd166;
+  margin-top: 0.5rem;
+}
+
+/* Always Active Badge */
+.always-active-badge {
+  background: linear-gradient(90deg, #ff6b6b, #ffa726);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 15px;
+  font-size: 0.85rem;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Individual Report Section */
+.individual-report-section {
+  background: rgba(0, 255, 157, 0.1);
+  border: 1px solid rgba(0, 255, 157, 0.3);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+}
+
+.individual-report-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.individual-report-header h3 {
+  margin: 0;
+  color: white;
+}
+
+.individual-report-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.individual-report-info {
+  flex: 1;
+}
+
+.individual-report-info p {
+  margin: 0;
+  color: rgba(255,255,255,0.8);
+  font-size: 0.95rem;
+}
+
+/* Batch File List Improvements */
+.batch-file-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-top: 1rem;
+}
+
+.batch-file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: rgba(255,255,255,0.05);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+}
+
+.batch-file-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.batch-file-name {
+  flex: 1;
+  font-size: 0.9rem;
+  color: white;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-file-size {
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.6);
+}
+
+.remove-file-btn {
+  background: rgba(255,107,107,0.2);
+  color: #ff6b6b;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.remove-file-btn:hover {
+  background: rgba(255,107,107,0.3);
+}
 .file-size {
   font-size: 0.85rem;
   color: var(--text-secondary);
