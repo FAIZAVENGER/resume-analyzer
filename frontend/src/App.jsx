@@ -3,23 +3,12 @@ import axios from 'axios';
 import { 
   Upload, FileText, Briefcase, CheckCircle, XCircle, 
   Download, Loader, TrendingUp, Award, BookOpen, 
-  Target, AlertCircle, Sparkles, Star, Zap, User,
-  ChevronRight, Shield, BarChart3, Globe, Clock,
-  AlertTriangle, BatteryCharging, Brain, Rocket,
-  RefreshCw, Check, X, ExternalLink, BarChart,
-  Battery, Crown, Users, Coffee, ShieldCheck,
-  Lock, DownloadCloud, Edit3, FileDown, Info,
-  Wifi, WifiOff, Activity, Thermometer, ListOrdered,
-  BarChart4, Filter, Cpu, Zap as ZapIcon, Bolt,
-  PlayCircle, PauseCircle, Circle, ShieldAlert,
-  BatteryFull, BatteryMedium, BatteryLow, Signal,
-  Cloud, CloudOff, CloudLightning, CloudRain,
-  ArrowLeft, ChevronLeft, Home, Grid, Folder,
-  FileSpreadsheet, ClipboardList, Award as AwardIcon,
-  FileX, Calculator, Hash, Percent, Target as TargetIcon,
-  PieChart, BarChart2, Layers, CheckSquare,
-  XSquare, AlertOctagon, GitMerge, GitBranch,
-  GitCommit, GitPullRequest, GitCompare, GitMergeIcon
+  Target, AlertCircle, Calculator, Users,
+  ChevronRight, BarChart3, Cpu, Zap,
+  RefreshCw, Check, X, ExternalLink,
+  ArrowLeft, Clock, User, Grid,
+  FileDown, DownloadCloud, Info,
+  Activity, Thermometer, GitMerge, Hash
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -40,21 +29,14 @@ function App() {
   const [aiStatus, setAiStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState('checking');
   const [groqWarmup, setGroqWarmup] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
-  const [quotaInfo, setQuotaInfo] = useState(null);
+  const [modelInfo, setModelInfo] = useState(null);
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
-  const [modelInfo, setModelInfo] = useState(null);
-  const [serviceStatus, setServiceStatus] = useState({
-    enhancedFallback: true,
-    validKeys: 0,
-    totalKeys: 0
-  });
   
   // View management for navigation
-  const [currentView, setCurrentView] = useState('main'); // 'main', 'batch-results', 'candidate-detail'
+  const [currentView, setCurrentView] = useState('main'); // 'main', 'batch-results', 'single-results', 'candidate-detail'
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(null);
   
   const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
@@ -75,15 +57,23 @@ function App() {
     window.scrollTo(0, 0);
   };
 
+  const navigateToSingleResults = () => {
+    setCurrentView('single-results');
+    window.scrollTo(0, 0);
+  };
+
   const navigateToMain = () => {
     setCurrentView('main');
+    setAnalysis(null);
+    setBatchAnalysis(null);
+    setSelectedCandidateIndex(null);
     window.scrollTo(0, 0);
   };
 
   const navigateBack = () => {
     if (currentView === 'candidate-detail') {
       setCurrentView('batch-results');
-    } else if (currentView === 'batch-results') {
+    } else if (currentView === 'batch-results' || currentView === 'single-results') {
       setCurrentView('main');
     }
     window.scrollTo(0, 0);
@@ -119,12 +109,6 @@ function App() {
       }).catch(() => null);
       
       if (healthResponse?.data) {
-        setServiceStatus({
-          enhancedFallback: healthResponse.data.client_initialized || false,
-          validKeys: healthResponse.data.client_initialized ? 1 : 0,
-          totalKeys: healthResponse.data.api_key_configured ? 1 : 0
-        });
-        
         setGroqWarmup(healthResponse.data.ai_warmup_complete || false);
         setModelInfo(healthResponse.data.model_info || { name: healthResponse.data.model });
         setBackendStatus('ready');
@@ -342,7 +326,6 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      // Allow up to 15 files
       setResumeFiles(prev => [...prev, ...validFiles].slice(0, 15));
       setError('');
     }
@@ -446,6 +429,9 @@ function App() {
         setLoadingMessage('');
       }, 800);
 
+      // Navigate to single results view
+      navigateToSingleResults();
+
     } catch (err) {
       if (progressInterval) clearInterval(progressInterval);
       
@@ -516,7 +502,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 300000, // 5 minutes for batch processing
+        timeout: 300000,
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -534,6 +520,8 @@ function App() {
       
       setBatchAnalysis(response.data);
       setBatchProgress(100);
+
+      // Navigate to batch results view
       navigateToBatchResults();
 
       setTimeout(() => {
@@ -604,19 +592,19 @@ function App() {
       case 'ready': return { 
         text: 'Backend Active', 
         color: '#00ff9d', 
-        icon: <CloudLightning size={16} />,
+        icon: <Activity size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
       };
       case 'waking': return { 
         text: 'Backend Waking', 
         color: '#ffd166', 
-        icon: <CloudRain size={16} />,
+        icon: <Thermometer size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       case 'sleeping': return { 
         text: 'Backend Sleeping', 
         color: '#ff6b6b', 
-        icon: <CloudOff size={16} />,
+        icon: <Activity size={16} />,
         bgColor: 'rgba(255, 107, 107, 0.1)'
       };
       default: return { 
@@ -633,7 +621,7 @@ function App() {
       case 'checking': return { 
         text: 'Checking Groq...', 
         color: '#ffd166', 
-        icon: <Bolt size={16} />,
+        icon: <Cpu size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       case 'warming': return { 
@@ -645,7 +633,7 @@ function App() {
       case 'available': return { 
         text: 'Groq Ready ⚡', 
         color: '#00ff9d', 
-        icon: <ZapIcon size={16} />,
+        icon: <Zap size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
       };
       case 'unavailable': return { 
@@ -657,7 +645,7 @@ function App() {
       default: return { 
         text: 'AI Status', 
         color: '#94a3b8', 
-        icon: <Brain size={16} />,
+        icon: <Cpu size={16} />,
         bgColor: 'rgba(148, 163, 184, 0.1)'
       };
     }
@@ -694,11 +682,6 @@ function App() {
     if (!modelInfo) return 'Groq AI';
     if (typeof modelInfo === 'string') return modelInfo;
     return modelInfo.name || 'Groq AI';
-  };
-
-  const getModelDescription = (modelInfo) => {
-    if (!modelInfo || typeof modelInfo === 'string') return 'Ultra-fast inference';
-    return modelInfo.description || 'Groq ultra-fast inference';
   };
 
   // Render score breakdown component
@@ -790,10 +773,6 @@ function App() {
             <span>Math-based scoring (no AI judgment)</span>
           </div>
           <div className="consistency-item">
-            <Percent size={16} className="info" />
-            <span>Decimal scores: {analysis.overall_score.toFixed(2)}</span>
-          </div>
-          <div className="consistency-item">
             <Hash size={16} className="info" />
             <span>Deterministic variation: {details.deterministic_variation?.toFixed(3) || '0.000'}</span>
           </div>
@@ -814,9 +793,6 @@ function App() {
           </span>
           <span className="status-badge ai">
             {aiStatusInfo.icon} {aiStatusInfo.text}
-          </span>
-          <span className="status-badge always-active">
-            <ZapIcon size={14} /> Always Active
           </span>
           <span className="status-badge deterministic">
             <Calculator size={14} /> Deterministic Scoring
@@ -1029,7 +1005,7 @@ function App() {
             </div>
             <div className="stat">
               <div className="stat-icon">
-                <ZapIcon size={14} />
+                <Zap size={14} />
               </div>
               <span>Guaranteed score consistency</span>
             </div>
@@ -1122,11 +1098,6 @@ function App() {
               <span>•</span>
               <span>Scoring: Deterministic</span>
             </div>
-            
-            <div className="loading-note info">
-              <Calculator size={14} />
-              <span>Deterministic scoring guarantees same inputs produce same score</span>
-            </div>
           </div>
         </div>
       )}
@@ -1195,7 +1166,7 @@ function App() {
               <span>Deterministic scoring: same inputs = same score every time</span>
             </div>
             <div className="tip">
-              <Percent size={16} />
+              <BarChart3 size={16} />
               <span>Decimal scores (e.g., 78.42) for precise comparisons</span>
             </div>
             <div className="tip">
@@ -1209,6 +1180,258 @@ function App() {
           </>
         )}
       </div>
+    </div>
+  );
+
+  // Render single results view
+  const renderSingleResultsView = () => (
+    <div className="results-section">
+      <div className="navigation-header glass">
+        <button onClick={navigateToMain} className="back-button">
+          <ArrowLeft size={20} />
+          <span>Back to Analysis</span>
+        </button>
+        <div className="navigation-title">
+          <h2>🎯 Deterministic ATS Analysis Results</h2>
+          <p>{analysis?.candidate_name} • Score Consistency Guaranteed</p>
+        </div>
+        <div className="navigation-actions">
+          {analysis?.excel_filename && (
+            <button className="download-report-btn" onClick={handleDownload}>
+              <DownloadCloud size={18} />
+              <span>Download Report</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {analysis ? (
+        <>
+          {/* Candidate Header */}
+          <div className="analysis-header">
+            <div className="candidate-info">
+              <div className="candidate-avatar">
+                <User size={24} />
+              </div>
+              <div>
+                <h2 className="candidate-name">{analysis.candidate_name}</h2>
+                <div className="candidate-meta">
+                  <span className="analysis-date">
+                    <Clock size={14} />
+                    Deterministic ATS Analysis
+                  </span>
+                  <span className="algorithm-info">
+                    <Calculator size={14} />
+                    Algorithm: v2.0 • Guaranteed Consistency
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="score-display">
+              <div className="score-circle-wrapper">
+                <div className="score-circle-glow" style={{ 
+                  background: `radial-gradient(circle, ${getScoreColor(analysis.overall_score)}22 0%, transparent 70%)` 
+                }}></div>
+                <div 
+                  className="score-circle" 
+                  style={{ 
+                    borderColor: getScoreColor(analysis.overall_score),
+                    background: `conic-gradient(${getScoreColor(analysis.overall_score)} ${analysis.overall_score * 3.6}deg, #2d3749 0deg)` 
+                  }}
+                >
+                  <div className="score-inner">
+                    <div className="score-value" style={{ color: getScoreColor(analysis.overall_score) }}>
+                      {analysis.overall_score.toFixed(1)}
+                    </div>
+                    <div className="score-label">Deterministic ATS Score</div>
+                  </div>
+                </div>
+              </div>
+              <div className="score-info">
+                <h3 className="score-grade">{getScoreGrade(analysis.overall_score)}</h3>
+                <p className="score-description">
+                  Math-based scoring • Same inputs = Same score every time
+                </p>
+                <div className="score-meta">
+                  <span className="meta-item">
+                    <Calculator size={12} />
+                    Algorithm: Deterministic v2.0
+                  </span>
+                  <span className="meta-item">
+                    <Hash size={12} />
+                    Consistency Hash: {analysis.detailed_breakdown?.score_hash?.substring(0, 8)}...
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Score Breakdown */}
+          {renderScoreBreakdown(analysis)}
+          
+          {/* Consistency Info */}
+          {renderConsistencyInfo(analysis)}
+
+          {/* Recommendation Card */}
+          <div className="recommendation-card glass" style={{
+            background: `linear-gradient(135deg, ${getScoreColor(analysis.overall_score)}15, ${getScoreColor(analysis.overall_score)}08)`,
+            borderLeft: `4px solid ${getScoreColor(analysis.overall_score)}`
+          }}>
+            <div className="recommendation-header">
+              <Award size={28} style={{ color: getScoreColor(analysis.overall_score) }} />
+              <div>
+                <h3>Deterministic Analysis Recommendation</h3>
+                <p className="recommendation-subtitle">
+                  Based on mathematical scoring formulas • Guaranteed consistency
+                </p>
+              </div>
+            </div>
+            <div className="recommendation-content">
+              <p className="recommendation-text">{analysis.recommendation}</p>
+              <div className="confidence-badge">
+                <Calculator size={16} />
+                <span>Deterministic ATS Scoring</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Skills Analysis */}
+          <div className="section-title">
+            <h2>Skills Analysis</h2>
+            <p>Required skills matching based on deterministic comparison</p>
+          </div>
+          
+          <div className="skills-grid">
+            <div className="skills-card glass success">
+              <div className="skills-card-header">
+                <div className="skills-icon success">
+                  <CheckCircle size={24} />
+                </div>
+                <div className="skills-header-content">
+                  <h3>Required Skills Matched</h3>
+                  <p className="skills-subtitle">Found in resume (deterministic match)</p>
+                </div>
+                <div className="skills-count success">
+                  <span>{analysis.skills_matched?.length || 0}</span>
+                </div>
+              </div>
+              <div className="skills-content">
+                <ul className="skills-list">
+                  {analysis.skills_matched?.map((skill, index) => (
+                    <li key={index} className="skill-item success">
+                      <div className="skill-item-content">
+                        <CheckCircle size={16} />
+                        <span>{skill}</span>
+                      </div>
+                    </li>
+                  ))}
+                  {(!analysis.skills_matched || analysis.skills_matched.length === 0) && (
+                    <li className="no-items">No required skills matched</li>
+                  )}
+                </ul>
+              </div>
+            </div>
+
+            <div className="skills-card glass warning">
+              <div className="skills-card-header">
+                <div className="skills-icon warning">
+                  <XCircle size={24} />
+                </div>
+                <div className="skills-header-content">
+                  <h3>Required Skills Missing</h3>
+                  <p className="skills-subtitle">Not found in resume (deterministic comparison)</p>
+                </div>
+                <div className="skills-count warning">
+                  <span>{analysis.skills_missing?.length || 0}</span>
+                </div>
+              </div>
+              <div className="skills-content">
+                <ul className="skills-list">
+                  {analysis.skills_missing?.map((skill, index) => (
+                    <li key={index} className="skill-item warning">
+                      <div className="skill-item-content">
+                        <XCircle size={16} />
+                        <span>{skill}</span>
+                      </div>
+                    </li>
+                  ))}
+                  {(!analysis.skills_missing || analysis.skills_missing.length === 0) && (
+                    <li className="no-items success-text">All required skills are present!</li>
+                  )}
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          {/* Summary Section */}
+          <div className="section-title">
+            <h2>Profile Summary</h2>
+            <p>Deterministic analysis of resume content</p>
+          </div>
+          
+          <div className="summary-grid">
+            <div className="summary-card glass">
+              <div className="summary-header">
+                <div className="summary-icon">
+                  <Briefcase size={24} />
+                </div>
+                <h3>Experience Analysis</h3>
+              </div>
+              <div className="summary-content">
+                <p className="detailed-summary">{analysis.experience_summary || "No experience summary available."}</p>
+                <div className="summary-footer">
+                  <span className="summary-tag">Deterministic Experience Match</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="summary-card glass">
+              <div className="summary-header">
+                <div className="summary-icon">
+                  <BookOpen size={24} />
+                </div>
+                <h3>Education Analysis</h3>
+              </div>
+              <div className="summary-content">
+                <p className="detailed-summary">{analysis.education_summary || "No education summary available."}</p>
+                <div className="summary-footer">
+                  <span className="summary-tag">Deterministic Education Match</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Section */}
+          <div className="action-section glass">
+            <div className="action-content">
+              <h3>Deterministic Analysis Complete</h3>
+              <p>All scores are mathematically calculated for guaranteed consistency</p>
+            </div>
+            <div className="action-buttons">
+              {analysis.excel_filename && (
+                <button className="download-button" onClick={handleDownload}>
+                  <DownloadCloud size={20} />
+                  <span>Download Detailed Report</span>
+                </button>
+              )}
+              <button className="reset-button" onClick={navigateToMain}>
+                <RefreshCw size={20} />
+                <span>New Analysis</span>
+              </button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="error-message glass">
+          <AlertCircle size={20} />
+          <span>No analysis data available</span>
+          <button onClick={navigateToMain} className="back-button">
+            <ArrowLeft size={16} />
+            Go Back
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -1226,174 +1449,191 @@ function App() {
           <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed with guaranteed consistency</p>
         </div>
         <div className="navigation-actions">
-          <button className="download-report-btn" onClick={handleBatchDownload}>
-            <DownloadCloud size={18} />
-            <span>Download Full Report</span>
-          </button>
+          {batchAnalysis?.batch_excel_filename && (
+            <button className="download-report-btn" onClick={handleBatchDownload}>
+              <DownloadCloud size={18} />
+              <span>Download Full Report</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Batch Stats */}
-      <div className="batch-stats-container glass">
-        <div className="stat-card">
-          <div className="stat-icon success">
-            <Check size={24} />
-          </div>
-          <div className="stat-content">
-            <div className="stat-value">{batchAnalysis?.successfully_analyzed || 0}</div>
-            <div className="stat-label">Successful</div>
-          </div>
-        </div>
-        
-        {batchAnalysis?.failed_files > 0 && (
-          <div className="stat-card">
-            <div className="stat-icon error">
-              <X size={24} />
-            </div>
-            <div className="stat-content">
-              <div className="stat-value">{batchAnalysis?.failed_files || 0}</div>
-              <div className="stat-label">Failed</div>
-            </div>
-          </div>
-        )}
-        
-        <div className="stat-card">
-          <div className="stat-icon info">
-            <Users size={24} />
-          </div>
-          <div className="stat-content">
-            <div className="stat-value">{batchAnalysis?.total_files || 0}</div>
-            <div className="stat-label">Total Files</div>
-          </div>
-        </div>
-        
-        <div className="stat-card">
-          <div className="stat-icon deterministic">
-            <Calculator size={24} />
-          </div>
-          <div className="stat-content">
-            <div className="stat-value">v2.0</div>
-            <div className="stat-label">ATS Algorithm</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Candidates Ranking */}
-      <div className="section-title">
-        <h2>Candidate Rankings</h2>
-        <p>Sorted by Deterministic ATS Score (Highest to Lowest) - Guaranteed Consistency</p>
-      </div>
-      
-      <div className="batch-results-grid">
-        {batchAnalysis?.analyses?.map((candidate, index) => (
-          <div key={index} className="batch-candidate-card glass">
-            <div className="batch-card-header">
-              <div className="candidate-rank">
-                <div className="rank-badge">#{candidate.rank}</div>
-                <div className="candidate-main-info">
-                  <h3 className="candidate-name">{candidate.candidate_name}</h3>
-                  <div className="candidate-meta">
-                    <span className="file-info">{candidate.filename}</span>
-                    <span className="file-size">{candidate.file_size}</span>
-                  </div>
-                </div>
+      {batchAnalysis ? (
+        <>
+          {/* Batch Stats */}
+          <div className="batch-stats-container glass">
+            <div className="stat-card">
+              <div className="stat-icon success">
+                <Check size={24} />
               </div>
-              <div className="candidate-score-display">
-                <div className="score-large" style={{ color: getScoreColor(candidate.overall_score) }}>
-                  {candidate.overall_score.toFixed(1)}
-                </div>
-                <div className="score-label">Deterministic ATS Score</div>
+              <div className="stat-content">
+                <div className="stat-value">{batchAnalysis?.successfully_analyzed || 0}</div>
+                <div className="stat-label">Successful</div>
               </div>
             </div>
             
-            <div className="batch-card-content">
-              <div className="recommendation-badge" style={{ 
-                background: getScoreColor(candidate.overall_score) + '20',
-                color: getScoreColor(candidate.overall_score),
-                border: `1px solid ${getScoreColor(candidate.overall_score)}40`
-              }}>
-                {candidate.recommendation}
+            {batchAnalysis?.failed_files > 0 && (
+              <div className="stat-card">
+                <div className="stat-icon error">
+                  <X size={24} />
+                </div>
+                <div className="stat-content">
+                  <div className="stat-value">{batchAnalysis?.failed_files || 0}</div>
+                  <div className="stat-label">Failed</div>
+                </div>
               </div>
-              
-              <div className="skills-preview">
-                <div className="skills-section">
-                  <div className="skills-header">
-                    <CheckCircle size={14} />
-                    <span>Required Skills Matched ({candidate.skills_matched?.length || 0})</span>
+            )}
+            
+            <div className="stat-card">
+              <div className="stat-icon info">
+                <Users size={24} />
+              </div>
+              <div className="stat-content">
+                <div className="stat-value">{batchAnalysis?.total_files || 0}</div>
+                <div className="stat-label">Total Files</div>
+              </div>
+            </div>
+            
+            <div className="stat-card">
+              <div className="stat-icon deterministic">
+                <Calculator size={24} />
+              </div>
+              <div className="stat-content">
+                <div className="stat-value">v2.0</div>
+                <div className="stat-label">ATS Algorithm</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Candidates Ranking */}
+          <div className="section-title">
+            <h2>Candidate Rankings</h2>
+            <p>Sorted by Deterministic ATS Score (Highest to Lowest) - Guaranteed Consistency</p>
+          </div>
+          
+          <div className="batch-results-grid">
+            {batchAnalysis?.analyses?.map((candidate, index) => (
+              <div key={index} className="batch-candidate-card glass">
+                <div className="batch-card-header">
+                  <div className="candidate-rank">
+                    <div className="rank-badge">#{candidate.rank}</div>
+                    <div className="candidate-main-info">
+                      <h3 className="candidate-name">{candidate.candidate_name}</h3>
+                      <div className="candidate-meta">
+                        <span className="file-info">{candidate.filename}</span>
+                        <span className="file-size">{candidate.file_size}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="skills-list">
-                    {candidate.skills_matched?.slice(0, 2).map((skill, idx) => (
-                      <span key={idx} className="skill-tag success">{skill}</span>
-                    ))}
-                    {candidate.skills_matched?.length > 2 && (
-                      <span className="more-skills">+{candidate.skills_matched.length - 2} more</span>
-                    )}
+                  <div className="candidate-score-display">
+                    <div className="score-large" style={{ color: getScoreColor(candidate.overall_score) }}>
+                      {candidate.overall_score.toFixed(1)}
+                    </div>
+                    <div className="score-label">Deterministic ATS Score</div>
                   </div>
                 </div>
                 
-                <div className="skills-section">
-                  <div className="skills-header">
-                    <XCircle size={14} />
-                    <span>Required Skills Missing ({candidate.skills_missing?.length || 0})</span>
+                <div className="batch-card-content">
+                  <div className="recommendation-badge" style={{ 
+                    background: getScoreColor(candidate.overall_score) + '20',
+                    color: getScoreColor(candidate.overall_score),
+                    border: `1px solid ${getScoreColor(candidate.overall_score)}40`
+                  }}>
+                    {candidate.recommendation}
                   </div>
-                  <div className="skills-list">
-                    {candidate.skills_missing?.slice(0, 2).map((skill, idx) => (
-                      <span key={idx} className="skill-tag error">{skill}</span>
-                    ))}
-                    {candidate.skills_missing?.length > 2 && (
-                      <span className="more-skills">+{candidate.skills_missing.length - 2} more</span>
-                    )}
+                  
+                  <div className="skills-preview">
+                    <div className="skills-section">
+                      <div className="skills-header">
+                        <CheckCircle size={14} />
+                        <span>Required Skills Matched ({candidate.skills_matched?.length || 0})</span>
+                      </div>
+                      <div className="skills-list">
+                        {candidate.skills_matched?.slice(0, 2).map((skill, idx) => (
+                          <span key={idx} className="skill-tag success">{skill}</span>
+                        ))}
+                        {candidate.skills_matched?.length > 2 && (
+                          <span className="more-skills">+{candidate.skills_matched.length - 2} more</span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="skills-section">
+                      <div className="skills-header">
+                        <XCircle size={14} />
+                        <span>Required Skills Missing ({candidate.skills_missing?.length || 0})</span>
+                      </div>
+                      <div className="skills-list">
+                        {candidate.skills_missing?.slice(0, 2).map((skill, idx) => (
+                          <span key={idx} className="skill-tag error">{skill}</span>
+                        ))}
+                        {candidate.skills_missing?.length > 2 && (
+                          <span className="more-skills">+{candidate.skills_missing.length - 2} more</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="consistency-preview">
+                    <div className="consistency-badge">
+                      <Hash size={12} />
+                      <span>Consistency: {candidate.detailed_breakdown?.score_hash?.substring(0, 8)}...</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-              
-              <div className="consistency-preview">
-                <div className="consistency-badge">
-                  <Hash size={12} />
-                  <span>Consistency: {candidate.detailed_breakdown?.score_hash?.substring(0, 8)}...</span>
+                
+                <div className="batch-card-footer">
+                  <button 
+                    className="view-details-btn"
+                    onClick={() => navigateToCandidateDetail(index)}
+                  >
+                    View Deterministic Analysis
+                    <ChevronRight size={16} />
+                  </button>
+                  {candidate.analysis_id && (
+                    <button 
+                      className="download-individual-btn"
+                      onClick={() => handleIndividualDownload(candidate.analysis_id)}
+                      title="Download individual report"
+                    >
+                      <FileDown size={16} />
+                    </button>
+                  )}
                 </div>
               </div>
+            ))}
+          </div>
+
+          {/* Action Buttons */}
+          <div className="action-section glass">
+            <div className="action-content">
+              <h3>Deterministic Batch Analysis Complete</h3>
+              <p>All scores are mathematically calculated for guaranteed consistency</p>
             </div>
-            
-            <div className="batch-card-footer">
-              <button 
-                className="view-details-btn"
-                onClick={() => navigateToCandidateDetail(index)}
-              >
-                View Deterministic Analysis
-                <ChevronRight size={16} />
-              </button>
-              {candidate.analysis_id && (
-                <button 
-                  className="download-individual-btn"
-                  onClick={() => handleIndividualDownload(candidate.analysis_id)}
-                  title="Download individual report"
-                >
-                  <FileDown size={16} />
+            <div className="action-buttons">
+              {batchAnalysis.batch_excel_filename && (
+                <button className="download-button" onClick={handleBatchDownload}>
+                  <DownloadCloud size={20} />
+                  <span>Download Full Batch Report</span>
                 </button>
               )}
+              <button className="reset-button" onClick={navigateToMain}>
+                <RefreshCw size={20} />
+                <span>New Batch Analysis</span>
+              </button>
             </div>
           </div>
-        ))}
-      </div>
-
-      {/* Action Buttons */}
-      <div className="action-section glass">
-        <div className="action-content">
-          <h3>Deterministic Batch Analysis Complete</h3>
-          <p>All scores are mathematically calculated for guaranteed consistency</p>
-        </div>
-        <div className="action-buttons">
-          <button className="download-button" onClick={handleBatchDownload}>
-            <DownloadCloud size={20} />
-            <span>Download Full Batch Report</span>
-          </button>
-          <button className="reset-button" onClick={navigateToMain}>
-            <RefreshCw size={20} />
-            <span>New Batch Analysis</span>
+        </>
+      ) : (
+        <div className="error-message glass">
+          <AlertCircle size={20} />
+          <span>No batch analysis data available</span>
+          <button onClick={navigateToMain} className="back-button">
+            <ArrowLeft size={16} />
+            Go Back
           </button>
         </div>
-      </div>
+      )}
     </div>
   );
 
@@ -1436,13 +1676,15 @@ function App() {
                 <span>Download Individual Report</span>
               </button>
             )}
-            <button 
-              className="download-report-btn secondary" 
-              onClick={handleBatchDownload}
-            >
-              <DownloadCloud size={18} />
-              <span>Download Full Batch</span>
-            </button>
+            {batchAnalysis?.batch_excel_filename && (
+              <button 
+                className="download-report-btn secondary" 
+                onClick={handleBatchDownload}
+              >
+                <DownloadCloud size={18} />
+                <span>Download Full Batch</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1518,7 +1760,7 @@ function App() {
           borderLeft: `4px solid ${getScoreColor(candidate.overall_score)}`
         }}>
           <div className="recommendation-header">
-            <AwardIcon size={28} style={{ color: getScoreColor(candidate.overall_score) }} />
+            <Award size={28} style={{ color: getScoreColor(candidate.overall_score) }} />
             <div>
               <h3>Deterministic Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
@@ -1657,10 +1899,12 @@ function App() {
                 <span>Download Individual Report</span>
               </button>
             )}
-            <button className="download-button secondary" onClick={handleBatchDownload}>
-              <DownloadCloud size={20} />
-              <span>Download Full Batch Report</span>
-            </button>
+            {batchAnalysis?.batch_excel_filename && (
+              <button className="download-button secondary" onClick={handleBatchDownload}>
+                <DownloadCloud size={20} />
+                <span>Download Full Batch Report</span>
+              </button>
+            )}
             <button className="reset-button" onClick={navigateBack}>
               <ArrowLeft size={20} />
               <span>Back to Rankings</span>
@@ -1671,308 +1915,13 @@ function App() {
     );
   };
 
-  // Render single analysis view
-  const renderSingleAnalysisView = () => (
-    <div className="results-section">
-      <div className="navigation-header glass">
-        <button onClick={() => {
-          setAnalysis(null);
-          setCurrentView('main');
-        }} className="back-button">
-          <ArrowLeft size={20} />
-          <span>Back to Analysis</span>
-        </button>
-        <div className="navigation-title">
-          <h2>🎯 Deterministic ATS Analysis Results</h2>
-          <p>{analysis.candidate_name} • Score Consistency Guaranteed</p>
-        </div>
-        <div className="navigation-actions">
-          <button className="download-report-btn" onClick={handleDownload}>
-            <DownloadCloud size={18} />
-            <span>Download Report</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Candidate Header */}
-      <div className="analysis-header">
-        <div className="candidate-info">
-          <div className="candidate-avatar">
-            <User size={24} />
-          </div>
-          <div>
-            <h2 className="candidate-name">{analysis.candidate_name}</h2>
-            <div className="candidate-meta">
-              <span className="analysis-date">
-                <Clock size={14} />
-                Deterministic ATS Analysis
-              </span>
-              <span className="algorithm-info">
-                <Calculator size={14} />
-                Algorithm: v2.0 • Guaranteed Consistency
-              </span>
-            </div>
-          </div>
-        </div>
-        
-        <div className="score-display">
-          <div className="score-circle-wrapper">
-            <div className="score-circle-glow" style={{ 
-              background: `radial-gradient(circle, ${getScoreColor(analysis.overall_score)}22 0%, transparent 70%)` 
-            }}></div>
-            <div 
-              className="score-circle" 
-              style={{ 
-                borderColor: getScoreColor(analysis.overall_score),
-                background: `conic-gradient(${getScoreColor(analysis.overall_score)} ${analysis.overall_score * 3.6}deg, #2d3749 0deg)` 
-              }}
-            >
-              <div className="score-inner">
-                <div className="score-value" style={{ color: getScoreColor(analysis.overall_score) }}>
-                  {analysis.overall_score.toFixed(1)}
-                </div>
-                <div className="score-label">Deterministic ATS Score</div>
-              </div>
-            </div>
-          </div>
-          <div className="score-info">
-            <h3 className="score-grade">{getScoreGrade(analysis.overall_score)}</h3>
-            <p className="score-description">
-              Math-based scoring • Same inputs = Same score every time
-            </p>
-            <div className="score-meta">
-              <span className="meta-item">
-                <Calculator size={12} />
-                Algorithm: Deterministic v2.0
-              </span>
-              <span className="meta-item">
-                <Hash size={12} />
-                Consistency Hash: {analysis.detailed_breakdown?.score_hash?.substring(0, 8)}...
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Score Breakdown */}
-      {renderScoreBreakdown(analysis)}
-      
-      {/* Consistency Info */}
-      {renderConsistencyInfo(analysis)}
-
-      {/* Recommendation Card */}
-      <div className="recommendation-card glass" style={{
-        background: `linear-gradient(135deg, ${getScoreColor(analysis.overall_score)}15, ${getScoreColor(analysis.overall_score)}08)`,
-        borderLeft: `4px solid ${getScoreColor(analysis.overall_score)}`
-      }}>
-        <div className="recommendation-header">
-          <AwardIcon size={28} style={{ color: getScoreColor(analysis.overall_score) }} />
-          <div>
-            <h3>Deterministic Analysis Recommendation</h3>
-            <p className="recommendation-subtitle">
-              Based on mathematical scoring formulas • Guaranteed consistency
-            </p>
-          </div>
-        </div>
-        <div className="recommendation-content">
-          <p className="recommendation-text">{analysis.recommendation}</p>
-          <div className="confidence-badge">
-            <Calculator size={16} />
-            <span>Deterministic ATS Scoring</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Skills Analysis */}
-      <div className="section-title">
-        <h2>Skills Analysis</h2>
-        <p>Required skills matching based on deterministic comparison</p>
-      </div>
-      
-      <div className="skills-grid">
-        <div className="skills-card glass success">
-          <div className="skills-card-header">
-            <div className="skills-icon success">
-              <CheckCircle size={24} />
-            </div>
-            <div className="skills-header-content">
-              <h3>Required Skills Matched</h3>
-              <p className="skills-subtitle">Found in resume (deterministic match)</p>
-            </div>
-            <div className="skills-count success">
-              <span>{analysis.skills_matched?.length || 0}</span>
-            </div>
-          </div>
-          <div className="skills-content">
-            <ul className="skills-list">
-              {analysis.skills_matched?.map((skill, index) => (
-                <li key={index} className="skill-item success">
-                  <div className="skill-item-content">
-                    <CheckCircle size={16} />
-                    <span>{skill}</span>
-                  </div>
-                </li>
-              ))}
-              {(!analysis.skills_matched || analysis.skills_matched.length === 0) && (
-                <li className="no-items">No required skills matched</li>
-              )}
-            </ul>
-          </div>
-        </div>
-
-        <div className="skills-card glass warning">
-          <div className="skills-card-header">
-            <div className="skills-icon warning">
-              <XCircle size={24} />
-            </div>
-            <div className="skills-header-content">
-              <h3>Required Skills Missing</h3>
-              <p className="skills-subtitle">Not found in resume (deterministic comparison)</p>
-            </div>
-            <div className="skills-count warning">
-              <span>{analysis.skills_missing?.length || 0}</span>
-            </div>
-          </div>
-          <div className="skills-content">
-            <ul className="skills-list">
-              {analysis.skills_missing?.map((skill, index) => (
-                <li key={index} className="skill-item warning">
-                  <div className="skill-item-content">
-                    <XCircle size={16} />
-                    <span>{skill}</span>
-                  </div>
-                </li>
-              ))}
-              {(!analysis.skills_missing || analysis.skills_missing.length === 0) && (
-                <li className="no-items success-text">All required skills are present!</li>
-              )}
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      {/* Summary Section */}
-      <div className="section-title">
-        <h2>Profile Summary</h2>
-        <p>Deterministic analysis of resume content</p>
-      </div>
-      
-      <div className="summary-grid">
-        <div className="summary-card glass">
-          <div className="summary-header">
-            <div className="summary-icon">
-              <Briefcase size={24} />
-            </div>
-            <h3>Experience Analysis</h3>
-          </div>
-          <div className="summary-content">
-            <p className="detailed-summary">{analysis.experience_summary || "No experience summary available."}</p>
-            <div className="summary-footer">
-              <span className="summary-tag">Deterministic Experience Match</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="summary-card glass">
-          <div className="summary-header">
-            <div className="summary-icon">
-              <BookOpen size={24} />
-            </div>
-            <h3>Education Analysis</h3>
-          </div>
-          <div className="summary-content">
-            <p className="detailed-summary">{analysis.education_summary || "No education summary available."}</p>
-            <div className="summary-footer">
-              <span className="summary-tag">Deterministic Education Match</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Insights Section */}
-      <div className="section-title">
-        <h2>Insights & Recommendations</h2>
-        <p>Based on deterministic scoring analysis</p>
-      </div>
-      
-      <div className="insights-grid">
-        <div className="insight-card glass">
-          <div className="insight-header">
-            <div className="insight-icon success">
-              <TrendingUp size={24} />
-            </div>
-            <div>
-              <h3>Key Strengths</h3>
-              <p className="insight-subtitle">Areas where candidate excels</p>
-            </div>
-          </div>
-          <div className="insight-content">
-            <ul>
-              {analysis.key_strengths?.map((strength, index) => (
-                <li key={index} className="strength-item">
-                  <div className="strength-marker"></div>
-                  <span>{strength}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
-        <div className="insight-card glass">
-          <div className="insight-header">
-            <div className="insight-icon warning">
-              <Target size={24} />
-            </div>
-            <div>
-              <h3>Areas for Improvement</h3>
-              <p className="insight-subtitle">Opportunities to improve ATS score</p>
-            </div>
-          </div>
-          <div className="insight-content">
-            <ul>
-              {analysis.areas_for_improvement?.map((area, index) => (
-                <li key={index} className="improvement-item">
-                  <div className="improvement-marker"></div>
-                  <span>{area}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      {/* Action Section */}
-      <div className="action-section glass">
-        <div className="action-content">
-          <h3>Deterministic Analysis Complete</h3>
-          <p>All scores are mathematically calculated for guaranteed consistency</p>
-        </div>
-        <div className="action-buttons">
-          <button className="download-button" onClick={handleDownload}>
-            <DownloadCloud size={20} />
-            <span>Download Detailed Report</span>
-          </button>
-          <button className="reset-button" onClick={() => {
-            setAnalysis(null);
-            setCurrentView('main');
-          }}>
-            <RefreshCw size={20} />
-            <span>New Analysis</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
   // Main render function
   const renderCurrentView = () => {
-    if (analysis && !batchAnalysis) {
-      return renderSingleAnalysisView();
-    }
-
     switch (currentView) {
       case 'batch-results':
         return renderBatchResultsView();
+      case 'single-results':
+        return renderSingleResultsView();
       case 'candidate-detail':
         return renderCandidateDetailView();
       default:
@@ -2081,7 +2030,7 @@ function App() {
             {currentView !== 'main' && (
               <div className="feature nav-indicator">
                 <Grid size={16} />
-                <span>{currentView === 'batch-results' ? 'Batch Results' : 'Candidate Details'}</span>
+                <span>{currentView === 'batch-results' ? 'Batch Results' : currentView === 'single-results' ? 'Single Results' : 'Candidate Details'}</span>
               </div>
             )}
             
@@ -2100,106 +2049,11 @@ function App() {
                 <span>Warm Up AI</span>
               </button>
             )}
-            
-            {/* Quota Status Toggle */}
-            <button 
-              className="feature quota-toggle"
-              onClick={() => setShowQuotaPanel(!showQuotaPanel)}
-              title="Show service status"
-            >
-              <BarChart size={16} />
-              <span>Service Status</span>
-            </button>
           </div>
-        </div>
-        
-        <div className="header-wave">
-          <svg viewBox="0 0 1200 120" preserveAspectRatio="none">
-            <path d="M0,0V46.29c47.79,22.2,103.59,32.17,158,28,70.36-5.37,136.33-33.31,206.8-37.5C438.64,32.43,512.34,53.67,583,72.05c69.27,18,138.3,24.88,209.4,13.08,36.15-6,69.85-17.84,104.45-29.34C989.49,25,1113-14.29,1200,52.47V0Z" opacity=".25" fill="currentColor"></path>
-            <path d="M0,0V15.81C13,36.92,27.64,56.86,47.69,72.05,99.41,111.27,165,111,224.58,91.58c31.15-10.15,60.09-26.07,89.67-39.8,40.92-19,84.73-46,130.83-49.67,36.26-2.85,70.9,9.42,98.6,31.56,31.77,25.39,62.32,62,103.63,73,40.44,10.79,81.35-6.69,119.13-24.28s75.16-39,116.92-43.05c59.73-5.85,113.28,22.88,168.9,38.84,30.2,8.66,59,6.17,87.09-7.5,22.43-10.89,48-26.93,60.65-49.24V0Z" opacity=".5" fill="currentColor"></path>
-            <path d="M0,0V5.63C149.93,59,314.09,71.32,475.83,42.57c43-7.64,84.23-20.12,127.61-26.46,59-8.63,112.48,12.24,165.56,35.4C827.93,77.22,886,95.24,951.2,90c86.53-7,172.46-45.71,248.8-84.81V0Z" fill="currentColor"></path>
-          </svg>
         </div>
       </header>
 
       <main className="main-content">
-        {/* Status Panel */}
-        {showQuotaPanel && (
-          <div className="quota-status-panel glass">
-            <div className="quota-panel-header">
-              <div className="quota-title">
-                <Activity size={20} />
-                <h3>Service Status</h3>
-              </div>
-              <button 
-                className="close-quota"
-                onClick={() => setShowQuotaPanel(false)}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            
-            <div className="quota-summary">
-              <div className="summary-item">
-                <div className="summary-label">Backend Status</div>
-                <div className={`summary-value ${backendStatus === 'ready' ? 'success' : backendStatus === 'waking' ? 'warning' : 'error'}`}>
-                  {backendStatus === 'ready' ? '✅ Active' : 
-                   backendStatus === 'waking' ? '🔥 Waking Up' : 
-                   '💤 Sleeping'}
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Groq API Status</div>
-                <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
-                  {aiStatus === 'available' ? '⚡ Ready' : 
-                   aiStatus === 'warming' ? '🔥 Warming' : 
-                   '⚠️ Enhanced Mode'}
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">ATS Algorithm</div>
-                <div className="summary-value deterministic">
-                  🎯 Deterministic v2.0
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Score Consistency</div>
-                <div className="summary-value success">
-                  ✅ Guaranteed
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Batch Capacity</div>
-                <div className="summary-value info">
-                  📊 Up to 15 resumes
-                </div>
-              </div>
-            </div>
-            
-            <div className="action-buttons-panel">
-              <button 
-                className="action-button refresh"
-                onClick={checkBackendHealth}
-              >
-                <RefreshCw size={16} />
-                Refresh Status
-              </button>
-              <button 
-                className="action-button warmup"
-                onClick={handleForceWarmup}
-                disabled={isWarmingUp}
-              >
-                {isWarmingUp ? (
-                  <Loader size={16} className="spinner" />
-                ) : (
-                  <Thermometer size={16} />
-                )}
-                Force Warm-up
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Status Banner */}
         <div className="top-notice-bar glass">
           <div className="notice-content">
@@ -2213,7 +2067,7 @@ function App() {
                 <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
               </div>
               <div className="status-indicator active">
-                <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
+                <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
                 <span>ATS: Deterministic v2.0</span>
               </div>
               <div className="status-indicator active">
@@ -2286,7 +2140,7 @@ function App() {
           <p>© 2024 Deterministic ATS Analyzer. Built with React + Flask + Groq API. Math-based Scoring.</p>
           <div className="footer-stats">
             <span className="stat">
-              <CloudLightning size={12} />
+              <Activity size={12} />
               Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
             </span>
             <span className="stat">
