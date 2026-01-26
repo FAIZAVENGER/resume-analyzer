@@ -1384,7 +1384,7 @@ function App() {
           </div>
         </div>
 
-        {/* Insights Section */}
+        {/* Insights Section - Clean Version without bullet points */}
         <div className="section-title">
           <h2>Insights & Recommendations</h2>
           <p>Personalized suggestions to improve your match</p>
@@ -1402,17 +1402,17 @@ function App() {
               </div>
             </div>
             <div className="insight-content">
-              <ul>
+              <div className="strengths-list">
                 {analysis.key_strengths?.map((strength, index) => (
-                  <li key={index} className="strength-item">
-                    <div className="strength-marker"></div>
-                    <span>{strength}</span>
-                  </li>
+                  <div key={index} className="strength-item">
+                    <CheckCircle size={16} className="strength-icon" />
+                    <span className="strength-text">{strength}</span>
+                  </div>
                 ))}
                 {(!analysis.key_strengths || analysis.key_strengths.length === 0) && (
-                  <li className="no-items">No strengths identified</li>
+                  <div className="no-items">No strengths identified</div>
                 )}
-              </ul>
+              </div>
             </div>
           </div>
 
@@ -1427,17 +1427,17 @@ function App() {
               </div>
             </div>
             <div className="insight-content">
-              <ul>
+              <div className="improvements-list">
                 {analysis.areas_for_improvement?.map((area, index) => (
-                  <li key={index} className="improvement-item">
-                    <div className="improvement-marker"></div>
-                    <span>{area}</span>
-                  </li>
+                  <div key={index} className="improvement-item">
+                    <AlertCircle size={16} className="improvement-icon" />
+                    <span className="improvement-text">{area}</span>
+                  </div>
                 ))}
                 {(!analysis.areas_for_improvement || analysis.areas_for_improvement.length === 0) && (
-                  <li className="no-items success-text">No significant areas for improvement identified</li>
+                  <div className="no-items success-text">No significant areas for improvement identified</div>
                 )}
-              </ul>
+              </div>
             </div>
           </div>
         </div>
@@ -1914,7 +1914,7 @@ function App() {
           </div>
         </div>
 
-        {/* Insights Section */}
+        {/* Insights Section - Clean Version without bullet points */}
         <div className="section-title">
           <h2>Insights & Recommendations</h2>
           <p>Personalized suggestions to improve your match</p>
@@ -1932,14 +1932,17 @@ function App() {
               </div>
             </div>
             <div className="insight-content">
-              <ul>
+              <div className="strengths-list">
                 {candidate.key_strengths?.map((strength, index) => (
-                  <li key={index} className="strength-item">
-                    <div className="strength-marker"></div>
-                    <span>{strength}</span>
-                  </li>
+                  <div key={index} className="strength-item">
+                    <CheckCircle size={16} className="strength-icon" />
+                    <span className="strength-text">{strength}</span>
+                  </div>
                 ))}
-              </ul>
+                {(!candidate.key_strengths || candidate.key_strengths.length === 0) && (
+                  <div className="no-items">No strengths identified</div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1954,14 +1957,17 @@ function App() {
               </div>
             </div>
             <div className="insight-content">
-              <ul>
+              <div className="improvements-list">
                 {candidate.areas_for_improvement?.map((area, index) => (
-                  <li key={index} className="improvement-item">
-                    <div className="improvement-marker"></div>
-                    <span>{area}</span>
-                  </li>
+                  <div key={index} className="improvement-item">
+                    <AlertCircle size={16} className="improvement-icon" />
+                    <span className="improvement-text">{area}</span>
+                  </div>
                 ))}
-              </ul>
+                {(!candidate.areas_for_improvement || candidate.areas_for_improvement.length === 0) && (
+                  <div className="no-items success-text">No areas for improvement identified</div>
+                )}
+              </div>
             </div>
           </div>
         </div>
