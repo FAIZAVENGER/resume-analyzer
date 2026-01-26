@@ -16,7 +16,45 @@ import {
   Cloud, CloudOff, CloudLightning, CloudRain,
   ArrowLeft, ChevronLeft, Home, Grid, Folder,
   FileSpreadsheet, ClipboardList, Award as AwardIcon,
-  FileX
+  FileX, Calendar, Mail, Phone, MapPin, Link,
+  ThumbsUp, AlertOctagon, Lightbulb, GitBranch,
+  Code, Database, Server, Terminal, Palette,
+  Music, Camera, Video, Headphones, Mic,
+  MessageSquare, Heart, Share2, Bookmark,
+  Eye, EyeOff, Search, Settings, Bell,
+  HelpCircle, Shield as ShieldIcon, Key,
+  LogOut, UserPlus, UserCheck, UserX,
+  Star as StarIcon, Heart as HeartIcon,
+  Flag, Filter as FilterIcon, SortAsc,
+  SortDesc, MoreHorizontal, MoreVertical,
+  Maximize2, Minimize2, Plus, Minus,
+  Edit, Trash2, Copy, Scissors, Type,
+  Bold, Italic, Underline, List,
+  Hash, Quote, Divide, Percent,
+  DollarSign, Euro, Pound, Yen,
+  Bitcoin, CreditCard, ShoppingCart,
+  Package, Truck, Box, Warehouse,
+  Building, Home as HomeIcon, Navigation,
+  Compass, Map, Globe as GlobeIcon,
+  Sunrise, Sunset, Moon, CloudSun,
+  Umbrella, Wind, ThermometerSun,
+  Droplets, Waves, Tree, Flower,
+  Leaf, Bug, Fish, Bird, Cat,
+  Dog, Rabbit, Cow, Pig, Egg,
+  Apple, Carrot, Coffee as CoffeeIcon,
+  Wine, Beer, Cake, Cookie, IceCream,
+  Pizza, Hamburger, FrenchFries, Drumstick,
+  EggFried, Soup, Milk, GlassWater,
+  Citrus, Pepper, Salt, Sugar,
+  Wheat, Croissant, Sandwich, Donut,
+  Candy, Citrus as Lemon, Cherry,
+  Strawberry, Grape, Watermelon, Peach,
+  Pear, Banana, Avocado, Broccoli,
+  Corn, Eggplant, Mushroom, Onion,
+  Potato, Tomato, Pumpkin, Radish,
+  HotPepper, Garlic, Basil, Sprout,
+  Bone, Skull, Ghost, Smile, Frown,
+  Meh, Laugh, Angry, surprised
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -51,7 +89,7 @@ function App() {
   });
   
   // View management for navigation
-  const [currentView, setCurrentView] = useState('main'); // 'main', 'batch-results', 'candidate-detail'
+  const [currentView, setCurrentView] = useState('main'); // 'main', 'single-results', 'batch-results', 'candidate-detail'
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(null);
   
   const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
@@ -61,6 +99,11 @@ function App() {
   const warmupCheckInterval = useRef(null);
 
   // Navigation functions
+  const navigateToSingleResults = () => {
+    setCurrentView('single-results');
+    window.scrollTo(0, 0);
+  };
+
   const navigateToBatchResults = () => {
     setCurrentView('batch-results');
     window.scrollTo(0, 0);
@@ -74,13 +117,18 @@ function App() {
 
   const navigateToMain = () => {
     setCurrentView('main');
+    setAnalysis(null);
+    setBatchAnalysis(null);
+    setResumeFile(null);
+    setResumeFiles([]);
+    setJobDescription('');
     window.scrollTo(0, 0);
   };
 
   const navigateBack = () => {
     if (currentView === 'candidate-detail') {
       setCurrentView('batch-results');
-    } else if (currentView === 'batch-results') {
+    } else if (currentView === 'batch-results' || currentView === 'single-results') {
       setCurrentView('main');
     }
     window.scrollTo(0, 0);
@@ -436,6 +484,7 @@ function App() {
       
       setAnalysis(response.data);
       setProgress(100);
+      navigateToSingleResults();
 
       await checkBackendHealth();
 
@@ -1110,6 +1159,347 @@ function App() {
     </div>
   );
 
+  const renderSingleAnalysisView = () => {
+    if (!analysis) return null;
+
+    return (
+      <div className="results-section">
+        {/* Navigation Header */}
+        <div className="navigation-header glass">
+          <button onClick={navigateToMain} className="back-button">
+            <ArrowLeft size={20} />
+            <span>New Analysis</span>
+          </button>
+          <div className="navigation-title">
+            <h2>⚡ Resume Analysis Results</h2>
+            <p>{analysis.candidate_name}</p>
+          </div>
+          <div className="navigation-actions">
+            <button className="download-report-btn" onClick={handleDownload}>
+              <DownloadCloud size={18} />
+              <span>Download Report</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Candidate Header */}
+        <div className="analysis-header">
+          <div className="candidate-info">
+            <div className="candidate-avatar">
+              <User size={24} />
+            </div>
+            <div>
+              <h2 className="candidate-name">{analysis.candidate_name}</h2>
+              <div className="candidate-meta">
+                <span className="analysis-date">
+                  <Clock size={14} />
+                  {new Date().toLocaleDateString('en-US', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                </span>
+                <span className="file-info">
+                  <Cpu size={14} />
+                  Model: {analysis.ai_model || 'Groq AI'}
+                </span>
+                <span className="provider-info">
+                  <ZapIcon size={14} />
+                  Provider: {analysis.ai_provider || 'Groq'}
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div className="score-display">
+            <div className="score-circle-wrapper">
+              <div className="score-circle-glow" style={{ 
+                background: `radial-gradient(circle, ${getScoreColor(analysis.overall_score)}22 0%, transparent 70%)` 
+              }}></div>
+              <div 
+                className="score-circle" 
+                style={{ 
+                  borderColor: getScoreColor(analysis.overall_score),
+                  background: `conic-gradient(${getScoreColor(analysis.overall_score)} ${analysis.overall_score * 3.6}deg, #2d3749 0deg)` 
+                }}
+              >
+                <div className="score-inner">
+                  <div className="score-value" style={{ color: getScoreColor(analysis.overall_score) }}>
+                    {analysis.overall_score}
+                  </div>
+                  <div className="score-label">ATS Score</div>
+                </div>
+              </div>
+            </div>
+            <div className="score-info">
+              <h3 className="score-grade">{getScoreGrade(analysis.overall_score)}</h3>
+              <p className="score-description">
+                Based on skill matching, experience relevance, and qualifications
+              </p>
+              <div className="score-meta">
+                <span className="meta-item">
+                  <ZapIcon size={12} />
+                  Response Time: {analysis.response_time || 'N/A'}
+                </span>
+                <span className="meta-item">
+                  <CheckCircle size={12} />
+                  {analysis.skills_matched?.length || 0} skills matched
+                </span>
+                <span className="meta-item">
+                  <XCircle size={12} />
+                  {analysis.skills_missing?.length || 0} skills missing
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Recommendation Card */}
+        <div className="recommendation-card glass" style={{
+          background: `linear-gradient(135deg, ${getScoreColor(analysis.overall_score)}15, ${getScoreColor(analysis.overall_score)}08)`,
+          borderLeft: `4px solid ${getScoreColor(analysis.overall_score)}`
+        }}>
+          <div className="recommendation-header">
+            <AwardIcon size={28} style={{ color: getScoreColor(analysis.overall_score) }} />
+            <div>
+              <h3>Analysis Recommendation</h3>
+              <p className="recommendation-subtitle">
+                {analysis.ai_model || 'Groq AI'} • Consistent ATS Scoring
+              </p>
+            </div>
+          </div>
+          <div className="recommendation-content">
+            <p className="recommendation-text">{analysis.recommendation}</p>
+            <div className="confidence-badge">
+              <ZapIcon size={16} />
+              <span>Groq AI Analysis</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Skills Analysis */}
+        <div className="section-title">
+          <h2>Skills Analysis</h2>
+          <p>Detailed breakdown of matched and missing skills</p>
+        </div>
+        
+        <div className="skills-grid">
+          <div className="skills-card glass success">
+            <div className="skills-card-header">
+              <div className="skills-icon success">
+                <CheckCircle size={24} />
+              </div>
+              <div className="skills-header-content">
+                <h3>Matched Skills</h3>
+                <p className="skills-subtitle">Found in resume</p>
+              </div>
+              <div className="skills-count success">
+                <span>{analysis.skills_matched?.length || 0}</span>
+              </div>
+            </div>
+            <div className="skills-content">
+              <ul className="skills-list">
+                {analysis.skills_matched?.map((skill, index) => (
+                  <li key={index} className="skill-item success">
+                    <div className="skill-item-content">
+                      <CheckCircle size={16} />
+                      <span>{skill}</span>
+                    </div>
+                  </li>
+                ))}
+                {(!analysis.skills_matched || analysis.skills_matched.length === 0) && (
+                  <li className="no-items">No matching skills detected</li>
+                )}
+              </ul>
+            </div>
+          </div>
+
+          <div className="skills-card glass warning">
+            <div className="skills-card-header">
+              <div className="skills-icon warning">
+                <XCircle size={24} />
+              </div>
+              <div className="skills-header-content">
+                <h3>Missing Skills</h3>
+                <p className="skills-subtitle">Suggested to learn</p>
+              </div>
+              <div className="skills-count warning">
+                <span>{analysis.skills_missing?.length || 0}</span>
+              </div>
+            </div>
+            <div className="skills-content">
+              <ul className="skills-list">
+                {analysis.skills_missing?.map((skill, index) => (
+                  <li key={index} className="skill-item warning">
+                    <div className="skill-item-content">
+                      <XCircle size={16} />
+                      <span>{skill}</span>
+                    </div>
+                  </li>
+                ))}
+                {(!analysis.skills_missing || analysis.skills_missing.length === 0) && (
+                  <li className="no-items success-text">All required skills are present!</li>
+                )}
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        {/* Summary Section */}
+        <div className="section-title">
+          <h2>Profile Summary</h2>
+          <p>Insights extracted from resume</p>
+        </div>
+        
+        <div className="summary-grid">
+          <div className="summary-card glass">
+            <div className="summary-header">
+              <div className="summary-icon">
+                <Briefcase size={24} />
+              </div>
+              <h3>Experience Summary</h3>
+            </div>
+            <div className="summary-content">
+              <p className="detailed-summary">{analysis.experience_summary || "No experience summary available."}</p>
+              <div className="summary-footer">
+                <span className="summary-tag">Professional Experience</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="summary-card glass">
+            <div className="summary-header">
+              <div className="summary-icon">
+                <BookOpen size={24} />
+              </div>
+              <h3>Education Summary</h3>
+            </div>
+            <div className="summary-content">
+              <p className="detailed-summary">{analysis.education_summary || "No education summary available."}</p>
+              <div className="summary-footer">
+                <span className="summary-tag">Academic Background</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Insights Section */}
+        <div className="section-title">
+          <h2>Insights & Recommendations</h2>
+          <p>Personalized suggestions to improve your match</p>
+        </div>
+        
+        <div className="insights-grid">
+          <div className="insight-card glass">
+            <div className="insight-header">
+              <div className="insight-icon success">
+                <TrendingUp size={24} />
+              </div>
+              <div>
+                <h3>Key Strengths</h3>
+                <p className="insight-subtitle">Areas where candidate excels</p>
+              </div>
+            </div>
+            <div className="insight-content">
+              <ul>
+                {analysis.key_strengths?.map((strength, index) => (
+                  <li key={index} className="strength-item">
+                    <div className="strength-marker"></div>
+                    <span>{strength}</span>
+                  </li>
+                ))}
+                {(!analysis.key_strengths || analysis.key_strengths.length === 0) && (
+                  <li className="no-items">No strengths identified</li>
+                )}
+              </ul>
+            </div>
+          </div>
+
+          <div className="insight-card glass">
+            <div className="insight-header">
+              <div className="insight-icon warning">
+                <Target size={24} />
+              </div>
+              <div>
+                <h3>Areas for Improvement</h3>
+                <p className="insight-subtitle">Opportunities to grow</p>
+              </div>
+            </div>
+            <div className="insight-content">
+              <ul>
+                {analysis.areas_for_improvement?.map((area, index) => (
+                  <li key={index} className="improvement-item">
+                    <div className="improvement-marker"></div>
+                    <span>{area}</span>
+                  </li>
+                ))}
+                {(!analysis.areas_for_improvement || analysis.areas_for_improvement.length === 0) && (
+                  <li className="no-items success-text">No significant areas for improvement identified</li>
+                )}
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        {/* AI Analysis Details */}
+        <div className="ai-details-card glass">
+          <div className="ai-details-header">
+            <Brain size={24} />
+            <div>
+              <h3>AI Analysis Details</h3>
+              <p className="ai-details-subtitle">Technical information about this analysis</p>
+            </div>
+          </div>
+          <div className="ai-details-content">
+            <div className="ai-detail-item">
+              <span className="detail-label">AI Provider:</span>
+              <span className="detail-value">{analysis.ai_provider || 'Groq'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">AI Model:</span>
+              <span className="detail-value">{analysis.ai_model || 'Groq AI'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">Response Time:</span>
+              <span className="detail-value">{analysis.response_time || 'N/A'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">Analysis ID:</span>
+              <span className="detail-value">{analysis.analysis_id || 'N/A'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">AI Status:</span>
+              <span className="detail-value" style={{ 
+                color: analysis.ai_status === 'Warmed up' ? '#00ff9d' : '#ffd166' 
+              }}>
+                {analysis.ai_status || 'N/A'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Action Section */}
+        <div className="action-section glass">
+          <div className="action-content">
+            <h3>Analysis Complete</h3>
+            <p>Download the detailed Excel report or start a new analysis</p>
+          </div>
+          <div className="action-buttons">
+            <button className="download-button" onClick={handleDownload}>
+              <DownloadCloud size={20} />
+              <span>Download Excel Report</span>
+            </button>
+            <button className="reset-button" onClick={navigateToMain}>
+              <RefreshCw size={20} />
+              <span>New Analysis</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderBatchResultsView = () => (
     <div className="results-section">
       {/* Navigation Header */}
@@ -1606,41 +1996,11 @@ function App() {
     );
   };
 
-  // Render single analysis view (unchanged from original)
-  const renderSingleAnalysisView = () => (
-    <div className="results-section">
-      <div className="navigation-header glass">
-        <button onClick={() => {
-          setAnalysis(null);
-          setCurrentView('main');
-        }} className="back-button">
-          <ArrowLeft size={20} />
-          <span>Back to Analysis</span>
-        </button>
-        <div className="navigation-title">
-          <h2>⚡ Resume Analysis Results</h2>
-          <p>{analysis.candidate_name}</p>
-        </div>
-        <div className="navigation-actions">
-          <button className="download-report-btn" onClick={handleDownload}>
-            <DownloadCloud size={18} />
-            <span>Download Report</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Rest of the single analysis view (keep original code) */}
-      {/* ... existing single analysis view code ... */}
-    </div>
-  );
-
   // Main render function
   const renderCurrentView = () => {
-    if (analysis && !batchAnalysis) {
-      return renderSingleAnalysisView();
-    }
-
     switch (currentView) {
+      case 'single-results':
+        return renderSingleAnalysisView();
       case 'batch-results':
         return renderBatchResultsView();
       case 'candidate-detail':
@@ -1745,7 +2105,9 @@ function App() {
             {currentView !== 'main' && (
               <div className="feature nav-indicator">
                 <Grid size={16} />
-                <span>{currentView === 'batch-results' ? 'Batch Results' : 'Candidate Details'}</span>
+                <span>{currentView === 'single-results' ? 'Single Analysis' : 
+                       currentView === 'batch-results' ? 'Batch Results' : 
+                       'Candidate Details'}</span>
               </div>
             )}
             
@@ -1884,7 +2246,10 @@ function App() {
               )}
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
-                <span>Mode: {batchMode ? 'Batch (15 resumes)' : 'Single'}</span>
+                <span>Mode: {currentView === 'single-results' ? 'Single Analysis' : 
+                              currentView === 'batch-results' ? 'Batch Results' : 
+                              currentView === 'candidate-detail' ? 'Candidate Details' : 
+                              batchMode ? 'Batch' : 'Single'}</span>
               </div>
             </div>
             
