@@ -16,7 +16,10 @@ import {
   Cloud, CloudOff, CloudLightning, CloudRain,
   ArrowLeft, ChevronLeft, Home, Grid, Folder,
   FileSpreadsheet, ClipboardList, Award as AwardIcon,
-  FileX
+  FileX, Calculator, Hash, Percent, Target as TargetIcon,
+  PieChart, BarChart2, Layers, CheckSquare,
+  XSquare, AlertOctagon, GitMerge, GitBranch,
+  GitCommit, GitPullRequest, GitCompare, GitMergeIcon
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -387,7 +390,7 @@ function App() {
     setAnalysis(null);
     setBatchAnalysis(null);
     setProgress(0);
-    setLoadingMessage('Starting analysis...');
+    setLoadingMessage('Starting deterministic ATS analysis...');
 
     const formData = new FormData();
     formData.append('resume', resumeFile);
@@ -403,15 +406,14 @@ function App() {
         });
       }, 500);
 
-      if (aiStatus === 'available' && groqWarmup) {
-        setLoadingMessage('Groq AI analysis (Ultra-fast)...');
-      } else {
-        setLoadingMessage('Enhanced analysis (Warming up Groq)...');
-      }
+      setLoadingMessage('AI data extraction (Groq)...');
       setProgress(20);
 
-      setLoadingMessage('Uploading and processing resume...');
-      setProgress(30);
+      setLoadingMessage('Job requirement analysis...');
+      setProgress(40);
+
+      setLoadingMessage('Deterministic ATS scoring...');
+      setProgress(60);
 
       const response = await axios.post(`${API_BASE_URL}/analyze`, formData, {
         headers: {
@@ -421,8 +423,8 @@ function App() {
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            setProgress(30 + percentCompleted * 0.4);
-            setLoadingMessage(percentCompleted < 50 ? 'Uploading file...' : 'Extracting text from resume...');
+            setProgress(60 + percentCompleted * 0.3);
+            setLoadingMessage(percentCompleted < 50 ? 'Uploading file...' : 'Processing...');
           }
         }
       });
@@ -430,7 +432,7 @@ function App() {
       clearInterval(progressInterval);
       setProgress(95);
       
-      setLoadingMessage('AI analysis complete!');
+      setLoadingMessage('Deterministic analysis complete!');
 
       await new Promise(resolve => setTimeout(resolve, 500));
       
@@ -488,7 +490,7 @@ function App() {
     setAnalysis(null);
     setBatchAnalysis(null);
     setBatchProgress(0);
-    setLoadingMessage(`Starting batch analysis of ${resumeFiles.length} resumes...`);
+    setLoadingMessage(`Starting deterministic batch analysis of ${resumeFiles.length} resumes...`);
 
     const formData = new FormData();
     formData.append('jobDescription', jobDescription);
@@ -514,7 +516,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 300000, // 5 minutes for batch processing (increased for 15 resumes)
+        timeout: 300000, // 5 minutes for batch processing
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -526,7 +528,7 @@ function App() {
 
       clearInterval(progressInterval);
       setBatchProgress(95);
-      setLoadingMessage('Batch analysis complete!');
+      setLoadingMessage('Deterministic batch analysis complete!');
 
       await new Promise(resolve => setTimeout(resolve, 800));
       
@@ -699,12 +701,113 @@ function App() {
     return modelInfo.description || 'Groq ultra-fast inference';
   };
 
-  // Render functions for different views
+  // Render score breakdown component
+  const renderScoreBreakdown = (analysis) => {
+    if (!analysis?.scoring_breakdown) return null;
+    
+    const breakdown = analysis.scoring_breakdown;
+    const weights = analysis.detailed_breakdown?.weights || {
+      'required_skills': 0.35,
+      'preferred_skills': 0.15,
+      'experience': 0.20,
+      'job_title': 0.10,
+      'education': 0.10,
+      'keywords': 0.05,
+      'formatting': 0.05
+    };
+    
+    const components = [
+      { name: 'Required Skills', score: breakdown.skill_match_score, weight: weights.required_skills, color: '#00ff9d' },
+      { name: 'Experience Match', score: breakdown.experience_score, weight: weights.experience, color: '#ffd166' },
+      { name: 'Education Match', score: breakdown.education_score, weight: weights.education, color: '#a78bfa' },
+      { name: 'Job Title', score: breakdown.job_title_score, weight: weights.job_title, color: '#60a5fa' },
+      { name: 'Keywords', score: breakdown.keyword_match_score, weight: weights.keywords, color: '#f472b6' },
+      { name: 'Formatting', score: breakdown.formatting_score, weight: weights.formatting, color: '#34d399' },
+      { name: 'Preferred Skills', score: breakdown.preferred_skills_score || 0, weight: weights.preferred_skills, color: '#fbbf24' }
+    ];
+    
+    return (
+      <div className="score-breakdown glass">
+        <h3>🎯 Deterministic Score Breakdown</h3>
+        <div className="breakdown-grid">
+          {components.map((comp, index) => (
+            <div key={index} className="breakdown-item">
+              <div className="breakdown-header">
+                <span className="breakdown-name">{comp.name}</span>
+                <span className="breakdown-weight">({(comp.weight * 100).toFixed(0)}%)</span>
+              </div>
+              <div className="breakdown-bar">
+                <div 
+                  className="breakdown-fill" 
+                  style={{ 
+                    width: `${comp.score}%`,
+                    backgroundColor: comp.color
+                  }}
+                ></div>
+              </div>
+              <div className="breakdown-score">
+                <span style={{ color: comp.color, fontWeight: 'bold' }}>
+                  {comp.score.toFixed(1)}
+                </span>
+                <span>/100</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="breakdown-footer">
+          <div className="consistency-info">
+            <Hash size={14} />
+            <span>Consistency Hash: {analysis.detailed_breakdown?.score_hash?.substring(0, 12)}...</span>
+          </div>
+          <div className="algorithm-info">
+            <Calculator size={14} />
+            <span>Algorithm: Deterministic v2.0</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Render consistency info component
+  const renderConsistencyInfo = (analysis) => {
+    if (!analysis?.detailed_breakdown) return null;
+    
+    const details = analysis.detailed_breakdown;
+    
+    return (
+      <div className="consistency-card glass">
+        <div className="consistency-header">
+          <GitMerge size={20} />
+          <h3>Score Consistency Guarantee</h3>
+        </div>
+        <div className="consistency-content">
+          <div className="consistency-item">
+            <CheckCircle size={16} className="success" />
+            <span>Same inputs always produce same score</span>
+          </div>
+          <div className="consistency-item">
+            <Calculator size={16} className="info" />
+            <span>Math-based scoring (no AI judgment)</span>
+          </div>
+          <div className="consistency-item">
+            <Percent size={16} className="info" />
+            <span>Decimal scores: {analysis.overall_score.toFixed(2)}</span>
+          </div>
+          <div className="consistency-item">
+            <Hash size={16} className="info" />
+            <span>Deterministic variation: {details.deterministic_variation?.toFixed(3) || '0.000'}</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Render main view
   const renderMainView = () => (
     <div className="upload-section">
       <div className="section-header">
         <h2>Start Your Analysis</h2>
-        <p>Upload resume(s) and job description to get detailed insights</p>
+        <p>Upload resume(s) and job description for deterministic ATS scoring</p>
         <div className="service-status">
           <span className="status-badge backend">
             {backendStatusInfo.icon} {backendStatusInfo.text}
@@ -714,6 +817,9 @@ function App() {
           </span>
           <span className="status-badge always-active">
             <ZapIcon size={14} /> Always Active
+          </span>
+          <span className="status-badge deterministic">
+            <Calculator size={14} /> Deterministic Scoring
           </span>
           {modelInfo && (
             <span className="status-badge model">
@@ -917,21 +1023,21 @@ function App() {
           <div className="upload-stats">
             <div className="stat">
               <div className="stat-icon">
+                <Calculator size={14} />
+              </div>
+              <span>Deterministic ATS scoring</span>
+            </div>
+            <div className="stat">
+              <div className="stat-icon">
                 <ZapIcon size={14} />
               </div>
-              <span>Ultra-fast Groq analysis</span>
+              <span>Guaranteed score consistency</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
                 <Cpu size={14} />
               </div>
               <span>{getModelDisplayName(modelInfo)}</span>
-            </div>
-            <div className="stat">
-              <div className="stat-icon">
-                <Activity size={14} />
-              </div>
-              <span>Always Active backend</span>
             </div>
           </div>
         </div>
@@ -991,7 +1097,7 @@ function App() {
           <div className="loading-container">
             <div className="loading-header">
               <Loader className="spinner" />
-              <h3>{batchMode ? 'Batch Analysis in Progress' : 'Analysis in Progress'}</h3>
+              <h3>{batchMode ? 'Deterministic Batch Analysis' : 'Deterministic ATS Analysis'}</h3>
             </div>
             
             <div className="progress-container">
@@ -1002,8 +1108,8 @@ function App() {
               <span className="loading-message">{loadingMessage}</span>
               <span className="loading-subtext">
                 {batchMode 
-                  ? `Processing ${resumeFiles.length} resume(s) with ${getModelDisplayName(modelInfo)}...` 
-                  : `Using ${getModelDisplayName(modelInfo)} (Ultra-fast)...`}
+                  ? `Processing ${resumeFiles.length} resume(s) with deterministic scoring...` 
+                  : `Using deterministic ATS algorithm v2.0...`}
               </span>
             </div>
             
@@ -1013,17 +1119,13 @@ function App() {
               <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
               <span>•</span>
               <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
-              {modelInfo && (
-                <>
-                  <span>•</span>
-                  <span>Model: {getModelDisplayName(modelInfo)}</span>
-                </>
-              )}
+              <span>•</span>
+              <span>Scoring: Deterministic</span>
             </div>
             
             <div className="loading-note info">
-              <Info size={14} />
-              <span>Groq API offers ultra-fast inference for quick responses</span>
+              <Calculator size={14} />
+              <span>Deterministic scoring guarantees same inputs produce same score</span>
             </div>
           </div>
         </div>
@@ -1050,13 +1152,13 @@ function App() {
         ) : (
           <>
             <div className="button-content">
-              <ZapIcon size={20} />
+              <Calculator size={20} />
               <div className="button-text">
                 <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                 <span className="button-subtext">
                   {batchMode 
-                    ? `${resumeFiles.length} resume(s) • ${getModelDisplayName(modelInfo)}` 
-                    : `${getModelDisplayName(modelInfo)} • Ultra-fast`}
+                    ? `${resumeFiles.length} resume(s) • Deterministic Scoring` 
+                    : `Deterministic ATS Scoring • Guaranteed Consistency`}
                 </span>
               </div>
             </div>
@@ -1070,39 +1172,39 @@ function App() {
         {batchMode ? (
           <>
             <div className="tip">
-              <ZapIcon size={16} />
-              <span>Groq API provides ultra-fast batch processing</span>
+              <Calculator size={16} />
+              <span>Deterministic ATS scoring guarantees consistent results</span>
             </div>
             <div className="tip">
               <TrendingUp size={16} />
-              <span>Candidates will be ranked by ATS score from highest to lowest</span>
+              <span>Candidates ranked by deterministic score from highest to lowest</span>
             </div>
             <div className="tip">
               <Download size={16} />
-              <span>Download comprehensive Excel report with all candidate data</span>
+              <span>Download comprehensive Excel report with detailed breakdowns</span>
             </div>
             <div className="tip">
-              <Cpu size={16} />
-              <span>Using: {getModelDisplayName(modelInfo)}</span>
+              <Hash size={16} />
+              <span>Score consistency hash ensures reproducibility</span>
             </div>
           </>
         ) : (
           <>
             <div className="tip">
-              <ZapIcon size={16} />
-              <span>Groq API offers ultra-fast responses (typically &lt;1s)</span>
+              <Calculator size={16} />
+              <span>Deterministic scoring: same inputs = same score every time</span>
             </div>
             <div className="tip">
-              <Thermometer size={16} />
-              <span>Groq API automatically warms up when idle</span>
+              <Percent size={16} />
+              <span>Decimal scores (e.g., 78.42) for precise comparisons</span>
             </div>
             <div className="tip">
-              <Activity size={16} />
-              <span>Backend stays awake with automatic pings every 3 minutes</span>
+              <GitMerge size={16} />
+              <span>Score consistency guaranteed by mathematical formulas</span>
             </div>
             <div className="tip">
               <Cpu size={16} />
-              <span>Using: {getModelDisplayName(modelInfo)}</span>
+              <span>AI used only for data extraction, not scoring</span>
             </div>
           </>
         )}
@@ -1110,6 +1212,7 @@ function App() {
     </div>
   );
 
+  // Render batch results view
   const renderBatchResultsView = () => (
     <div className="results-section">
       {/* Navigation Header */}
@@ -1119,8 +1222,8 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>⚡ Batch Analysis Results</h2>
-          <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
+          <h2>🎯 Deterministic Batch Analysis Results</h2>
+          <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed with guaranteed consistency</p>
         </div>
         <div className="navigation-actions">
           <button className="download-report-btn" onClick={handleBatchDownload}>
@@ -1165,12 +1268,12 @@ function App() {
         </div>
         
         <div className="stat-card">
-          <div className="stat-icon primary">
-            <Cpu size={24} />
+          <div className="stat-icon deterministic">
+            <Calculator size={24} />
           </div>
           <div className="stat-content">
-            <div className="stat-value">{getModelDisplayName(batchAnalysis?.model_used)}</div>
-            <div className="stat-label">AI Model</div>
+            <div className="stat-value">v2.0</div>
+            <div className="stat-label">ATS Algorithm</div>
           </div>
         </div>
       </div>
@@ -1178,7 +1281,7 @@ function App() {
       {/* Candidates Ranking */}
       <div className="section-title">
         <h2>Candidate Rankings</h2>
-        <p>Sorted by ATS Score (Highest to Lowest)</p>
+        <p>Sorted by Deterministic ATS Score (Highest to Lowest) - Guaranteed Consistency</p>
       </div>
       
       <div className="batch-results-grid">
@@ -1197,9 +1300,9 @@ function App() {
               </div>
               <div className="candidate-score-display">
                 <div className="score-large" style={{ color: getScoreColor(candidate.overall_score) }}>
-                  {candidate.overall_score}
+                  {candidate.overall_score.toFixed(1)}
                 </div>
-                <div className="score-label">ATS Score</div>
+                <div className="score-label">Deterministic ATS Score</div>
               </div>
             </div>
             
@@ -1216,7 +1319,7 @@ function App() {
                 <div className="skills-section">
                   <div className="skills-header">
                     <CheckCircle size={14} />
-                    <span>Matched Skills ({candidate.skills_matched?.length || 0})</span>
+                    <span>Required Skills Matched ({candidate.skills_matched?.length || 0})</span>
                   </div>
                   <div className="skills-list">
                     {candidate.skills_matched?.slice(0, 2).map((skill, idx) => (
@@ -1231,7 +1334,7 @@ function App() {
                 <div className="skills-section">
                   <div className="skills-header">
                     <XCircle size={14} />
-                    <span>Missing Skills ({candidate.skills_missing?.length || 0})</span>
+                    <span>Required Skills Missing ({candidate.skills_missing?.length || 0})</span>
                   </div>
                   <div className="skills-list">
                     {candidate.skills_missing?.slice(0, 2).map((skill, idx) => (
@@ -1244,8 +1347,11 @@ function App() {
                 </div>
               </div>
               
-              <div className="experience-preview">
-                <p>{candidate.experience_summary?.substring(0, 120)}...</p>
+              <div className="consistency-preview">
+                <div className="consistency-badge">
+                  <Hash size={12} />
+                  <span>Consistency: {candidate.detailed_breakdown?.score_hash?.substring(0, 8)}...</span>
+                </div>
               </div>
             </div>
             
@@ -1254,7 +1360,7 @@ function App() {
                 className="view-details-btn"
                 onClick={() => navigateToCandidateDetail(index)}
               >
-                View Full Details
+                View Deterministic Analysis
                 <ChevronRight size={16} />
               </button>
               {candidate.analysis_id && (
@@ -1274,8 +1380,8 @@ function App() {
       {/* Action Buttons */}
       <div className="action-section glass">
         <div className="action-content">
-          <h3>Batch Analysis Complete</h3>
-          <p>Download comprehensive Excel report with all candidate details</p>
+          <h3>Deterministic Batch Analysis Complete</h3>
+          <p>All scores are mathematically calculated for guaranteed consistency</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
@@ -1291,6 +1397,7 @@ function App() {
     </div>
   );
 
+  // Render candidate detail view
   const renderCandidateDetailView = () => {
     const candidate = batchAnalysis?.analyses?.[selectedCandidateIndex];
     
@@ -1316,7 +1423,7 @@ function App() {
             <span>Back to Rankings</span>
           </button>
           <div className="navigation-title">
-            <h2>Candidate Details</h2>
+            <h2>Deterministic ATS Analysis</h2>
             <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
           </div>
           <div className="navigation-actions">
@@ -1374,26 +1481,36 @@ function App() {
               >
                 <div className="score-inner">
                   <div className="score-value" style={{ color: getScoreColor(candidate.overall_score) }}>
-                    {candidate.overall_score}
+                    {candidate.overall_score.toFixed(1)}
                   </div>
-                  <div className="score-label">ATS Score</div>
+                  <div className="score-label">Deterministic ATS Score</div>
                 </div>
               </div>
             </div>
             <div className="score-info">
               <h3 className="score-grade">{getScoreGrade(candidate.overall_score)}</h3>
               <p className="score-description">
-                Based on skill matching, experience relevance, and qualifications
+                Math-based scoring with guaranteed consistency
               </p>
               <div className="score-meta">
                 <span className="meta-item">
-                  <Cpu size={12} />
-                  Model: {candidate.ai_model || 'Groq AI'}
+                  <Calculator size={12} />
+                  Algorithm: Deterministic v2.0
+                </span>
+                <span className="meta-item">
+                  <Hash size={12} />
+                  Consistency Hash: {candidate.detailed_breakdown?.score_hash?.substring(0, 8)}...
                 </span>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Score Breakdown */}
+        {renderScoreBreakdown(candidate)}
+        
+        {/* Consistency Info */}
+        {renderConsistencyInfo(candidate)}
 
         {/* Recommendation Card */}
         <div className="recommendation-card glass" style={{
@@ -1403,17 +1520,17 @@ function App() {
           <div className="recommendation-header">
             <AwardIcon size={28} style={{ color: getScoreColor(candidate.overall_score) }} />
             <div>
-              <h3>Analysis Recommendation</h3>
+              <h3>Deterministic Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {candidate.ai_model || 'Groq AI'} • Consistent ATS Scoring
+                Based on mathematical scoring formulas • Guaranteed consistency
               </p>
             </div>
           </div>
           <div className="recommendation-content">
             <p className="recommendation-text">{candidate.recommendation}</p>
             <div className="confidence-badge">
-              <ZapIcon size={16} />
-              <span>Groq AI Analysis</span>
+              <Calculator size={16} />
+              <span>Deterministic ATS Scoring</span>
             </div>
           </div>
         </div>
@@ -1421,7 +1538,7 @@ function App() {
         {/* Skills Analysis */}
         <div className="section-title">
           <h2>Skills Analysis</h2>
-          <p>Detailed breakdown of matched and missing skills</p>
+          <p>Required skills matching based on deterministic comparison</p>
         </div>
         
         <div className="skills-grid">
@@ -1431,8 +1548,8 @@ function App() {
                 <CheckCircle size={24} />
               </div>
               <div className="skills-header-content">
-                <h3>Matched Skills</h3>
-                <p className="skills-subtitle">Found in resume</p>
+                <h3>Required Skills Matched</h3>
+                <p className="skills-subtitle">Found in resume (deterministic match)</p>
               </div>
               <div className="skills-count success">
                 <span>{candidate.skills_matched?.length || 0}</span>
@@ -1449,7 +1566,7 @@ function App() {
                   </li>
                 ))}
                 {(!candidate.skills_matched || candidate.skills_matched.length === 0) && (
-                  <li className="no-items">No matching skills detected</li>
+                  <li className="no-items">No required skills matched</li>
                 )}
               </ul>
             </div>
@@ -1461,8 +1578,8 @@ function App() {
                 <XCircle size={24} />
               </div>
               <div className="skills-header-content">
-                <h3>Missing Skills</h3>
-                <p className="skills-subtitle">Suggested to learn</p>
+                <h3>Required Skills Missing</h3>
+                <p className="skills-subtitle">Not found in resume (deterministic comparison)</p>
               </div>
               <div className="skills-count warning">
                 <span>{candidate.skills_missing?.length || 0}</span>
@@ -1489,7 +1606,7 @@ function App() {
         {/* Summary Section */}
         <div className="section-title">
           <h2>Profile Summary</h2>
-          <p>Insights extracted from resume</p>
+          <p>Deterministic analysis of resume content</p>
         </div>
         
         <div className="summary-grid">
@@ -1498,12 +1615,12 @@ function App() {
               <div className="summary-icon">
                 <Briefcase size={24} />
               </div>
-              <h3>Experience Summary</h3>
+              <h3>Experience Analysis</h3>
             </div>
             <div className="summary-content">
               <p className="detailed-summary">{candidate.experience_summary || "No experience summary available."}</p>
               <div className="summary-footer">
-                <span className="summary-tag">Professional Experience</span>
+                <span className="summary-tag">Deterministic Experience Match</span>
               </div>
             </div>
           </div>
@@ -1513,65 +1630,13 @@ function App() {
               <div className="summary-icon">
                 <BookOpen size={24} />
               </div>
-              <h3>Education Summary</h3>
+              <h3>Education Analysis</h3>
             </div>
             <div className="summary-content">
               <p className="detailed-summary">{candidate.education_summary || "No education summary available."}</p>
               <div className="summary-footer">
-                <span className="summary-tag">Academic Background</span>
+                <span className="summary-tag">Deterministic Education Match</span>
               </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Insights Section */}
-        <div className="section-title">
-          <h2>Insights & Recommendations</h2>
-          <p>Personalized suggestions to improve your match</p>
-        </div>
-        
-        <div className="insights-grid">
-          <div className="insight-card glass">
-            <div className="insight-header">
-              <div className="insight-icon success">
-                <TrendingUp size={24} />
-              </div>
-              <div>
-                <h3>Key Strengths</h3>
-                <p className="insight-subtitle">Areas where candidate excels</p>
-              </div>
-            </div>
-            <div className="insight-content">
-              <ul>
-                {candidate.key_strengths?.map((strength, index) => (
-                  <li key={index} className="strength-item">
-                    <div className="strength-marker"></div>
-                    <span>{strength}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-
-          <div className="insight-card glass">
-            <div className="insight-header">
-              <div className="insight-icon warning">
-                <Target size={24} />
-              </div>
-              <div>
-                <h3>Areas for Improvement</h3>
-                <p className="insight-subtitle">Opportunities to grow</p>
-              </div>
-            </div>
-            <div className="insight-content">
-              <ul>
-                {candidate.areas_for_improvement?.map((area, index) => (
-                  <li key={index} className="improvement-item">
-                    <div className="improvement-marker"></div>
-                    <span>{area}</span>
-                  </li>
-                ))}
-              </ul>
             </div>
           </div>
         </div>
@@ -1579,8 +1644,8 @@ function App() {
         {/* Action Section */}
         <div className="action-section glass">
           <div className="action-content">
-            <h3>Candidate Analysis Complete</h3>
-            <p>Download individual report or full batch report</p>
+            <h3>Deterministic Analysis Complete</h3>
+            <p>All scores are mathematically calculated for guaranteed consistency</p>
           </div>
           <div className="action-buttons">
             {candidate.analysis_id && (
@@ -1606,7 +1671,7 @@ function App() {
     );
   };
 
-  // Render single analysis view (unchanged from original)
+  // Render single analysis view
   const renderSingleAnalysisView = () => (
     <div className="results-section">
       <div className="navigation-header glass">
@@ -1618,8 +1683,8 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>⚡ Resume Analysis Results</h2>
-          <p>{analysis.candidate_name}</p>
+          <h2>🎯 Deterministic ATS Analysis Results</h2>
+          <p>{analysis.candidate_name} • Score Consistency Guaranteed</p>
         </div>
         <div className="navigation-actions">
           <button className="download-report-btn" onClick={handleDownload}>
@@ -1629,8 +1694,273 @@ function App() {
         </div>
       </div>
 
-      {/* Rest of the single analysis view (keep original code) */}
-      {/* ... existing single analysis view code ... */}
+      {/* Candidate Header */}
+      <div className="analysis-header">
+        <div className="candidate-info">
+          <div className="candidate-avatar">
+            <User size={24} />
+          </div>
+          <div>
+            <h2 className="candidate-name">{analysis.candidate_name}</h2>
+            <div className="candidate-meta">
+              <span className="analysis-date">
+                <Clock size={14} />
+                Deterministic ATS Analysis
+              </span>
+              <span className="algorithm-info">
+                <Calculator size={14} />
+                Algorithm: v2.0 • Guaranteed Consistency
+              </span>
+            </div>
+          </div>
+        </div>
+        
+        <div className="score-display">
+          <div className="score-circle-wrapper">
+            <div className="score-circle-glow" style={{ 
+              background: `radial-gradient(circle, ${getScoreColor(analysis.overall_score)}22 0%, transparent 70%)` 
+            }}></div>
+            <div 
+              className="score-circle" 
+              style={{ 
+                borderColor: getScoreColor(analysis.overall_score),
+                background: `conic-gradient(${getScoreColor(analysis.overall_score)} ${analysis.overall_score * 3.6}deg, #2d3749 0deg)` 
+              }}
+            >
+              <div className="score-inner">
+                <div className="score-value" style={{ color: getScoreColor(analysis.overall_score) }}>
+                  {analysis.overall_score.toFixed(1)}
+                </div>
+                <div className="score-label">Deterministic ATS Score</div>
+              </div>
+            </div>
+          </div>
+          <div className="score-info">
+            <h3 className="score-grade">{getScoreGrade(analysis.overall_score)}</h3>
+            <p className="score-description">
+              Math-based scoring • Same inputs = Same score every time
+            </p>
+            <div className="score-meta">
+              <span className="meta-item">
+                <Calculator size={12} />
+                Algorithm: Deterministic v2.0
+              </span>
+              <span className="meta-item">
+                <Hash size={12} />
+                Consistency Hash: {analysis.detailed_breakdown?.score_hash?.substring(0, 8)}...
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Score Breakdown */}
+      {renderScoreBreakdown(analysis)}
+      
+      {/* Consistency Info */}
+      {renderConsistencyInfo(analysis)}
+
+      {/* Recommendation Card */}
+      <div className="recommendation-card glass" style={{
+        background: `linear-gradient(135deg, ${getScoreColor(analysis.overall_score)}15, ${getScoreColor(analysis.overall_score)}08)`,
+        borderLeft: `4px solid ${getScoreColor(analysis.overall_score)}`
+      }}>
+        <div className="recommendation-header">
+          <AwardIcon size={28} style={{ color: getScoreColor(analysis.overall_score) }} />
+          <div>
+            <h3>Deterministic Analysis Recommendation</h3>
+            <p className="recommendation-subtitle">
+              Based on mathematical scoring formulas • Guaranteed consistency
+            </p>
+          </div>
+        </div>
+        <div className="recommendation-content">
+          <p className="recommendation-text">{analysis.recommendation}</p>
+          <div className="confidence-badge">
+            <Calculator size={16} />
+            <span>Deterministic ATS Scoring</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Skills Analysis */}
+      <div className="section-title">
+        <h2>Skills Analysis</h2>
+        <p>Required skills matching based on deterministic comparison</p>
+      </div>
+      
+      <div className="skills-grid">
+        <div className="skills-card glass success">
+          <div className="skills-card-header">
+            <div className="skills-icon success">
+              <CheckCircle size={24} />
+            </div>
+            <div className="skills-header-content">
+              <h3>Required Skills Matched</h3>
+              <p className="skills-subtitle">Found in resume (deterministic match)</p>
+            </div>
+            <div className="skills-count success">
+              <span>{analysis.skills_matched?.length || 0}</span>
+            </div>
+          </div>
+          <div className="skills-content">
+            <ul className="skills-list">
+              {analysis.skills_matched?.map((skill, index) => (
+                <li key={index} className="skill-item success">
+                  <div className="skill-item-content">
+                    <CheckCircle size={16} />
+                    <span>{skill}</span>
+                  </div>
+                </li>
+              ))}
+              {(!analysis.skills_matched || analysis.skills_matched.length === 0) && (
+                <li className="no-items">No required skills matched</li>
+              )}
+            </ul>
+          </div>
+        </div>
+
+        <div className="skills-card glass warning">
+          <div className="skills-card-header">
+            <div className="skills-icon warning">
+              <XCircle size={24} />
+            </div>
+            <div className="skills-header-content">
+              <h3>Required Skills Missing</h3>
+              <p className="skills-subtitle">Not found in resume (deterministic comparison)</p>
+            </div>
+            <div className="skills-count warning">
+              <span>{analysis.skills_missing?.length || 0}</span>
+            </div>
+          </div>
+          <div className="skills-content">
+            <ul className="skills-list">
+              {analysis.skills_missing?.map((skill, index) => (
+                <li key={index} className="skill-item warning">
+                  <div className="skill-item-content">
+                    <XCircle size={16} />
+                    <span>{skill}</span>
+                  </div>
+                </li>
+              ))}
+              {(!analysis.skills_missing || analysis.skills_missing.length === 0) && (
+                <li className="no-items success-text">All required skills are present!</li>
+              )}
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      {/* Summary Section */}
+      <div className="section-title">
+        <h2>Profile Summary</h2>
+        <p>Deterministic analysis of resume content</p>
+      </div>
+      
+      <div className="summary-grid">
+        <div className="summary-card glass">
+          <div className="summary-header">
+            <div className="summary-icon">
+              <Briefcase size={24} />
+            </div>
+            <h3>Experience Analysis</h3>
+          </div>
+          <div className="summary-content">
+            <p className="detailed-summary">{analysis.experience_summary || "No experience summary available."}</p>
+            <div className="summary-footer">
+              <span className="summary-tag">Deterministic Experience Match</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="summary-card glass">
+          <div className="summary-header">
+            <div className="summary-icon">
+              <BookOpen size={24} />
+            </div>
+            <h3>Education Analysis</h3>
+          </div>
+          <div className="summary-content">
+            <p className="detailed-summary">{analysis.education_summary || "No education summary available."}</p>
+            <div className="summary-footer">
+              <span className="summary-tag">Deterministic Education Match</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Insights Section */}
+      <div className="section-title">
+        <h2>Insights & Recommendations</h2>
+        <p>Based on deterministic scoring analysis</p>
+      </div>
+      
+      <div className="insights-grid">
+        <div className="insight-card glass">
+          <div className="insight-header">
+            <div className="insight-icon success">
+              <TrendingUp size={24} />
+            </div>
+            <div>
+              <h3>Key Strengths</h3>
+              <p className="insight-subtitle">Areas where candidate excels</p>
+            </div>
+          </div>
+          <div className="insight-content">
+            <ul>
+              {analysis.key_strengths?.map((strength, index) => (
+                <li key={index} className="strength-item">
+                  <div className="strength-marker"></div>
+                  <span>{strength}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="insight-card glass">
+          <div className="insight-header">
+            <div className="insight-icon warning">
+              <Target size={24} />
+            </div>
+            <div>
+              <h3>Areas for Improvement</h3>
+              <p className="insight-subtitle">Opportunities to improve ATS score</p>
+            </div>
+          </div>
+          <div className="insight-content">
+            <ul>
+              {analysis.areas_for_improvement?.map((area, index) => (
+                <li key={index} className="improvement-item">
+                  <div className="improvement-marker"></div>
+                  <span>{area}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      {/* Action Section */}
+      <div className="action-section glass">
+        <div className="action-content">
+          <h3>Deterministic Analysis Complete</h3>
+          <p>All scores are mathematically calculated for guaranteed consistency</p>
+        </div>
+        <div className="action-buttons">
+          <button className="download-button" onClick={handleDownload}>
+            <DownloadCloud size={20} />
+            <span>Download Detailed Report</span>
+          </button>
+          <button className="reset-button" onClick={() => {
+            setAnalysis(null);
+            setCurrentView('main');
+          }}>
+            <RefreshCw size={20} />
+            <span>New Analysis</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 
@@ -1664,15 +1994,15 @@ function App() {
             {/* Logo and Title */}
             <div className="logo">
               <div className="logo-glow">
-                <ZapIcon className="logo-icon" />
+                <Calculator className="logo-icon" />
               </div>
               <div className="logo-text">
-                <h1>AI Resume Analyzer</h1>
+                <h1>Deterministic ATS Analyzer</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
                   <span className="groq-badge">⚡ Groq</span>
                   <span className="divider">•</span>
-                  <span className="tagline">Ultra-fast • Always Active</span>
+                  <span className="tagline">Math-based • Consistent • Reliable</span>
                 </div>
               </div>
             </div>
@@ -1731,6 +2061,12 @@ function App() {
               {aiStatusInfo.icon}
               <span>{aiStatusInfo.text}</span>
               {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
+            </div>
+            
+            {/* Deterministic Scoring Badge */}
+            <div className="feature deterministic-badge">
+              <Calculator size={16} />
+              <span>Deterministic Scoring</span>
             </div>
             
             {/* Model Info */}
@@ -1821,21 +2157,21 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">AI Model</div>
-                <div className="summary-value">
-                  {getModelDisplayName(modelInfo)}
+                <div className="summary-label">ATS Algorithm</div>
+                <div className="summary-value deterministic">
+                  🎯 Deterministic v2.0
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Score Consistency</div>
+                <div className="summary-value success">
+                  ✅ Guaranteed
                 </div>
               </div>
               <div className="summary-item">
                 <div className="summary-label">Batch Capacity</div>
-                <div className="summary-value success">
-                  📊 Up to 15 resumes
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Keep-alive</div>
                 <div className="summary-value info">
-                  ⚡ Always Active
+                  📊 Up to 15 resumes
                 </div>
               </div>
             </div>
@@ -1876,15 +2212,13 @@ function App() {
                 <div className="indicator-dot"></div>
                 <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
               </div>
-              {modelInfo && (
-                <div className="status-indicator active">
-                  <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Model: {getModelDisplayName(modelInfo)}</span>
-                </div>
-              )}
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
-                <span>Mode: {batchMode ? 'Batch (15 resumes)' : 'Single'}</span>
+                <span>ATS: Deterministic v2.0</span>
+              </div>
+              <div className="status-indicator active">
+                <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                <span>Consistency: Guaranteed</span>
               </div>
             </div>
             
@@ -1913,28 +2247,28 @@ function App() {
         <div className="footer-content">
           <div className="footer-brand">
             <div className="footer-logo">
-              <ZapIcon size={20} />
-              <span>AI Resume Analyzer</span>
+              <Calculator size={20} />
+              <span>Deterministic ATS Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Groq API offers ultra-fast inference for instant responses • Up to 15 resumes per batch • Individual reports available
+              Math-based ATS scoring with guaranteed consistency • Same inputs = Same score every time • Up to 15 resumes per batch
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
               <h4>Features</h4>
-              <a href="#">Ultra-fast AI</a>
-              <a href="#">Groq API</a>
-              <a href="#">Batch Processing</a>
+              <a href="#">Deterministic Scoring</a>
+              <a href="#">Guaranteed Consistency</a>
+              <a href="#">Decimal Scores</a>
               <a href="#">Excel Reports</a>
             </div>
             <div className="footer-section">
-              <h4>Service</h4>
-              <a href="#">Auto Warm-up</a>
-              <a href="#">Keep-alive</a>
-              <a href="#">Health Checks</a>
-              <a href="#">Status Monitor</a>
+              <h4>Scoring</h4>
+              <a href="#">Required Skills</a>
+              <a href="#">Experience Match</a>
+              <a href="#">Education Match</a>
+              <a href="#">Formatting Score</a>
             </div>
             <div className="footer-section">
               <h4>Navigation</h4>
@@ -1949,19 +2283,19 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq API. Ultra-fast Mode.</p>
+          <p>© 2024 Deterministic ATS Analyzer. Built with React + Flask + Groq API. Math-based Scoring.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
               Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
             </span>
             <span className="stat">
-              <ZapIcon size={12} />
-              Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming'}
+              <Calculator size={12} />
+              ATS: Deterministic v2.0
             </span>
             <span className="stat">
-              <Cpu size={12} />
-              Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
+              <Hash size={12} />
+              Consistency: Guaranteed
             </span>
           </div>
         </div>
