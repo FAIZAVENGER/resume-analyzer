@@ -19,6 +19,7 @@ from collections import defaultdict
 import queue
 import asyncio
 import hashlib
+import random
 
 # Load environment variables
 load_dotenv()
@@ -39,7 +40,8 @@ GROQ_MODELS = {
         'provider': 'Groq',
         'description': 'Fast 8B model for quick responses',
         'status': 'production',
-        'free_tier': True
+        'free_tier': True,
+        'max_batch_size': 10  # Increased batch capacity
     },
     'llama-3.3-70b-versatile': {
         'name': 'Llama 3.3 70B Versatile',
@@ -47,7 +49,8 @@ GROQ_MODELS = {
         'provider': 'Groq',
         'description': 'High-quality 70B model for complex tasks',
         'status': 'production',
-        'free_tier': True
+        'free_tier': True,
+        'max_batch_size': 8
     },
     'meta-llama/llama-4-scout-17b-16e-instruct': {
         'name': 'Llama 4 Scout 17B',
@@ -55,7 +58,8 @@ GROQ_MODELS = {
         'provider': 'Groq',
         'description': 'Multimodal 17B model with vision capabilities',
         'status': 'production',
-        'free_tier': True
+        'free_tier': True,
+        'max_batch_size': 6
     }
 }
 
@@ -82,14 +86,18 @@ print(f"📁 Reports folder: {REPORTS_FOLDER}")
 score_cache = {}
 cache_lock = threading.Lock()
 
-# Request queue for batch processing
-request_queue = queue.Queue()
-MAX_CONCURRENT_REQUESTS = 3  # Process 3 resumes at a time
+# Request queue for batch processing - OPTIMIZED for 10+ resumes
+MAX_CONCURRENT_REQUESTS = 4  # Increased to 4 concurrent requests
+MAX_BATCH_SIZE = 15  # Maximum number of resumes per batch
 PROCESSING_SEMAPHORE = threading.Semaphore(MAX_CONCURRENT_REQUESTS)
 
 # Service keep-alive
-SERVICE_KEEP_ALIVE_INTERVAL = 60  # Keep alive every 60 seconds
+SERVICE_KEEP_ALIVE_INTERVAL = 60
 last_keep_alive = datetime.now()
+
+# Rate limiting protection
+RATE_LIMIT_DELAY = 1.5  # Delay between API calls (reduced from 2s)
+MAX_RETRIES = 3
 
 def calculate_resume_hash(resume_text, job_description):
     """Calculate a hash for caching consistent scores"""
@@ -133,7 +141,7 @@ def keep_service_active():
             print(f"⚠️ Keep-alive thread error: {e}")
 
 def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_override=None, retry_count=0):
-    """Call Groq API with the given prompt with retry logic"""
+    """Call Groq API with the given prompt with optimized retry logic"""
     if not GROQ_API_KEY:
         print("❌ No Groq API key configured")
         return {'error': 'no_api_key', 'status': 500}
@@ -192,18 +200,18 @@ def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_ov
             return {'error': f'api_error_400: {error_msg[:100]}', 'status': 400}
         elif response.status_code == 429:
             print(f"❌ Groq API rate limit exceeded")
-            # Exponential backoff for rate limiting
-            if retry_count < 3:
-                wait_time = (2 ** retry_count) * 5  # 5, 10, 20 seconds
-                print(f"⏳ Rate limited, retrying in {wait_time}s (attempt {retry_count + 1}/3)")
+            # Exponential backoff with jitter for rate limiting
+            if retry_count < MAX_RETRIES:
+                wait_time = (2 ** retry_count) * 2 + random.uniform(0, 1)  # 2, 5, 11 seconds with jitter
+                print(f"⏳ Rate limited, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
                 time.sleep(wait_time)
                 return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
             return {'error': 'rate_limit', 'status': 429}
         elif response.status_code == 503:
             print(f"❌ Groq API service unavailable")
             if retry_count < 2:
-                wait_time = 10  # Wait 10 seconds before retry
-                print(f"⏳ Service unavailable, retrying in {wait_time}s")
+                wait_time = 5 + random.uniform(0, 2)  # 5-7 seconds with jitter
+                print(f"⏳ Service unavailable, retrying in {wait_time:.1f}s")
                 time.sleep(wait_time)
                 return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
             return {'error': 'service_unavailable', 'status': 503}
@@ -214,14 +222,16 @@ def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_ov
     except requests.exceptions.Timeout:
         print(f"❌ Groq API timeout after {timeout}s")
         if retry_count < 2:
-            print(f"⏳ Timeout, retrying (attempt {retry_count + 1}/3)")
+            wait_time = 3 + random.uniform(0, 2)
+            print(f"⏳ Timeout, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/3)")
+            time.sleep(wait_time)
             return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
         return {'error': 'timeout', 'status': 408}
     except requests.exceptions.ConnectionError:
         print(f"❌ Groq API connection error")
         if retry_count < 2:
-            wait_time = 5
-            print(f"⏳ Connection error, retrying in {wait_time}s")
+            wait_time = 3 + random.uniform(0, 2)
+            print(f"⏳ Connection error, retrying in {wait_time:.1f}s")
             time.sleep(wait_time)
             return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
         return {'error': 'connection_error', 'status': 503}
@@ -259,7 +269,7 @@ def warmup_groq_service():
             else:
                 print(f"⚠️ Warm-up attempt failed: {error_type}")
             
-            threading.Timer(15.0, warmup_groq_service).start()
+            threading.Timer(10.0, warmup_groq_service).start()
             return False
         elif response and 'ready' in response.lower():
             elapsed = time.time() - start_time
@@ -272,12 +282,12 @@ def warmup_groq_service():
             return True
         else:
             print("⚠️ Warm-up attempt failed: Unexpected response")
-            threading.Timer(15.0, warmup_groq_service).start()
+            threading.Timer(10.0, warmup_groq_service).start()
             return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        threading.Timer(15.0, warmup_groq_service).start()
+        threading.Timer(10.0, warmup_groq_service).start()
         return False
 
 def keep_service_warm():
@@ -285,7 +295,7 @@ def keep_service_warm():
     global last_activity_time
     
     while True:
-        time.sleep(30)  # Reduced to 30 seconds for more frequent keep-alive
+        time.sleep(45)  # Increased to 45 seconds for less frequent keep-alive
         
         try:
             inactive_time = datetime.now() - last_activity_time
@@ -594,6 +604,16 @@ def home():
             animation: pulse 2s infinite;
         }}
         
+        .batch-capacity {{
+            display: inline-block;
+            background: linear-gradient(90deg, #9C27B0, #E91E63);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            margin-left: 5px;
+        }}
+        
         @keyframes pulse {{
             0%, 100% {{ opacity: 1; }}
             50% {{ opacity: 0.7; }}
@@ -603,10 +623,10 @@ def home():
 <body>
     <div class="container">
         <h1>🚀 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis • Latest Groq Models • <span class="always-active-badge">Always Active</span></p>
+        <p class="subtitle">AI-powered resume analysis • Latest Groq Models • <span class="always-active-badge">Always Active</span> <span class="batch-capacity">Up to 15 Resumes</span></p>
         
         <div class="api-status">
-            ⚡ GROQ API IS RUNNING • ALWAYS ACTIVE
+            ⚡ GROQ API IS RUNNING • BATCH PROCESSING 10+ RESUMES
         </div>
         
         <div class="warmup-status">
@@ -637,7 +657,11 @@ def home():
             </div>
             <div class="status-item">
                 <span class="status-label">Batch Capacity:</span>
-                <span class="status-value">15 resumes simultaneously</span>
+                <span class="status-value"><span class="batch-capacity">10-15 resumes simultaneously</span></span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Concurrent Processing:</span>
+                <span class="status-value">{MAX_CONCURRENT_REQUESTS} resumes at once</span>
             </div>
             <div class="status-item">
                 <span class="status-label">Context Length:</span>
@@ -648,8 +672,8 @@ def home():
                 <span class="status-value success">Every {SERVICE_KEEP_ALIVE_INTERVAL}s</span>
             </div>
             <div class="status-item">
-                <span class="status-label">Upload Folder:</span>
-                <span class="status-value">{UPLOAD_FOLDER}</span>
+                <span class="status-label">Rate Limit Protection:</span>
+                <span class="status-value success">✅ Enabled (adaptive delays)</span>
             </div>
         </div>
         
@@ -666,6 +690,12 @@ def home():
                 <span class="method">POST</span>
                 <span class="path">/analyze-batch</span>
                 <p class="description">Upload multiple resumes for batch analysis with ranking (Up to 15 resumes)</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">POST</span>
+                <span class="path">/analyze-batch-optimized</span>
+                <p class="description">Optimized batch analysis with better rate limiting for 10+ resumes</p>
             </div>
             
             <div class="endpoint">
@@ -721,7 +751,7 @@ def home():
         <div class="footer">
             <p>Powered by Flask & Groq API | Deployed on Render | <span class="always-active-badge">Always Active Mode</span></p>
             <p>AI Service: GROQ | Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
-            <p>Model: {model_info['name']} | Batch Capacity: 15 resumes | Keep-alive: {SERVICE_KEEP_ALIVE_INTERVAL}s</p>
+            <p>Model: {model_info['name']} | Batch Capacity: 10-15 resumes | Concurrent: {MAX_CONCURRENT_REQUESTS} | Keep-alive: {SERVICE_KEEP_ALIVE_INTERVAL}s</p>
         </div>
     </div>
 </body>
@@ -742,8 +772,9 @@ def extract_text_from_pdf(file_path):
         if not text.strip():
             return "Error: PDF appears to be empty or text could not be extracted"
         
-        if len(text) > 10000:
-            text = text[:10000] + "\n[Text truncated for processing...]"
+        # Optimize for Groq processing - keep it concise
+        if len(text) > 8000:
+            text = text[:8000] + "\n[Text truncated for optimal processing...]"
             
         return text
     except Exception as e:
@@ -760,8 +791,9 @@ def extract_text_from_docx(file_path):
         if not text.strip():
             return "Error: Document appears to be empty"
         
-        if len(text) > 10000:
-            text = text[:10000] + "\n[Text truncated for processing...]"
+        # Optimize for Groq processing
+        if len(text) > 8000:
+            text = text[:8000] + "\n[Text truncated for optimal processing...]"
             
         return text
     except Exception as e:
@@ -782,8 +814,9 @@ def extract_text_from_txt(file_path):
                 if not text.strip():
                     return "Error: Text file appears to be empty"
                 
-                if len(text) > 10000:
-                    text = text[:10000] + "\n[Text truncated for processing...]"
+                # Optimize for Groq processing
+                if len(text) > 8000:
+                    text = text[:8000] + "\n[Text truncated for optimal processing...]"
                     
                 return text
             except UnicodeDecodeError:
@@ -836,9 +869,9 @@ def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis
     resume_hash = calculate_resume_hash(resume_text, job_description)
     cached_score = get_cached_score(resume_hash)
     
-    # Truncate for better performance
-    resume_text = resume_text[:6000]
-    job_description = job_description[:2000]
+    # Optimize text length for better performance with batch processing
+    resume_text = resume_text[:4000]  # Reduced from 6000
+    job_description = job_description[:1500]  # Reduced from 2000
     
     # Enhanced prompt for consistent and accurate ATS scoring
     prompt = f"""You are an expert ATS (Applicant Tracking System) analyzer and recruitment specialist. 
@@ -867,13 +900,13 @@ IMPORTANT SCORING GUIDELINES FOR CONSISTENCY:
 Provide analysis in this exact JSON format:
 {{
     "candidate_name": "Extract name from resume or use filename",
-    "skills_matched": ["exact skill 1", "exact skill 2", "exact skill 3", "exact skill 4", "exact skill 5"],
-    "skills_missing": ["exact skill 1", "exact skill 2", "exact skill 3"],
+    "skills_matched": ["exact skill 1", "exact skill 2", "exact skill 3"],
+    "skills_missing": ["exact skill 1", "exact skill 2"],
     "experience_summary": "Detailed 2-3 sentence summary focusing on relevant experience matching job requirements",
     "education_summary": "Detailed 1-2 sentence summary of education and certifications matching job requirements",
     "overall_score": 75,
     "recommendation": "Highly Recommended/Recommended/Moderately Recommended/Needs Improvement/Not Recommended",
-    "key_strengths": ["specific strength 1", "specific strength 2", "specific strength 3"],
+    "key_strengths": ["specific strength 1", "specific strength 2"],
     "areas_for_improvement": ["specific area 1", "specific area 2"],
     "scoring_breakdown": {{
         "skill_match_score": 85,
@@ -889,7 +922,8 @@ CRITICAL:
 3. Match skills EXACTLY as they appear in job description
 4. Score must reflect actual match percentage (0-100)
 5. Return ONLY the JSON object, no other text or markdown formatting.
-6. Use the scoring breakdown to explain the overall score."""
+6. Use the scoring breakdown to explain the overall score.
+7. KEEP RESPONSES CONCISE for batch processing."""
 
     try:
         model_to_use = GROQ_MODEL or DEFAULT_MODEL
@@ -898,9 +932,9 @@ CRITICAL:
         
         response = call_groq_api(
             prompt=prompt,
-            max_tokens=1200,
-            temperature=0.1,  # Lower temperature for more consistent results
-            timeout=60
+            max_tokens=800,  # Reduced from 1200 for faster processing
+            temperature=0.1,
+            timeout=45  # Reduced from 60
         )
         
         if isinstance(response, dict) and 'error' in response:
@@ -934,7 +968,6 @@ CRITICAL:
         print(f"✅ Groq API response in {elapsed_time:.2f} seconds")
         
         result_text = response.strip()
-        print(f"📝 Raw response (first 500 chars): {result_text[:500]}...")
         
         json_start = result_text.find('{')
         json_end = result_text.rfind('}') + 1
@@ -1008,11 +1041,11 @@ CRITICAL:
             else:
                 analysis['overall_score'] = 70
         
-        # Limit array lengths
-        analysis['skills_matched'] = analysis['skills_matched'][:8]
-        analysis['skills_missing'] = analysis['skills_missing'][:8]
-        analysis['key_strengths'] = analysis['key_strengths'][:4]
-        analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:4]
+        # Limit array lengths for batch optimization
+        analysis['skills_matched'] = analysis['skills_matched'][:5]  # Reduced from 8
+        analysis['skills_missing'] = analysis['skills_missing'][:5]  # Reduced from 8
+        analysis['key_strengths'] = analysis['key_strengths'][:3]    # Reduced from 4
+        analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:3]  # Reduced from 4
         
         # Ensure all values are strings (not lists)
         for field in ['experience_summary', 'education_summary', 'recommendation']:
@@ -1349,11 +1382,20 @@ def analyze_resume():
         print(f"❌ Unexpected error: {traceback.format_exc()}")
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
-def process_batch_resume(resume_file, job_description, index, total, batch_id):
-    """Process a single resume in batch mode"""
+def process_batch_resume_optimized(resume_file, job_description, index, total, batch_id, delay_multiplier=1):
+    """Process a single resume in batch mode with optimized rate limiting"""
     try:
         with PROCESSING_SEMAPHORE:
             print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
+            
+            # Add adaptive delay to avoid rate limiting
+            base_delay = RATE_LIMIT_DELAY * delay_multiplier
+            jitter = random.uniform(0, 0.5)
+            delay = base_delay + jitter
+            
+            if index > 0:
+                print(f"⏳ Adding {delay:.2f}s delay to avoid rate limiting...")
+                time.sleep(delay)
             
             # Save file temporarily
             file_ext = os.path.splitext(resume_file.filename)[1].lower()
@@ -1413,9 +1455,6 @@ def process_batch_resume(resume_file, job_description, index, total, batch_id):
             
             print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
             
-            # Add delay between requests to avoid rate limiting
-            time.sleep(1)
-            
             return {
                 'analysis': analysis,
                 'status': 'success'
@@ -1458,10 +1497,9 @@ def analyze_resume_batch():
         print(f"📦 Batch size: {len(resume_files)} resumes")
         print(f"📋 Job description: {job_description[:100]}...")
         
-        # Increased batch size to 15
-        if len(resume_files) > 15:
-            print(f"❌ Too many files: {len(resume_files)}")
-            return jsonify({'error': 'Maximum 15 resumes allowed per batch'}), 400
+        if len(resume_files) > MAX_BATCH_SIZE:
+            print(f"❌ Too many files: {len(resume_files)} (max: {MAX_BATCH_SIZE})")
+            return jsonify({'error': f'Maximum {MAX_BATCH_SIZE} resumes allowed per batch'}), 400
         
         # Check API configuration
         if not GROQ_API_KEY:
@@ -1472,6 +1510,9 @@ def analyze_resume_batch():
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         all_analyses = []
         errors = []
+        
+        # Calculate adaptive delay multiplier based on batch size
+        delay_multiplier = max(1, len(resume_files) // 5)  # More delay for larger batches
         
         # Process resumes with ThreadPoolExecutor for parallel processing
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS) as executor:
@@ -1484,19 +1525,20 @@ def analyze_resume_batch():
                 
                 # Submit task to executor
                 future = executor.submit(
-                    process_batch_resume,
+                    process_batch_resume_optimized,
                     resume_file,
                     job_description,
                     idx,
                     len(resume_files),
-                    batch_id
+                    batch_id,
+                    delay_multiplier
                 )
                 futures.append((resume_file.filename, future))
             
             # Collect results
             for filename, future in futures:
                 try:
-                    result = future.result(timeout=180)  # 3 minutes timeout per resume
+                    result = future.result(timeout=120)  # 2 minutes timeout per resume
                     
                     if result['status'] == 'success':
                         all_analyses.append(result['analysis'])
@@ -1504,7 +1546,7 @@ def analyze_resume_batch():
                         errors.append({'filename': filename, 'error': result.get('error', 'Unknown error')})
                         
                 except concurrent.futures.TimeoutError:
-                    errors.append({'filename': filename, 'error': 'Processing timeout (180 seconds)'})
+                    errors.append({'filename': filename, 'error': 'Processing timeout (120 seconds)'})
                 except Exception as e:
                     errors.append({'filename': filename, 'error': f'Processing error: {str(e)[:100]}'})
         
@@ -1542,7 +1584,9 @@ def analyze_resume_batch():
             'ai_provider': "groq",
             'ai_status': "Warmed up" if warmup_complete else "Warming up",
             'processing_time': f"{time.time() - start_time:.2f}s",
-            'job_description_preview': job_description[:200] + ("..." if len(job_description) > 200 else "")
+            'job_description_preview': job_description[:200] + ("..." if len(job_description) > 200 else ""),
+            'batch_size': len(resume_files),
+            'concurrent_processing': MAX_CONCURRENT_REQUESTS
         }
         
         print(f"✅ Batch analysis completed in {time.time() - start_time:.2f}s")
@@ -1552,6 +1596,149 @@ def analyze_resume_batch():
         
     except Exception as e:
         print(f"❌ Batch analysis error: {traceback.format_exc()}")
+        return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
+
+@app.route('/analyze-batch-optimized', methods=['POST'])
+def analyze_batch_optimized():
+    """Optimized batch analysis endpoint specifically for handling 10+ resumes"""
+    update_activity()
+    
+    try:
+        print("\n" + "="*50)
+        print("🚀 OPTIMIZED batch analysis request received")
+        start_time = time.time()
+        
+        if 'resumes' not in request.files:
+            return jsonify({'error': 'No resume files provided'}), 400
+        
+        resume_files = request.files.getlist('resumes')
+        
+        if 'jobDescription' not in request.form:
+            return jsonify({'error': 'No job description provided'}), 400
+        
+        job_description = request.form['jobDescription']
+        
+        if len(resume_files) == 0:
+            return jsonify({'error': 'No files selected'}), 400
+        
+        print(f"🚀 OPTIMIZED batch size: {len(resume_files)} resumes")
+        
+        # Increased limit for optimized endpoint
+        OPTIMIZED_MAX_BATCH = 15
+        if len(resume_files) > OPTIMIZED_MAX_BATCH:
+            return jsonify({'error': f'Maximum {OPTIMIZED_MAX_BATCH} resumes allowed for optimized batch'}), 400
+        
+        # Check API configuration
+        if not GROQ_API_KEY:
+            return jsonify({'error': 'Groq API not configured'}), 500
+        
+        # Process in smaller chunks for better reliability
+        batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        all_analyses = []
+        errors = []
+        
+        # Process resumes in chunks of 3
+        chunk_size = 3
+        chunks = [resume_files[i:i + chunk_size] for i in range(0, len(resume_files), chunk_size)]
+        
+        print(f"📊 Processing {len(resume_files)} resumes in {len(chunks)} chunks")
+        
+        for chunk_idx, chunk in enumerate(chunks):
+            print(f"\n🔄 Processing chunk {chunk_idx + 1}/{len(chunks)} ({len(chunk)} resumes)")
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(3, len(chunk))) as executor:
+                futures = []
+                
+                for idx_in_chunk, resume_file in enumerate(chunk):
+                    global_idx = chunk_idx * chunk_size + idx_in_chunk
+                    
+                    if resume_file.filename == '':
+                        errors.append({'filename': 'Empty file', 'error': 'File has no name'})
+                        continue
+                    
+                    future = executor.submit(
+                        process_batch_resume_optimized,
+                        resume_file,
+                        job_description,
+                        global_idx,
+                        len(resume_files),
+                        batch_id,
+                        delay_multiplier=0.5  # Reduced delay for optimized processing
+                    )
+                    futures.append((resume_file.filename, future))
+                
+                # Collect results from this chunk
+                for filename, future in futures:
+                    try:
+                        result = future.result(timeout=90)  # 1.5 minutes timeout
+                        
+                        if result['status'] == 'success':
+                            all_analyses.append(result['analysis'])
+                        else:
+                            errors.append({'filename': filename, 'error': result.get('error', 'Unknown error')})
+                            
+                    except concurrent.futures.TimeoutError:
+                        errors.append({'filename': filename, 'error': 'Processing timeout (90 seconds)'})
+                    except Exception as e:
+                        errors.append({'filename': filename, 'error': f'Processing error: {str(e)[:100]}'})
+            
+            # Add delay between chunks
+            if chunk_idx < len(chunks) - 1:
+                chunk_delay = 2 + random.uniform(0, 2)
+                print(f"⏳ Adding {chunk_delay:.1f}s delay between chunks...")
+                time.sleep(chunk_delay)
+        
+        print(f"\n📊 Batch processing complete. Successful: {len(all_analyses)}, Failed: {len(errors)}")
+        
+        # Sort by score
+        all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
+        
+        # Add ranking
+        for rank, analysis in enumerate(all_analyses, 1):
+            analysis['rank'] = rank
+        
+        # Create batch Excel report
+        batch_excel_path = None
+        if all_analyses:
+            try:
+                print("📊 Creating optimized batch Excel report...")
+                excel_filename = f"optimized_batch_{batch_id}.xlsx"
+                batch_excel_path = create_batch_excel_report(all_analyses, job_description, excel_filename)
+                print(f"✅ Excel report created: {batch_excel_path}")
+            except Exception as e:
+                print(f"❌ Failed to create Excel report: {str(e)}")
+        
+        # Prepare response
+        batch_summary = {
+            'success': True,
+            'total_files': len(resume_files),
+            'successfully_analyzed': len(all_analyses),
+            'failed_files': len(errors),
+            'errors': errors,
+            'batch_excel_filename': os.path.basename(batch_excel_path) if batch_excel_path else None,
+            'batch_id': batch_id,
+            'analyses': all_analyses,
+            'model_used': GROQ_MODEL or DEFAULT_MODEL,
+            'ai_provider': "groq",
+            'ai_status': "Warmed up" if warmup_complete else "Warming up",
+            'processing_time': f"{time.time() - start_time:.2f}s",
+            'job_description_preview': job_description[:200] + ("..." if len(job_description) > 200 else ""),
+            'batch_size': len(resume_files),
+            'processing_method': 'optimized_chunked',
+            'chunks_processed': len(chunks),
+            'chunk_size': chunk_size
+        }
+        
+        total_time = time.time() - start_time
+        avg_time_per_resume = total_time / len(all_analyses) if all_analyses else 0
+        print(f"✅ Optimized batch analysis completed in {total_time:.2f}s")
+        print(f"📈 Average time per resume: {avg_time_per_resume:.2f}s")
+        print("="*50 + "\n")
+        
+        return jsonify(batch_summary)
+        
+    except Exception as e:
+        print(f"❌ Optimized batch analysis error: {traceback.format_exc()}")
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
 def create_batch_excel_report(analyses, job_description, filename="batch_resume_analysis.xlsx"):
@@ -2104,8 +2291,14 @@ def health_check():
         'inactive_minutes': inactive_minutes,
         'keep_alive_seconds': keep_alive_seconds,
         'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
-        'version': '8.0.0',
-        'features': ['always_active', 'groq_api_support', 'batch_processing_15', 'keep_alive', 'consistent_scoring', 'cache_system', 'individual_reports', 'parallel_processing']
+        'version': '9.0.0',
+        'features': ['always_active', 'groq_api_support', 'batch_processing_15', 'keep_alive', 'consistent_scoring', 'cache_system', 'individual_reports', 'parallel_processing', 'optimized_batch_10plus', 'rate_limit_protection'],
+        'configuration': {
+            'max_concurrent_requests': MAX_CONCURRENT_REQUESTS,
+            'max_batch_size': MAX_BATCH_SIZE,
+            'rate_limit_delay': RATE_LIMIT_DELAY,
+            'max_retries': MAX_RETRIES
+        }
     })
 
 @app.route('/models', methods=['GET'])
@@ -2193,11 +2386,12 @@ if __name__ == '__main__':
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
     print("✅ Always Active Mode: Enabled")
-    print(f"✅ Keep-alive Interval: {SERVICE_KEEP_ALIVE_INTERVAL} seconds")
-    print("✅ Parallel Processing: 3 resumes at once")
-    print("✅ Batch Capacity: Up to 15 resumes")
+    print(f"✅ Concurrent Processing: {MAX_CONCURRENT_REQUESTS} resumes at once")
+    print(f"✅ Batch Capacity: Up to {MAX_BATCH_SIZE} resumes")
+    print(f"✅ Rate Limit Protection: Enabled (adaptive delays)")
+    print("✅ Optimized for 10+ resumes: Chunked processing")
     print("✅ Individual Reports: Each candidate gets separate Excel")
-    print("✅ Consistent Scoring: Enabled")
+    print("✅ Consistent Scoring: Enabled with cache system")
     print("="*50 + "\n")
     
     if not GROQ_API_KEY:
