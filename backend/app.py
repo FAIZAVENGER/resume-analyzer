@@ -70,8 +70,6 @@ DEFAULT_MODEL = 'llama-3.1-8b-instant'
 api_available = False
 warmup_complete = False
 last_activity_time = datetime.now()
-keep_warm_thread = None
-warmup_lock = threading.Lock()
 
 # Get absolute path for uploads folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -85,10 +83,6 @@ print(f"📁 Reports folder: {REPORTS_FOLDER}")
 # Cache for consistent scoring (resume hash -> extracted data)
 extracted_data_cache = {}
 cache_lock = threading.Lock()
-
-# Service keep-alive
-SERVICE_KEEP_ALIVE_INTERVAL = 60
-last_keep_alive = datetime.now()
 
 # ==============================================
 # DETERMINISTIC ATS SCORING ENGINE
@@ -1082,7 +1076,6 @@ def analyze_job_description_rule_based(job_description: str) -> JobDescriptionAn
 
 def analyze_resume_with_deterministic_scoring(resume_text: str, job_description: str, filename: str = None, analysis_id: str = None):
     """Analyze resume using deterministic ATS scoring"""
-    update_activity()
     
     print(f"🎯 Starting deterministic ATS scoring...")
     
@@ -1237,39 +1230,13 @@ def extract_improvement_areas(breakdown: Dict) -> List[str]:
     return improvements[:4]
 
 # ==============================================
-# REST OF THE ORIGINAL CODE (with analysis function updated)
+# API CALL FUNCTIONS
 # ==============================================
 
-def calculate_resume_hash(resume_text, job_description):
-    """Calculate a hash for caching"""
-    content = f"{resume_text[:500]}{job_description[:500]}".encode('utf-8')
-    return hashlib.md5(content).hexdigest()
-
-def keep_service_active():
-    """Keep the service always active by making periodic requests"""
-    global last_keep_alive
-    
-    while True:
-        try:
-            time.sleep(SERVICE_KEEP_ALIVE_INTERVAL)
-            
-            # Make a simple request to keep the service active
-            health_check_url = f"http://localhost:{os.environ.get('PORT', 5002)}/ping"
-            try:
-                response = requests.get(health_check_url, timeout=10)
-                print(f"✅ Service keep-alive: {response.status_code}")
-            except:
-                # If we can't reach locally, try the external URL
-                try:
-                    response = requests.get(f"{request.host_url}/ping", timeout=10)
-                    print(f"✅ External keep-alive: {response.status_code}")
-                except Exception as e:
-                    print(f"⚠️ Keep-alive failed: {e}")
-            
-            last_keep_alive = datetime.now()
-            
-        except Exception as e:
-            print(f"⚠️ Keep-alive thread error: {e}")
+def update_activity():
+    """Update last activity timestamp"""
+    global last_activity_time
+    last_activity_time = datetime.now()
 
 def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_override=None, retry_count=0):
     """Call Groq API with the given prompt with retry logic"""
@@ -1398,490 +1365,26 @@ def warmup_groq_service():
             else:
                 print(f"⚠️ Warm-up attempt failed: {error_type}")
             
-            threading.Timer(15.0, warmup_groq_service).start()
             return False
         elif response and 'ready' in response.lower():
             elapsed = time.time() - start_time
             print(f"✅ Groq warmed up in {elapsed:.2f}s")
             
-            with warmup_lock:
-                warmup_complete = True
-                api_available = True
+            warmup_complete = True
+            api_available = True
                 
             return True
         else:
             print("⚠️ Warm-up attempt failed: Unexpected response")
-            threading.Timer(15.0, warmup_groq_service).start()
             return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        threading.Timer(15.0, warmup_groq_service).start()
         return False
 
-def keep_service_warm():
-    """Periodically send requests to keep Groq service responsive"""
-    global last_activity_time
-    
-    while True:
-        time.sleep(30)
-        
-        try:
-            inactive_time = datetime.now() - last_activity_time
-            
-            if GROQ_API_KEY:
-                print(f"♨️ Keeping Groq warm...")
-                
-                try:
-                    response = call_groq_api(
-                        prompt="Ping - just say 'pong'",
-                        max_tokens=5,
-                        timeout=15
-                    )
-                    if response and 'pong' in response.lower():
-                        print("✅ Keep-alive ping successful")
-                    else:
-                        print("⚠️ Keep-alive ping got unexpected response")
-                except Exception as e:
-                    print(f"⚠️ Keep-alive ping failed: {str(e)}")
-                    
-        except Exception as e:
-            print(f"⚠️ Keep-warm thread error: {str(e)}")
-
-def update_activity():
-    """Update last activity timestamp"""
-    global last_activity_time
-    last_activity_time = datetime.now()
-
-# Start warm-up on app start
-if GROQ_API_KEY:
-    print(f"🚀 Starting Groq warm-up...")
-    model_to_use = GROQ_MODEL or DEFAULT_MODEL
-    print(f"🤖 Using model: {model_to_use}")
-    
-    # Start warm-up in a separate thread
-    warmup_thread = threading.Thread(target=warmup_groq_service, daemon=True)
-    warmup_thread.start()
-    
-    # Start keep-warm thread
-    keep_warm_thread = threading.Thread(target=keep_service_warm, daemon=True)
-    keep_warm_thread.start()
-    
-    # Start service keep-alive thread
-    keep_alive_thread = threading.Thread(target=keep_service_active, daemon=True)
-    keep_alive_thread.start()
-    
-    print("✅ Keep-warm thread started")
-    print("✅ Service keep-alive thread started")
-else:
-    print("⚠️ WARNING: No Groq API key found!")
-    print("Please set GROQ_API_KEY in Render environment variables")
-
-@app.route('/')
-def home():
-    """Root route - API landing page"""
-    global warmup_complete, last_activity_time, last_keep_alive
-    
-    update_activity()
-    
-    inactive_time = datetime.now() - last_activity_time
-    inactive_minutes = int(inactive_time.total_seconds() / 60)
-    
-    keep_alive_time = datetime.now() - last_keep_alive
-    keep_alive_seconds = int(keep_alive_time.total_seconds())
-    
-    warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
-    model_to_use = GROQ_MODEL or DEFAULT_MODEL
-    model_info = GROQ_MODELS.get(model_to_use, {'name': model_to_use, 'provider': 'Groq'})
-    
-    return f'''
-    <!DOCTYPE html>
-<html>
-<head>
-    <title>Resume Analyzer API</title>
-    <style>
-        body {{
-            font-family: 'Arial', sans-serif;
-            margin: 0;
-            padding: 40px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }}
-        
-        .container {{
-            max-width: 800px;
-            width: 100%;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            padding: 40px;
-            text-align: center;
-        }}
-        
-        h1 {{
-            color: #2c3e50;
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }}
-        
-        .subtitle {{
-            color: #7f8c8d;
-            font-size: 1.1rem;
-            margin-bottom: 30px;
-        }}
-        
-        .status-card {{
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            border-radius: 15px;
-            padding: 20px;
-            margin: 20px 0;
-            border-left: 5px solid #667eea;
-        }}
-        
-        .status-item {{
-            display: flex;
-            justify-content: space-between;
-            margin: 10px 0;
-            padding: 8px 0;
-            border-bottom: 1px solid #e0e0e0;
-        }}
-        
-        .status-label {{
-            font-weight: 600;
-            color: #2c3e50;
-        }}
-        
-        .status-value {{
-            color: #27ae60;
-            font-weight: 600;
-        }}
-        
-        .warmup-status {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 12px;
-            background: #e3f2fd;
-            border-radius: 10px;
-            margin: 15px 0;
-            border-left: 4px solid #2196f3;
-        }}
-        
-        .warmup-dot {{
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: {'#4caf50' if warmup_complete else '#ff9800'};
-            animation: {'none' if warmup_complete else 'pulse 1.5s infinite'};
-        }}
-        
-        @keyframes pulse {{
-            0%, 100% {{ opacity: 1; }}
-            50% {{ opacity: 0.5; }}
-        }}
-        
-        .endpoints {{
-            text-align: left;
-            margin: 30px 0;
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 15px;
-            border: 2px solid #e9ecef;
-        }}
-        
-        .endpoint {{
-            background: white;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 10px;
-            border-left: 4px solid #667eea;
-            transition: transform 0.3s;
-        }}
-        
-        .endpoint:hover {{
-            transform: translateX(10px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-        }}
-        
-        .method {{
-            display: inline-block;
-            background: #667eea;
-            color: white;
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-weight: bold;
-            margin-right: 10px;
-            font-size: 0.9rem;
-        }}
-        
-        .path {{
-            font-family: 'Courier New', monospace;
-            font-weight: bold;
-            color: #2c3e50;
-        }}
-        
-        .description {{
-            color: #7f8c8d;
-            margin-top: 5px;
-            font-size: 0.95rem;
-        }}
-        
-        .api-status {{
-            display: inline-block;
-            padding: 8px 20px;
-            background: #27ae60;
-            color: white;
-            border-radius: 20px;
-            font-weight: bold;
-            margin: 20px 0;
-        }}
-        
-        .buttons {{
-            margin-top: 30px;
-        }}
-        
-        .btn {{
-            display: inline-block;
-            padding: 12px 30px;
-            margin: 0 10px;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            color: white;
-            text-decoration: none;
-            border-radius: 30px;
-            font-weight: bold;
-            transition: all 0.3s;
-            border: none;
-            cursor: pointer;
-            font-size: 1rem;
-        }}
-        
-        .btn:hover {{
-            transform: translateY(-3px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
-        }}
-        
-        .btn-secondary {{
-            background: linear-gradient(90deg, #11998e, #38ef7d);
-        }}
-        
-        .btn-warmup {{
-            background: linear-gradient(90deg, #ff9800, #ff5722);
-        }}
-        
-        .footer {{
-            margin-top: 40px;
-            color: #7f8c8d;
-            font-size: 0.9rem;
-        }}
-        
-        .error {{
-            color: #e74c3c;
-            font-weight: 600;
-        }}
-        
-        .success {{
-            color: #27ae60;
-            font-weight: 600;
-        }}
-        
-        .warning {{
-            color: #ff9800;
-            font-weight: 600;
-        }}
-        
-        .info {{
-            color: #2196f3;
-            font-weight: 600;
-        }}
-        
-        .model-badge {{
-            display: inline-block;
-            background: linear-gradient(90deg, #00b09b, #96c93d);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 0.85rem;
-            margin-left: 10px;
-        }}
-        
-        .free-badge {{
-            display: inline-block;
-            background: linear-gradient(90deg, #00b09b, #96c93d);
-            color: white;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 0.75rem;
-            margin-left: 5px;
-        }}
-        
-        .always-active-badge {{
-            display: inline-block;
-            background: linear-gradient(90deg, #ff6b6b, #ffa726);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 0.85rem;
-            margin-left: 10px;
-            animation: pulse 2s infinite;
-        }}
-        
-        .deterministic-badge {{
-            display: inline-block;
-            background: linear-gradient(90deg, #00b09b, #38ef7d);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 0.85rem;
-            margin-left: 10px;
-        }}
-        
-        @keyframes pulse {{
-            0%, 100% {{ opacity: 1; }}
-            50% {{ opacity: 0.7; }}
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🚀 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis • Latest Groq Models • <span class="always-active-badge">Always Active</span> • <span class="deterministic-badge">Deterministic Scoring v2.0</span></p>
-        
-        <div class="api-status">
-            ⚡ GROQ API IS RUNNING • DETERMINISTIC ATS SCORING
-        </div>
-        
-        <div class="warmup-status">
-            <div class="warmup-dot"></div>
-            <div>
-                <strong>Groq Service Status:</strong> {warmup_status}
-                <br>
-                <small>Last activity: {inactive_minutes} minute(s) ago • Keep-alive: {keep_alive_seconds}s ago</small>
-            </div>
-        </div>
-        
-        <div class="status-card">
-            <div class="status-item">
-                <span class="status-label">Service Status:</span>
-                <span class="status-value"><span class="always-active-badge">⚡ Always Active</span></span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">AI Provider:</span>
-                <span class="status-value info">GROQ</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">Model:</span>
-                <span class="status-value">{model_info['name']} <span class="model-badge">{model_info['provider']}</span> {model_info.get('free_tier', False) and '<span class="free-badge">FREE</span>' or ''}</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">API Status:</span>
-                {'<span class="success">✅ Available</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
-            </div>
-            <div class="status-item">
-                <span class="status-label">ATS Scoring:</span>
-                <span class="status-value"><span class="deterministic-badge">Deterministic v2.0</span></span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">Score Consistency:</span>
-                <span class="status-value success">Guaranteed</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">Decimal Scores:</span>
-                <span class="status-value success">Enabled (e.g., 78.42)</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">Keep-alive:</span>
-                <span class="status-value success">Every {SERVICE_KEEP_ALIVE_INTERVAL}s</span>
-            </div>
-        </div>
-        
-        <div class="endpoints">
-            <h2>📡 API Endpoints</h2>
-            
-            <div class="endpoint">
-                <span class="method">POST</span>
-                <span class="path">/analyze</span>
-                <p class="description">Upload a single resume with job description for deterministic ATS scoring</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">POST</span>
-                <span class="path">/analyze-batch</span>
-                <p class="description">Upload multiple resumes for batch analysis with consistent ranking</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/quick-check</span>
-                <p class="description">Quick Groq API availability check</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/warmup</span>
-                <p class="description">Force warm-up Groq API connection</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/health</span>
-                <p class="description">Check API health status and configuration</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/ping</span>
-                <p class="description">Simple ping to keep service awake</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/download/&lt;filename&gt;</span>
-                <p class="description">Download generated Excel analysis reports</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/download-individual/&lt;analysis_id&gt;</span>
-                <p class="description">Download individual candidate report</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/models</span>
-                <p class="description">List available Groq models</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/ats-info</span>
-                <p class="description">Learn about deterministic ATS scoring algorithm</p>
-            </div>
-        </div>
-        
-        <div class="buttons">
-            <a href="/health" class="btn">Check Health</a>
-            <a href="/warmup" class="btn btn-warmup">Warm Up Groq API</a>
-            <a href="/ats-info" class="btn btn-secondary">ATS Scoring Info</a>
-            <a href="/ping" class="btn">Ping Service</a>
-        </div>
-        
-        <div class="footer">
-            <p>Powered by Flask & Groq API | Deployed on Render | <span class="always-active-badge">Always Active Mode</span> | <span class="deterministic-badge">Deterministic ATS v2.0</span></p>
-            <p>AI Service: GROQ | Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
-            <p>Model: {model_info['name']} | ATS Algorithm: Deterministic | Score Consistency: Guaranteed</p>
-        </div>
-    </div>
-</body>
-</html>
-    '''
+# ==============================================
+# FILE EXTRACTION FUNCTIONS
+# ==============================================
 
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file"""
@@ -1950,34 +1453,9 @@ def extract_text_from_txt(file_path):
         print(f"TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
-def fallback_response(reason, filename=None):
-    """Return a fallback response when Groq API fails"""
-    update_activity()
-    
-    candidate_name = "Professional Candidate"
-    if filename:
-        base_name = os.path.splitext(filename)[0]
-        clean_name = base_name.replace('-', ' ').replace('_', ' ').title()
-        if len(clean_name.split()) <= 4:
-            candidate_name = clean_name
-    
-    return {
-        "candidate_name": candidate_name,
-        "skills_matched": ["AI service is initializing", "Please try again in a moment"],
-        "skills_missing": ["Detailed analysis coming soon", "Service warming up"],
-        "experience_summary": f"The Groq AI analysis service is currently warming up.",
-        "education_summary": f"Educational background analysis will be available once the service is ready.",
-        "overall_score": 50,
-        "recommendation": "Service Warming Up - Please Retry",
-        "key_strengths": ["Ultra-fast analysis once model is loaded", "Accurate skill matching"],
-        "areas_for_improvement": ["Please wait for model to load", "Try again in 15 seconds"],
-        "ai_provider": "groq",
-        "ai_status": "Warming up"
-    }
-
-def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None):
-    """Legacy function - now uses deterministic scoring"""
-    return analyze_resume_with_deterministic_scoring(resume_text, job_description, filename, analysis_id)
+# ==============================================
+# EXCEL REPORT FUNCTIONS
+# ==============================================
 
 def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     """Create a beautiful Excel report with the analysis"""
@@ -2210,324 +1688,6 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     wb.save(filepath)
     print(f"📄 Excel report saved to: {filepath}")
     return filepath
-
-@app.route('/analyze', methods=['POST'])
-def analyze_resume():
-    """Main endpoint to analyze single resume with deterministic scoring"""
-    update_activity()
-    
-    try:
-        print("\n" + "="*50)
-        print("📥 New single analysis request received (Deterministic Scoring)")
-        start_time = time.time()
-        
-        if 'resume' not in request.files:
-            print("❌ No resume file in request")
-            return jsonify({'error': 'No resume file provided'}), 400
-        
-        if 'jobDescription' not in request.form:
-            print("❌ No job description in request")
-            return jsonify({'error': 'No job description provided'}), 400
-        
-        resume_file = request.files['resume']
-        job_description = request.form['jobDescription']
-        
-        print(f"📄 Resume file: {resume_file.filename}")
-        print(f"📋 Job description length: {len(job_description)} characters")
-        
-        if resume_file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
-        
-        # Check file size (15MB limit)
-        resume_file.seek(0, 2)
-        file_size = resume_file.tell()
-        resume_file.seek(0)
-        
-        if file_size > 15 * 1024 * 1024:
-            print(f"❌ File too large: {file_size} bytes")
-            return jsonify({'error': 'File size too large. Maximum size is 15MB.'}), 400
-        
-        # Save the uploaded file
-        file_ext = os.path.splitext(resume_file.filename)[1].lower()
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}{file_ext}")
-        resume_file.save(file_path)
-        print(f"💾 File saved to: {file_path}")
-        
-        # Extract text
-        print(f"📖 Extracting text from {file_ext} file...")
-        extraction_start = time.time()
-        
-        if file_ext == '.pdf':
-            resume_text = extract_text_from_pdf(file_path)
-        elif file_ext in ['.docx', '.doc']:
-            resume_text = extract_text_from_docx(file_path)
-        elif file_ext == '.txt':
-            resume_text = extract_text_from_txt(file_path)
-        else:
-            print(f"❌ Unsupported file format: {file_ext}")
-            return jsonify({'error': 'Unsupported file format. Please upload PDF, DOCX, or TXT'}), 400
-        
-        if resume_text.startswith('Error'):
-            print(f"❌ Text extraction error: {resume_text}")
-            return jsonify({'error': resume_text}), 500
-        
-        extraction_time = time.time() - extraction_start
-        print(f"✅ Extracted {len(resume_text)} characters in {extraction_time:.2f}s")
-        
-        # Check API configuration
-        if not GROQ_API_KEY:
-            print("❌ No Groq API key configured")
-            return jsonify({'error': 'Groq API not configured. Please set GROQ_API_KEY in environment variables'}), 500
-        
-        # Analyze with deterministic scoring
-        print(f"🎯 Starting deterministic ATS scoring...")
-        ai_start = time.time()
-        
-        # Generate unique analysis ID
-        analysis_id = f"single_{timestamp}"
-        analysis = analyze_resume_with_deterministic_scoring(resume_text, job_description, resume_file.filename, analysis_id)
-        ai_time = time.time() - ai_start
-        
-        print(f"✅ Deterministic ATS scoring completed in {ai_time:.2f}s")
-        print(f"📊 Score: {analysis['overall_score']} | Consistency Hash: {analysis.get('detailed_breakdown', {}).get('score_hash', '')[:8]}")
-        
-        # Create Excel report
-        print("📊 Creating Excel report...")
-        excel_start = time.time()
-        excel_filename = f"analysis_{analysis_id}.xlsx"
-        excel_path = create_excel_report(analysis, excel_filename)
-        excel_time = time.time() - excel_start
-        print(f"✅ Excel report created in {excel_time:.2f}s: {excel_path}")
-        
-        # Clean up
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        
-        # Return analysis
-        analysis['excel_filename'] = os.path.basename(excel_path)
-        analysis['ai_model'] = GROQ_MODEL or DEFAULT_MODEL
-        analysis['ai_provider'] = "groq"
-        analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
-        analysis['response_time'] = f"{ai_time:.2f}s"
-        analysis['analysis_id'] = analysis_id
-        analysis['ats_algorithm'] = "deterministic_v2.0"
-        
-        total_time = time.time() - start_time
-        print(f"✅ Request completed in {total_time:.2f} seconds")
-        print("="*50 + "\n")
-        
-        return jsonify(analysis)
-        
-    except Exception as e:
-        print(f"❌ Unexpected error: {traceback.format_exc()}")
-        return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
-
-def process_batch_resume(resume_file, job_description, index, total, batch_id):
-    """Process a single resume in batch mode with deterministic scoring"""
-    try:
-        print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
-        
-        # Save file temporarily
-        file_ext = os.path.splitext(resume_file.filename)[1].lower()
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        file_path = os.path.join(UPLOAD_FOLDER, f"batch_{batch_id}_{index}{file_ext}")
-        resume_file.save(file_path)
-        
-        # Extract text
-        if file_ext == '.pdf':
-            resume_text = extract_text_from_pdf(file_path)
-        elif file_ext in ['.docx', '.doc']:
-            resume_text = extract_text_from_docx(file_path)
-        elif file_ext == '.txt':
-            resume_text = extract_text_from_txt(file_path)
-        else:
-            os.remove(file_path)
-            return {
-                'filename': resume_file.filename,
-                'error': f'Unsupported format: {file_ext}',
-                'status': 'failed'
-            }
-        
-        if resume_text.startswith('Error'):
-            os.remove(file_path)
-            return {
-                'filename': resume_file.filename,
-                'error': resume_text,
-                'status': 'failed'
-            }
-        
-        # Analyze with deterministic scoring
-        analysis_id = f"{batch_id}_candidate_{index}"
-        analysis = analyze_resume_with_deterministic_scoring(resume_text, job_description, resume_file.filename, analysis_id)
-        analysis['filename'] = resume_file.filename
-        analysis['original_filename'] = resume_file.filename
-        
-        # Get file size
-        resume_file.seek(0, 2)
-        file_size = resume_file.tell()
-        resume_file.seek(0)
-        analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
-        
-        # Add analysis ID
-        analysis['analysis_id'] = analysis_id
-        
-        # Create individual Excel report
-        try:
-            excel_filename = f"individual_{analysis_id}.xlsx"
-            excel_path = create_excel_report(analysis, excel_filename)
-            analysis['individual_excel_filename'] = os.path.basename(excel_path)
-        except Exception as e:
-            print(f"⚠️ Failed to create individual report: {str(e)}")
-            analysis['individual_excel_filename'] = None
-        
-        # Clean up
-        os.remove(file_path)
-        
-        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
-        
-        # Add small delay to avoid rate limiting
-        time.sleep(0.5)
-        
-        return {
-            'analysis': analysis,
-            'status': 'success'
-        }
-            
-    except Exception as e:
-        print(f"❌ Error processing {resume_file.filename}: {str(e)}")
-        return {
-            'filename': resume_file.filename,
-            'error': f"Processing error: {str(e)[:100]}",
-            'status': 'failed'
-        }
-
-@app.route('/analyze-batch', methods=['POST'])
-def analyze_resume_batch():
-    """Analyze multiple resumes with deterministic scoring"""
-    update_activity()
-    
-    try:
-        print("\n" + "="*50)
-        print("📦 New batch analysis request received (Deterministic Scoring)")
-        start_time = time.time()
-        
-        if 'resumes' not in request.files:
-            print("❌ No 'resumes' key in request.files")
-            return jsonify({'error': 'No resume files provided'}), 400
-        
-        resume_files = request.files.getlist('resumes')
-        
-        if 'jobDescription' not in request.form:
-            print("❌ No job description in request")
-            return jsonify({'error': 'No job description provided'}), 400
-        
-        job_description = request.form['jobDescription']
-        
-        if len(resume_files) == 0:
-            print("❌ No files selected")
-            return jsonify({'error': 'No files selected'}), 400
-        
-        print(f"📦 Batch size: {len(resume_files)} resumes")
-        print(f"📋 Job description: {job_description[:100]}...")
-        
-        # Increased batch size to 15
-        if len(resume_files) > 15:
-            print(f"❌ Too many files: {len(resume_files)}")
-            return jsonify({'error': 'Maximum 15 resumes allowed per batch'}), 400
-        
-        # Check API configuration
-        if not GROQ_API_KEY:
-            print("❌ No Groq API key configured")
-            return jsonify({'error': 'Groq API not configured'}), 500
-        
-        # Prepare batch analysis
-        batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        all_analyses = []
-        errors = []
-        
-        # Process resumes with ThreadPoolExecutor for parallel processing
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            futures = []
-            
-            for idx, resume_file in enumerate(resume_files):
-                if resume_file.filename == '':
-                    errors.append({'filename': 'Empty file', 'error': 'File has no name'})
-                    continue
-                
-                # Submit task to executor
-                future = executor.submit(
-                    process_batch_resume,
-                    resume_file,
-                    job_description,
-                    idx,
-                    len(resume_files),
-                    batch_id
-                )
-                futures.append((resume_file.filename, future))
-            
-            # Collect results
-            for filename, future in futures:
-                try:
-                    result = future.result(timeout=180)  # 3 minutes timeout per resume
-                    
-                    if result['status'] == 'success':
-                        all_analyses.append(result['analysis'])
-                    else:
-                        errors.append({'filename': filename, 'error': result.get('error', 'Unknown error')})
-                        
-                except concurrent.futures.TimeoutError:
-                    errors.append({'filename': filename, 'error': 'Processing timeout (180 seconds)'})
-                except Exception as e:
-                    errors.append({'filename': filename, 'error': f'Processing error: {str(e)[:100]}'})
-        
-        print(f"\n📊 Batch processing complete. Successful: {len(all_analyses)}, Failed: {len(errors)}")
-        
-        # Sort by score
-        all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
-        
-        # Add ranking
-        for rank, analysis in enumerate(all_analyses, 1):
-            analysis['rank'] = rank
-        
-        # Create batch Excel report if we have analyses
-        batch_excel_path = None
-        if all_analyses:
-            try:
-                print("📊 Creating batch Excel report...")
-                excel_filename = f"batch_analysis_{batch_id}.xlsx"
-                batch_excel_path = create_batch_excel_report(all_analyses, job_description, excel_filename)
-                print(f"✅ Excel report created: {batch_excel_path}")
-            except Exception as e:
-                print(f"❌ Failed to create Excel report: {str(e)}")
-        
-        # Prepare response
-        batch_summary = {
-            'success': True,
-            'total_files': len(resume_files),
-            'successfully_analyzed': len(all_analyses),
-            'failed_files': len(errors),
-            'errors': errors,
-            'batch_excel_filename': os.path.basename(batch_excel_path) if batch_excel_path else None,
-            'batch_id': batch_id,
-            'analyses': all_analyses,
-            'model_used': GROQ_MODEL or DEFAULT_MODEL,
-            'ai_provider': "groq",
-            'ai_status': "Warmed up" if warmup_complete else "Warming up",
-            'processing_time': f"{time.time() - start_time:.2f}s",
-            'ats_algorithm': "deterministic_v2.0",
-            'score_consistency': "guaranteed",
-            'job_description_preview': job_description[:200] + ("..." if len(job_description) > 200 else "")
-        }
-        
-        print(f"✅ Batch analysis completed in {time.time() - start_time:.2f}s")
-        print("="*50 + "\n")
-        
-        return jsonify(batch_summary)
-        
-    except Exception as e:
-        print(f"❌ Batch analysis error: {traceback.format_exc()}")
-        return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
 def create_batch_excel_report(analyses, job_description, filename="batch_resume_analysis.xlsx"):
     """Create a comprehensive Excel report for batch analysis"""
@@ -2838,7 +1998,7 @@ def create_individual_sheet(ws, analysis, candidate_number):
     row += 1
     
     # Areas for Improvement
-    ws.merge_cells(f'A{row}:B{row}')
+    ws.merge_calls(f'A{row}:B{row}')
     cell = ws[f'A{row}']
     cell.value = "AREAS FOR IMPROVEMENT"
     cell.font = header_font
@@ -2850,6 +2010,335 @@ def create_individual_sheet(ws, analysis, candidate_number):
         ws[f'A{row}'] = "•"
         ws[f'B{row}'] = area
         row += 1
+
+# ==============================================
+# API ENDPOINTS
+# ==============================================
+
+@app.route('/')
+def home():
+    """Root route - API landing page"""
+    return jsonify({
+        'status': 'Resume Analyzer API',
+        'version': '2.0.0',
+        'ats_scoring': 'deterministic_v2.0',
+        'description': 'Deterministic ATS scoring with guaranteed consistency'
+    })
+
+@app.route('/analyze', methods=['POST'])
+def analyze_resume():
+    """Main endpoint to analyze single resume with deterministic scoring"""
+    update_activity()
+    
+    try:
+        print("\n" + "="*50)
+        print("📥 New single analysis request received (Deterministic Scoring)")
+        start_time = time.time()
+        
+        if 'resume' not in request.files:
+            print("❌ No resume file in request")
+            return jsonify({'error': 'No resume file provided'}), 400
+        
+        if 'jobDescription' not in request.form:
+            print("❌ No job description in request")
+            return jsonify({'error': 'No job description provided'}), 400
+        
+        resume_file = request.files['resume']
+        job_description = request.form['jobDescription']
+        
+        print(f"📄 Resume file: {resume_file.filename}")
+        print(f"📋 Job description length: {len(job_description)} characters")
+        
+        if resume_file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Check file size (15MB limit)
+        resume_file.seek(0, 2)
+        file_size = resume_file.tell()
+        resume_file.seek(0)
+        
+        if file_size > 15 * 1024 * 1024:
+            print(f"❌ File too large: {file_size} bytes")
+            return jsonify({'error': 'File size too large. Maximum size is 15MB.'}), 400
+        
+        # Save the uploaded file
+        file_ext = os.path.splitext(resume_file.filename)[1].lower()
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}{file_ext}")
+        resume_file.save(file_path)
+        print(f"💾 File saved to: {file_path}")
+        
+        # Extract text
+        print(f"📖 Extracting text from {file_ext} file...")
+        extraction_start = time.time()
+        
+        if file_ext == '.pdf':
+            resume_text = extract_text_from_pdf(file_path)
+        elif file_ext in ['.docx', '.doc']:
+            resume_text = extract_text_from_docx(file_path)
+        elif file_ext == '.txt':
+            resume_text = extract_text_from_txt(file_path)
+        else:
+            print(f"❌ Unsupported file format: {file_ext}")
+            return jsonify({'error': 'Unsupported file format. Please upload PDF, DOCX, or TXT'}), 400
+        
+        if resume_text.startswith('Error'):
+            print(f"❌ Text extraction error: {resume_text}")
+            return jsonify({'error': resume_text}), 500
+        
+        extraction_time = time.time() - extraction_start
+        print(f"✅ Extracted {len(resume_text)} characters in {extraction_time:.2f}s")
+        
+        # Check API configuration
+        if not GROQ_API_KEY:
+            print("❌ No Groq API key configured")
+            return jsonify({'error': 'Groq API not configured. Please set GROQ_API_KEY in environment variables'}), 500
+        
+        # Analyze with deterministic scoring
+        print(f"🎯 Starting deterministic ATS scoring...")
+        ai_start = time.time()
+        
+        # Generate unique analysis ID
+        analysis_id = f"single_{timestamp}"
+        analysis = analyze_resume_with_deterministic_scoring(resume_text, job_description, resume_file.filename, analysis_id)
+        ai_time = time.time() - ai_start
+        
+        print(f"✅ Deterministic ATS scoring completed in {ai_time:.2f}s")
+        print(f"📊 Score: {analysis['overall_score']} | Consistency Hash: {analysis.get('detailed_breakdown', {}).get('score_hash', '')[:8]}")
+        
+        # Create Excel report
+        print("📊 Creating Excel report...")
+        excel_start = time.time()
+        excel_filename = f"analysis_{analysis_id}.xlsx"
+        excel_path = create_excel_report(analysis, excel_filename)
+        excel_time = time.time() - excel_start
+        print(f"✅ Excel report created in {excel_time:.2f}s: {excel_path}")
+        
+        # Clean up
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        
+        # Return analysis
+        analysis['excel_filename'] = os.path.basename(excel_path)
+        analysis['ai_model'] = GROQ_MODEL or DEFAULT_MODEL
+        analysis['ai_provider'] = "groq"
+        analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
+        analysis['response_time'] = f"{ai_time:.2f}s"
+        analysis['analysis_id'] = analysis_id
+        analysis['ats_algorithm'] = "deterministic_v2.0"
+        
+        total_time = time.time() - start_time
+        print(f"✅ Request completed in {total_time:.2f} seconds")
+        print("="*50 + "\n")
+        
+        return jsonify(analysis)
+        
+    except Exception as e:
+        print(f"❌ Unexpected error: {traceback.format_exc()}")
+        return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
+
+def process_batch_resume(resume_file, job_description, index, total, batch_id):
+    """Process a single resume in batch mode with deterministic scoring"""
+    try:
+        print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
+        
+        # Save file temporarily
+        file_ext = os.path.splitext(resume_file.filename)[1].lower()
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        file_path = os.path.join(UPLOAD_FOLDER, f"batch_{batch_id}_{index}{file_ext}")
+        resume_file.save(file_path)
+        
+        # Extract text
+        if file_ext == '.pdf':
+            resume_text = extract_text_from_pdf(file_path)
+        elif file_ext in ['.docx', '.doc']:
+            resume_text = extract_text_from_docx(file_path)
+        elif file_ext == '.txt':
+            resume_text = extract_text_from_txt(file_path)
+        else:
+            os.remove(file_path)
+            return {
+                'filename': resume_file.filename,
+                'error': f'Unsupported format: {file_ext}',
+                'status': 'failed'
+            }
+        
+        if resume_text.startswith('Error'):
+            os.remove(file_path)
+            return {
+                'filename': resume_file.filename,
+                'error': resume_text,
+                'status': 'failed'
+            }
+        
+        # Analyze with deterministic scoring
+        analysis_id = f"{batch_id}_candidate_{index}"
+        analysis = analyze_resume_with_deterministic_scoring(resume_text, job_description, resume_file.filename, analysis_id)
+        analysis['filename'] = resume_file.filename
+        analysis['original_filename'] = resume_file.filename
+        
+        # Get file size
+        resume_file.seek(0, 2)
+        file_size = resume_file.tell()
+        resume_file.seek(0)
+        analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
+        
+        # Add analysis ID
+        analysis['analysis_id'] = analysis_id
+        
+        # Create individual Excel report
+        try:
+            excel_filename = f"individual_{analysis_id}.xlsx"
+            excel_path = create_excel_report(analysis, excel_filename)
+            analysis['individual_excel_filename'] = os.path.basename(excel_path)
+        except Exception as e:
+            print(f"⚠️ Failed to create individual report: {str(e)}")
+            analysis['individual_excel_filename'] = None
+        
+        # Clean up
+        os.remove(file_path)
+        
+        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
+        
+        return {
+            'analysis': analysis,
+            'status': 'success'
+        }
+            
+    except Exception as e:
+        print(f"❌ Error processing {resume_file.filename}: {str(e)}")
+        return {
+            'filename': resume_file.filename,
+            'error': f"Processing error: {str(e)[:100]}",
+            'status': 'failed'
+        }
+
+@app.route('/analyze-batch', methods=['POST'])
+def analyze_resume_batch():
+    """Analyze multiple resumes with deterministic scoring"""
+    update_activity()
+    
+    try:
+        print("\n" + "="*50)
+        print("📦 New batch analysis request received (Deterministic Scoring)")
+        start_time = time.time()
+        
+        if 'resumes' not in request.files:
+            print("❌ No 'resumes' key in request.files")
+            return jsonify({'error': 'No resume files provided'}), 400
+        
+        resume_files = request.files.getlist('resumes')
+        
+        if 'jobDescription' not in request.form:
+            print("❌ No job description in request")
+            return jsonify({'error': 'No job description provided'}), 400
+        
+        job_description = request.form['jobDescription']
+        
+        if len(resume_files) == 0:
+            print("❌ No files selected")
+            return jsonify({'error': 'No files selected'}), 400
+        
+        print(f"📦 Batch size: {len(resume_files)} resumes")
+        print(f"📋 Job description: {job_description[:100]}...")
+        
+        # Increased batch size to 15
+        if len(resume_files) > 15:
+            print(f"❌ Too many files: {len(resume_files)}")
+            return jsonify({'error': 'Maximum 15 resumes allowed per batch'}), 400
+        
+        # Check API configuration
+        if not GROQ_API_KEY:
+            print("❌ No Groq API key configured")
+            return jsonify({'error': 'Groq API not configured'}), 500
+        
+        # Prepare batch analysis
+        batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        all_analyses = []
+        errors = []
+        
+        # Process resumes with ThreadPoolExecutor for parallel processing
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            futures = []
+            
+            for idx, resume_file in enumerate(resume_files):
+                if resume_file.filename == '':
+                    errors.append({'filename': 'Empty file', 'error': 'File has no name'})
+                    continue
+                
+                # Submit task to executor
+                future = executor.submit(
+                    process_batch_resume,
+                    resume_file,
+                    job_description,
+                    idx,
+                    len(resume_files),
+                    batch_id
+                )
+                futures.append((resume_file.filename, future))
+            
+            # Collect results
+            for filename, future in futures:
+                try:
+                    result = future.result(timeout=180)  # 3 minutes timeout per resume
+                    
+                    if result['status'] == 'success':
+                        all_analyses.append(result['analysis'])
+                    else:
+                        errors.append({'filename': filename, 'error': result.get('error', 'Unknown error')})
+                        
+                except concurrent.futures.TimeoutError:
+                    errors.append({'filename': filename, 'error': 'Processing timeout (180 seconds)'})
+                except Exception as e:
+                    errors.append({'filename': filename, 'error': f'Processing error: {str(e)[:100]}'})
+        
+        print(f"\n📊 Batch processing complete. Successful: {len(all_analyses)}, Failed: {len(errors)}")
+        
+        # Sort by score
+        all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
+        
+        # Add ranking
+        for rank, analysis in enumerate(all_analyses, 1):
+            analysis['rank'] = rank
+        
+        # Create batch Excel report if we have analyses
+        batch_excel_path = None
+        if all_analyses:
+            try:
+                print("📊 Creating batch Excel report...")
+                excel_filename = f"batch_analysis_{batch_id}.xlsx"
+                batch_excel_path = create_batch_excel_report(all_analyses, job_description, excel_filename)
+                print(f"✅ Excel report created: {batch_excel_path}")
+            except Exception as e:
+                print(f"❌ Failed to create Excel report: {str(e)}")
+        
+        # Prepare response
+        batch_summary = {
+            'success': True,
+            'total_files': len(resume_files),
+            'successfully_analyzed': len(all_analyses),
+            'failed_files': len(errors),
+            'errors': errors,
+            'batch_excel_filename': os.path.basename(batch_excel_path) if batch_excel_path else None,
+            'batch_id': batch_id,
+            'analyses': all_analyses,
+            'model_used': GROQ_MODEL or DEFAULT_MODEL,
+            'ai_provider': "groq",
+            'ai_status': "Warmed up" if warmup_complete else "Warming up",
+            'processing_time': f"{time.time() - start_time:.2f}s",
+            'ats_algorithm': "deterministic_v2.0",
+            'score_consistency': "guaranteed",
+            'job_description_preview': job_description[:200] + ("..." if len(job_description) > 200 else "")
+        }
+        
+        print(f"✅ Batch analysis completed in {time.time() - start_time:.2f}s")
+        print("="*50 + "\n")
+        
+        return jsonify(batch_summary)
+        
+    except Exception as e:
+        print(f"❌ Batch analysis error: {traceback.format_exc()}")
+        return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_report(filename):
@@ -3047,9 +2536,6 @@ def ping():
     """Simple ping to keep service awake"""
     update_activity()
     
-    global last_keep_alive
-    last_keep_alive = datetime.now()
-    
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
     return jsonify({
         'status': 'pong',
@@ -3060,8 +2546,6 @@ def ping():
         'model': model_to_use,
         'ats_algorithm': 'deterministic_v2.0',
         'score_consistency': 'guaranteed',
-        'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
-        'keep_alive_active': True,
         'message': f'Service is alive with deterministic ATS scoring!' if warmup_complete else f'Service is alive, warming up...'
     })
 
@@ -3072,9 +2556,6 @@ def health_check():
     
     inactive_time = datetime.now() - last_activity_time
     inactive_minutes = int(inactive_time.total_seconds() / 60)
-    
-    keep_alive_time = datetime.now() - last_keep_alive
-    keep_alive_seconds = int(keep_alive_time.total_seconds())
     
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
     model_info = GROQ_MODELS.get(model_to_use, {'name': model_to_use, 'provider': 'Groq'})
@@ -3103,11 +2584,9 @@ def health_check():
             'total_entries': cache_size,
             'resume_data_cached': resume_cache_count,
             'job_analysis_cached': job_cache_count,
-            'cache_hit_ratio': 'N/A'  # Could be enhanced with hit tracking
+            'cache_hit_ratio': 'N/A'
         },
         'inactive_minutes': inactive_minutes,
-        'keep_alive_seconds': keep_alive_seconds,
-        'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
         'version': '2.0.0',
         'features': [
             'deterministic_ats_scoring',
@@ -3123,7 +2602,6 @@ def health_check():
             'education_certification_match',
             'resume_formatting_scoring',
             'cache_system',
-            'always_active',
             'batch_processing_15'
         ]
     })
@@ -3206,60 +2684,23 @@ def ats_info():
         }
     })
 
-@app.route('/switch-model/<model_name>', methods=['POST'])
-def switch_model(model_name):
-    """Switch to a different Groq model (for testing)"""
-    update_activity()
+# Start warm-up on app start
+if GROQ_API_KEY:
+    print(f"🚀 Starting Groq warm-up...")
+    model_to_use = GROQ_MODEL or DEFAULT_MODEL
+    print(f"🤖 Using model: {model_to_use}")
     
-    if model_name not in GROQ_MODELS:
-        return jsonify({
-            'status': 'error',
-            'message': f'Model {model_name} not available',
-            'available_models': list(GROQ_MODELS.keys())
-        })
+    # Start warm-up in a separate thread to avoid blocking
+    def delayed_warmup():
+        time.sleep(2)  # Wait for server to start
+        warmup_groq_service()
     
-    return jsonify({
-        'status': 'success',
-        'message': f'Model {model_name} is available',
-        'model': model_name,
-        'model_info': GROQ_MODELS[model_name],
-        'note': 'To change model, update GROQ_MODEL environment variable',
-        'timestamp': datetime.now().isoformat()
-    })
-
-@app.route('/cleanup-old-files', methods=['POST'])
-def cleanup_old_files():
-    """Cleanup old files (run periodically)"""
-    try:
-        cutoff_time = datetime.now() - timedelta(hours=24)
-        deleted_count = 0
-        
-        # Cleanup uploads folder
-        for filename in os.listdir(UPLOAD_FOLDER):
-            file_path = os.path.join(UPLOAD_FOLDER, filename)
-            if os.path.isfile(file_path):
-                file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
-                if file_time < cutoff_time:
-                    os.remove(file_path)
-                    deleted_count += 1
-        
-        # Cleanup reports folder
-        for filename in os.listdir(REPORTS_FOLDER):
-            file_path = os.path.join(REPORTS_FOLDER, filename)
-            if os.path.isfile(file_path):
-                file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
-                if file_time < cutoff_time:
-                    os.remove(file_path)
-                    deleted_count += 1
-        
-        return jsonify({
-            'status': 'success',
-            'message': f'Cleaned up {deleted_count} old files',
-            'timestamp': datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    warmup_thread = threading.Thread(target=delayed_warmup, daemon=True)
+    warmup_thread.start()
+    
+else:
+    print("⚠️ WARNING: No Groq API key found!")
+    print("Please set GROQ_API_KEY in Render environment variables")
 
 if __name__ == '__main__':
     print("\n" + "="*50)
@@ -3275,8 +2716,6 @@ if __name__ == '__main__':
     print(f"✅ Decimal Scores: Enabled")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
-    print("✅ Always Active Mode: Enabled")
-    print(f"✅ Keep-alive Interval: {SERVICE_KEEP_ALIVE_INTERVAL} seconds")
     print("✅ Deterministic Scoring: Math-only, no AI judgment")
     print("✅ Cache System: Resume and job analysis caching")
     print("✅ Batch Capacity: Up to 15 resumes")
