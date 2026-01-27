@@ -2381,7 +2381,189 @@ body {
   padding-top: 0.5rem;
   border-top: 1px dashed rgba(255, 255, 255, 0.1);
 }
+/* Multi-key specific styles */
+.status-badge.multi-key {
+  background: linear-gradient(135deg, #00b09b, #96c93d);
+}
 
+.key-distribution-info {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(0, 176, 155, 0.1), rgba(150, 201, 61, 0.1));
+  border: 1px solid rgba(0, 176, 155, 0.3);
+}
+
+.multi-key-stats-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.stat-card.wide {
+  grid-column: span 2;
+}
+
+.key-distribution-card {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+}
+
+.key-distribution-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.key-distribution-content {
+  color: #666;
+}
+
+.key-badges {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.key-badge {
+  padding: 0.375rem 0.75rem;
+  background: linear-gradient(135deg, rgba(0, 176, 155, 0.1), rgba(150, 201, 61, 0.1));
+  border: 1px solid rgba(0, 176, 155, 0.3);
+  border-radius: 20px;
+  font-size: 0.85rem;
+  color: #00b09b;
+}
+
+.key-badge-small {
+  padding: 0.25rem 0.5rem;
+  background: rgba(0, 176, 155, 0.1);
+  border: 1px solid rgba(0, 176, 155, 0.3);
+  border-radius: 12px;
+  font-size: 0.75rem;
+  color: #00b09b;
+}
+
+/* API Keys Status in panel */
+.api-keys-status {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.api-keys-status h4 {
+  margin-bottom: 1rem;
+  color: #fff;
+  font-size: 1rem;
+}
+
+.keys-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.key-status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+}
+
+.key-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.key-name {
+  font-weight: 600;
+  color: #fff;
+}
+
+.key-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.key-status.active {
+  color: #00ff9d;
+}
+
+.key-status.error {
+  color: #ff6b6b;
+}
+
+.key-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.key-usage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.key-availability {
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+}
+
+.key-availability.available {
+  background: rgba(0, 255, 157, 0.1);
+  color: #00ff9d;
+  border: 1px solid rgba(0, 255, 157, 0.3);
+}
+
+.key-availability.unavailable {
+  background: rgba(255, 107, 107, 0.1);
+  color: #ff6b6b;
+  border: 1px solid rgba(255, 107, 107, 0.3);
+}
+
+/* Multi-key message */
+.multi-key-message {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: linear-gradient(135deg, rgba(0, 176, 155, 0.1), rgba(150, 201, 61, 0.1));
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: #00b09b;
+  margin-top: 0.5rem;
+}
+
+/* Feature button for API keys */
+.feature.api-keys-info {
+  background: linear-gradient(135deg, rgba(0, 176, 155, 0.1), rgba(150, 201, 61, 0.1));
+  border: 1px solid rgba(0, 176, 155, 0.3);
+  color: #00b09b;
+}
+
+/* Key info in candidate meta */
+.candidate-meta .key-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  background: rgba(0, 176, 155, 0.1);
+  border: 1px solid rgba(0, 176, 155, 0.3);
+  border-radius: 12px;
+  font-size: 0.75rem;
+  color: #00b09b;
+}
 /* Action Section */
 .action-section {
   border-radius: 24px;
