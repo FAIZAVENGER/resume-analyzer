@@ -23,7 +23,6 @@ import random
 from itertools import cycle
 import gc
 import sys
-import spacy
 from typing import Dict, List, Tuple, Any
 
 # Load environment variables
