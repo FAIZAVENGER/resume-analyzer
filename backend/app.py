@@ -22,6 +22,7 @@ import hashlib
 import random
 from itertools import cycle
 import gc
+import sys
 
 # Load environment variables
 load_dotenv()
@@ -38,7 +39,6 @@ GROQ_API_KEYS = [
 
 # Filter out None values and create key pool
 ACTIVE_API_KEYS = [key for key in GROQ_API_KEYS if key]
-KEY_CYCLER = cycle(ACTIVE_API_KEYS) if ACTIVE_API_KEYS else None
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
@@ -83,11 +83,8 @@ GROQ_MODELS = {
 DEFAULT_MODEL = 'llama-3.1-8b-instant'
 
 # Track API status
-api_available = False
 warmup_complete = False
 last_activity_time = datetime.now()
-keep_warm_thread = None
-warmup_lock = threading.Lock()
 
 # Get absolute path for uploads folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -105,15 +102,13 @@ cache_lock = threading.Lock()
 # Request queue for batch processing - OPTIMIZED for 12+ resumes
 MAX_CONCURRENT_REQUESTS_PER_KEY = 2  # Reduced for better distribution
 MAX_BATCH_SIZE = 12  # Maximum number of resumes per batch (4 per key * 3 keys)
-PROCESSING_SEMAPHORE = threading.Semaphore(len(ACTIVE_API_KEYS) * MAX_CONCURRENT_REQUESTS_PER_KEY)
-
-# Service keep-alive
-SERVICE_KEEP_ALIVE_INTERVAL = 60
-last_keep_alive = datetime.now()
 
 # Rate limiting protection
 RATE_LIMIT_DELAY = 1.5
 MAX_RETRIES = 3
+
+# Global variables for service status
+service_running = True
 
 def get_next_available_key():
     """Get next available API key using round-robin with usage tracking"""
@@ -171,28 +166,6 @@ def set_cached_score(resume_hash, score):
     """Cache score for consistency"""
     with cache_lock:
         score_cache[resume_hash] = score
-
-def keep_service_active():
-    """Keep the service always active by making periodic requests"""
-    global last_keep_alive
-    
-    while True:
-        try:
-            time.sleep(SERVICE_KEEP_ALIVE_INTERVAL)
-            
-            # Make a simple request to keep the service active
-            try:
-                # Create a test app context
-                with app.app_context():
-                    # Simple health check without external HTTP request
-                    print("✅ Service keep-alive ping")
-            except:
-                pass
-            
-            last_keep_alive = datetime.now()
-            
-        except Exception as e:
-            print(f"⚠️ Keep-alive thread error: {e}")
 
 def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_override=None, retry_count=0, api_key=None):
     """Call Groq API with the given prompt with optimized retry logic"""
@@ -295,7 +268,7 @@ def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_ov
 
 def warmup_groq_service():
     """Warm up Groq service connection for all keys"""
-    global warmup_complete, api_available
+    global warmup_complete
     
     if not ACTIVE_API_KEYS:
         print("⚠️ Skipping Groq warm-up: No API keys configured")
@@ -333,9 +306,7 @@ def warmup_groq_service():
         
         if successful_warmups > 0:
             print(f"✅ {successful_warmups}/{len(ACTIVE_API_KEYS)} API keys warmed up successfully")
-            with warmup_lock:
-                warmup_complete = True
-                api_available = True
+            warmup_complete = True
             return True
         else:
             print("⚠️ All warm-up attempts failed")
@@ -348,14 +319,12 @@ def warmup_groq_service():
         return False
 
 def keep_service_warm():
-    """Periodically send requests to keep Groq service responsive"""
-    global last_activity_time
+    """Periodically send requests to keep Groq service responsive - SIMPLIFIED VERSION"""
+    global service_running
     
-    while True:
-        time.sleep(45)
-        
+    while service_running:
         try:
-            inactive_time = datetime.now() - last_activity_time
+            time.sleep(45)  # Check every 45 seconds
             
             if ACTIVE_API_KEYS:
                 print(f"♨️ Keeping Groq warm with {len(ACTIVE_API_KEYS)} keys...")
@@ -368,7 +337,7 @@ def keep_service_warm():
                             timeout=15,
                             api_key=api_key
                         )
-                        if response and 'pong' in response.lower():
+                        if response and 'pong' in str(response).lower():
                             print(f"  ✅ Key {idx} keep-alive successful")
                         else:
                             print(f"  ⚠️ Key {idx} keep-alive got unexpected response")
@@ -377,503 +346,12 @@ def keep_service_warm():
                     
         except Exception as e:
             print(f"⚠️ Keep-warm thread error: {str(e)}")
+            time.sleep(60)  # Wait longer on error
 
 def update_activity():
     """Update last activity timestamp"""
     global last_activity_time
     last_activity_time = datetime.now()
-
-# Start warm-up on app start
-if ACTIVE_API_KEYS:
-    print(f"🚀 Starting Groq warm-up with {len(ACTIVE_API_KEYS)} keys...")
-    model_to_use = GROQ_MODEL or DEFAULT_MODEL
-    print(f"🤖 Using model: {model_to_use}")
-    
-    # Reset key usage periodically
-    def periodic_key_reset():
-        while True:
-            time.sleep(300)  # Reset every 5 minutes
-            reset_key_usage()
-    
-    reset_thread = threading.Thread(target=periodic_key_reset, daemon=True)
-    reset_thread.start()
-    
-    # Start warm-up in a separate thread
-    warmup_thread = threading.Thread(target=warmup_groq_service, daemon=True)
-    warmup_thread.start()
-    
-    # Start keep-warm thread
-    keep_warm_thread = threading.Thread(target=keep_service_warm, daemon=True)
-    keep_warm_thread.start()
-    
-    # Start service keep-alive thread (simplified to avoid request context issues)
-    keep_alive_thread = threading.Thread(target=keep_service_active, daemon=True)
-    keep_alive_thread.start()
-    
-    print("✅ Keep-warm thread started")
-    print("✅ Service keep-alive thread started")
-    print("✅ Periodic key reset started (every 5 minutes)")
-else:
-    print("⚠️ WARNING: No Groq API keys found!")
-    print("Please set GROQ_API_KEY_1, GROQ_API_KEY_2, GROQ_API_KEY_3 in Render environment variables")
-
-@app.route('/')
-def home():
-    """Root route - API landing page"""
-    global warmup_complete, last_activity_time, last_keep_alive
-    
-    update_activity()
-    
-    inactive_time = datetime.now() - last_activity_time
-    inactive_minutes = int(inactive_time.total_seconds() / 60)
-    
-    keep_alive_time = datetime.now() - last_keep_alive
-    keep_alive_seconds = int(keep_alive_time.total_seconds())
-    
-    warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
-    model_to_use = GROQ_MODEL or DEFAULT_MODEL
-    model_info = GROQ_MODELS.get(model_to_use, {'name': model_to_use, 'provider': 'Groq'})
-    
-    return f'''
-    <!DOCTYPE html>
-<html>
-<head>
-    <title>Resume Analyzer API</title>
-    <style>
-        body {{
-            font-family: 'Arial', sans-serif;
-            margin: 0;
-            padding: 40px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }}
-        
-        .container {{
-            max-width: 800px;
-            width: 100%;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            padding: 40px;
-            text-align: center;
-        }}
-        
-        h1 {{
-            color: #2c3e50;
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }}
-        
-        .subtitle {{
-            color: #7f8c8d;
-            font-size: 1.1rem;
-            margin-bottom: 30px;
-        }}
-        
-        .status-card {{
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            border-radius: 15px;
-            padding: 20px;
-            margin: 20px 0;
-            border-left: 5px solid #667eea;
-        }}
-        
-        .status-item {{
-            display: flex;
-            justify-content: space-between;
-            margin: 10px 0;
-            padding: 8px 0;
-            border-bottom: 1px solid #e0e0e0;
-        }}
-        
-        .status-label {{
-            font-weight: 600;
-            color: #2c3e50;
-        }}
-        
-        .status-value {{
-            color: #27ae60;
-            font-weight: 600;
-        }}
-        
-        .warmup-status {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 12px;
-            background: #e3f2fd;
-            border-radius: 10px;
-            margin: 15px 0;
-            border-left: 4px solid #2196f3;
-        }}
-        
-        .warmup-dot {{
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: {'#4caf50' if warmup_complete else '#ff9800'};
-            animation: {'none' if warmup_complete else 'pulse 1.5s infinite'};
-        }}
-        
-        @keyframes pulse {{
-            0%, 100% {{ opacity: 1; }}
-            50% {{ opacity: 0.5; }}
-        }}
-        
-        .endpoints {{
-            text-align: left;
-            margin: 30px 0;
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 15px;
-            border: 2px solid #e9ecef;
-        }}
-        
-        .endpoint {{
-            background: white;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 10px;
-            border-left: 4px solid #667eea;
-            transition: transform 0.3s;
-        }}
-        
-        .endpoint:hover {{
-            transform: translateX(10px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-        }}
-        
-        .method {{
-            display: inline-block;
-            background: #667eea;
-            color: white;
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-weight: bold;
-            margin-right: 10px;
-            font-size: 0.9rem;
-        }}
-        
-        .path {{
-            font-family: 'Courier New', monospace;
-            font-weight: bold;
-            color: #2c3e50;
-        }}
-        
-        .description {{
-            color: #7f8c8d;
-            margin-top: 5px;
-            font-size: 0.95rem;
-        }}
-        
-        .api-status {{
-            display: inline-block;
-            padding: 8px 20px;
-            background: #27ae60;
-            color: white;
-            border-radius: 20px;
-            font-weight: bold;
-            margin: 20px 0;
-        }}
-        
-        .buttons {{
-            margin-top: 30px;
-        }}
-        
-        .btn {{
-            display: inline-block;
-            padding: 12px 30px;
-            margin: 0 10px;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            color: white;
-            text-decoration: none;
-            border-radius: 30px;
-            font-weight: bold;
-            transition: all 0.3s;
-            border: none;
-            cursor: pointer;
-            font-size: 1rem;
-        }}
-        
-        .btn:hover {{
-            transform: translateY(-3px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
-        }}
-        
-        .btn-secondary {{
-            background: linear-gradient(90deg, #11998e, #38ef7d);
-        }}
-        
-        .btn-warmup {{
-            background: linear-gradient(90deg, #ff9800, #ff5722);
-        }}
-        
-        .footer {{
-            margin-top: 40px;
-            color: #7f8c8d;
-            font-size: 0.9rem;
-        }}
-        
-        .error {{
-            color: #e74c3c;
-            font-weight: 600;
-        }}
-        
-        .success {{
-            color: #27ae60;
-            font-weight: 600;
-        }}
-        
-        .warning {{
-            color: #ff9800;
-            font-weight: 600;
-        }}
-        
-        .info {{
-            color: #2196f3;
-            font-weight: 600;
-        }}
-        
-        .model-badge {{
-            display: inline-block;
-            background: linear-gradient(90deg, #00b09b, #96c93d);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 0.85rem;
-            margin-left: 10px;
-        }}
-        
-        .free-badge {{
-            display: inline-block;
-            background: linear-gradient(90deg, #00b09b, #96c93d);
-            color: white;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 0.75rem;
-            margin-left: 5px;
-        }}
-        
-        .always-active-badge {{
-            display: inline-block;
-            background: linear-gradient(90deg, #ff6b6b, #ffa726);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 0.85rem;
-            margin-left: 10px;
-            animation: pulse 2s infinite;
-        }}
-        
-        .batch-capacity {{
-            display: inline-block;
-            background: linear-gradient(90deg, #9C27B0, #E91E63);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 0.85rem;
-            margin-left: 5px;
-        }}
-        
-        .multi-key-badge {{
-            display: inline-block;
-            background: linear-gradient(90deg, #00b09b, #96c93d);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 0.85rem;
-            margin-left: 5px;
-        }}
-        
-        .key-status {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin: 5px 0;
-            padding: 8px;
-            background: #f8f9fa;
-            border-radius: 8px;
-            font-size: 0.9rem;
-        }}
-        
-        .key-dot {{
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #00b09b;
-        }}
-        
-        .key-dot.active {{
-            background: #00b09b;
-            animation: pulse 1.5s infinite;
-        }}
-        
-        .key-dot.inactive {{
-            background: #ff6b6b;
-        }}
-        
-        @keyframes pulse {{
-            0%, 100% {{ opacity: 1; }}
-            50% {{ opacity: 0.7; }}
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🚀 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis • Latest Groq Models • <span class="always-active-badge">Always Active</span> <span class="batch-capacity">Up to 12 Resumes</span> <span class="multi-key-badge">3 API Keys</span></p>
-        
-        <div class="api-status">
-            ⚡ GROQ API IS RUNNING • MULTI-KEY PROCESSING 12 RESUMES
-        </div>
-        
-        <div class="warmup-status">
-            <div class="warmup-dot"></div>
-            <div>
-                <strong>Groq Service Status:</strong> {warmup_status}
-                <br>
-                <small>Last activity: {inactive_minutes} minute(s) ago • Keep-alive: {keep_alive_seconds}s ago</small>
-            </div>
-        </div>
-        
-        <div class="status-card">
-            <div class="status-item">
-                <span class="status-label">Service Status:</span>
-                <span class="status-value"><span class="always-active-badge">⚡ Always Active</span></span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">AI Provider:</span>
-                <span class="status-value info">GROQ</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">Model:</span>
-                <span class="status-value">{model_info['name']} <span class="model-badge">{model_info['provider']}</span> {model_info.get('free_tier', False) and '<span class="free-badge">FREE</span>' or ''}</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">API Keys:</span>
-                <span class="status-value"><span class="multi-key-badge">{len(ACTIVE_API_KEYS)} Active Keys</span></span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">Batch Capacity:</span>
-                <span class="status-value"><span class="batch-capacity">Up to 12 resumes (4 per key)</span></span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">API Status:</span>
-                {'<span class="success">✅ Available</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
-            </div>
-            
-            <div class="status-item">
-                <span class="status-label">Key Distribution:</span>
-                <span class="status-value">Key 1: Resumes 1-4 • Key 2: Resumes 5-8 • Key 3: Resumes 9-12</span>
-            </div>
-            
-            <div class="status-item">
-                <span class="status-label">Key Usage:</span>
-                <span class="status-value">
-                    {', '.join([f'Key {i+1}: {KEY_USAGE[key]["count"]}/{KEY_LIMIT}' for i, key in enumerate(ACTIVE_API_KEYS)]) if ACTIVE_API_KEYS else 'No keys configured'}
-                </span>
-            </div>
-            
-            <div class="status-item">
-                <span class="status-label">Key Reset Interval:</span>
-                <span class="status-value success">Every 5 minutes</span>
-            </div>
-        </div>
-        
-        <div class="endpoints">
-            <h2>📡 API Endpoints</h2>
-            
-            <div class="endpoint">
-                <span class="method">POST</span>
-                <span class="path">/analyze</span>
-                <p class="description">Upload a single resume (PDF/DOCX/TXT) with job description for AI analysis</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">POST</span>
-                <span class="path">/analyze-batch</span>
-                <p class="description">Upload multiple resumes for batch analysis with ranking (Up to 12 resumes)</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">POST</span>
-                <span class="path">/analyze-batch-multi-key</span>
-                <p class="description">Multi-key optimized batch analysis for 12+ resumes</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/quick-check</span>
-                <p class="description">Quick Groq API availability check</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/warmup</span>
-                <p class="description">Force warm-up Groq API connection</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/health</span>
-                <p class="description">Check API health status and configuration</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/ping</span>
-                <p class="description">Simple ping to keep service awake</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/keys-status</span>
-                <p class="description">Check status of all API keys</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/download/&lt;filename&gt;</span>
-                <p class="description">Download generated Excel analysis reports</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/download-individual/&lt;analysis_id&gt;</span>
-                <p class="description">Download individual candidate report</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="path">/models</span>
-                <p class="description">List available Groq models</p>
-            </div>
-        </div>
-        
-        <div class="buttons">
-            <a href="/health" class="btn">Check Health</a>
-            <a href="/warmup" class="btn btn-warmup">Warm Up Groq API</a>
-            <a href="/keys-status" class="btn">Check Keys Status</a>
-            <a href="/ping" class="btn btn-secondary">Ping Service</a>
-        </div>
-        
-        <div class="footer">
-            <p>Powered by Flask & Groq API | Deployed on Render | <span class="always-active-badge">Always Active Mode</span></p>
-            <p>AI Service: GROQ | Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
-            <p>Model: {model_info['name']} | Batch Capacity: 12 resumes (4 per key) | Active Keys: {len(ACTIVE_API_KEYS)}</p>
-        </div>
-    </div>
-</body>
-</html>
-    '''
 
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file with error handling for corrupted files"""
@@ -881,39 +359,45 @@ def extract_text_from_pdf(file_path):
         update_activity()
         
         # Try different PDF reading strategies
-        try:
-            reader = PdfReader(file_path)
-            text = ""
-            
-            for page in reader.pages:
-                try:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
-                except Exception as e:
-                    print(f"⚠️ PDF page extraction error: {e}")
-                    continue
-            
-            if not text.strip():
-                return "Error: PDF appears to be empty or text could not be extracted"
-            
-        except Exception as e:
-            print(f"❌ PDFReader failed: {e}")
-            # Try alternative method for corrupted PDFs
+        text = ""
+        max_attempts = 3
+        
+        for attempt in range(max_attempts):
             try:
-                import fitz  # PyMuPDF
-                doc = fitz.open(file_path)
+                reader = PdfReader(file_path)
                 text = ""
-                for page in doc:
-                    text += page.get_text() + "\n"
-                doc.close()
-            except ImportError:
-                print("⚠️ PyMuPDF not available, using fallback")
-                # Simple text extraction as fallback
-                with open(file_path, 'rb') as f:
-                    content = f.read()
-                    text = content.decode('utf-8', errors='ignore')
-                    text = ' '.join(text.split()[:1000])  # Take first 1000 words
+                
+                for page in reader.pages:
+                    try:
+                        page_text = page.extract_text()
+                        if page_text:
+                            text += page_text + "\n"
+                    except Exception as e:
+                        print(f"⚠️ PDF page extraction error: {e}")
+                        continue
+                
+                if text.strip():
+                    break
+                    
+            except Exception as e:
+                print(f"❌ PDFReader attempt {attempt + 1} failed: {e}")
+                if attempt == max_attempts - 1:
+                    # Last attempt, try fallback
+                    try:
+                        # Simple text extraction as fallback
+                        with open(file_path, 'rb') as f:
+                            content = f.read()
+                            # Try to extract text from binary
+                            text = content.decode('utf-8', errors='ignore')
+                            # Take first 1000 words if we got something
+                            if text.strip():
+                                words = text.split()
+                                text = ' '.join(words[:1000])
+                    except:
+                        text = "Error: Could not extract text from PDF file"
+        
+        if not text.strip():
+            return "Error: PDF appears to be empty or text could not be extracted"
         
         # Optimize for Groq processing - keep it concise
         if len(text) > 8000:
@@ -1007,9 +491,8 @@ def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis
         print("❌ No available API key.")
         return fallback_response("API Configuration Error", filename)
     
-    with warmup_lock:
-        if not warmup_complete:
-            print(f"⚠️ Groq API not warmed up yet, analysis may be slower")
+    if not warmup_complete:
+        print(f"⚠️ Groq API not warmed up yet, analysis may be slower")
     
     # Check cache for consistent scoring
     resume_hash = calculate_resume_hash(resume_text, job_description)
@@ -1427,6 +910,461 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     print(f"📄 Excel report saved to: {filepath}")
     return filepath
 
+@app.route('/')
+def home():
+    """Root route - API landing page"""
+    global warmup_complete, last_activity_time
+    
+    update_activity()
+    
+    inactive_time = datetime.now() - last_activity_time
+    inactive_minutes = int(inactive_time.total_seconds() / 60)
+    
+    warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
+    model_to_use = GROQ_MODEL or DEFAULT_MODEL
+    model_info = GROQ_MODELS.get(model_to_use, {'name': model_to_use, 'provider': 'Groq'})
+    
+    return f'''
+    <!DOCTYPE html>
+<html>
+<head>
+    <title>Resume Analyzer API</title>
+    <style>
+        body {{
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }}
+        
+        .container {{
+            max-width: 800px;
+            width: 100%;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            text-align: center;
+        }}
+        
+        h1 {{
+            color: #2c3e50;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }}
+        
+        .subtitle {{
+            color: #7f8c8d;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+        }}
+        
+        .status-card {{
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 5px solid #667eea;
+        }}
+        
+        .status-item {{
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }}
+        
+        .status-label {{
+            font-weight: 600;
+            color: #2c3e50;
+        }}
+        
+        .status-value {{
+            color: #27ae60;
+            font-weight: 600;
+        }}
+        
+        .warmup-status {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: #e3f2fd;
+            border-radius: 10px;
+            margin: 15px 0;
+            border-left: 4px solid #2196f3;
+        }}
+        
+        .warmup-dot {{
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: {'#4caf50' if warmup_complete else '#ff9800'};
+            animation: {'none' if warmup_complete else 'pulse 1.5s infinite'};
+        }}
+        
+        @keyframes pulse {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.5; }}
+        }}
+        
+        .endpoints {{
+            text-align: left;
+            margin: 30px 0;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            border: 2px solid #e9ecef;
+        }}
+        
+        .endpoint {{
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            transition: transform 0.3s;
+        }}
+        
+        .endpoint:hover {{
+            transform: translateX(10px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }}
+        
+        .method {{
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 0.9rem;
+        }}
+        
+        .path {{
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #2c3e50;
+        }}
+        
+        .description {{
+            color: #7f8c8d;
+            margin-top: 5px;
+            font-size: 0.95rem;
+        }}
+        
+        .api-status {{
+            display: inline-block;
+            padding: 8px 20px;
+            background: #27ae60;
+            color: white;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 20px 0;
+        }}
+        
+        .buttons {{
+            margin-top: 30px;
+        }}
+        
+        .btn {{
+            display: inline-block;
+            padding: 12px 30px;
+            margin: 0 10px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            color: white;
+            text-decoration: none;
+            border-radius: 30px;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+        }}
+        
+        .btn:hover {{
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }}
+        
+        .btn-secondary {{
+            background: linear-gradient(90deg, #11998e, #38ef7d);
+        }}
+        
+        .btn-warmup {{
+            background: linear-gradient(90deg, #ff9800, #ff5722);
+        }}
+        
+        .footer {{
+            margin-top: 40px;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }}
+        
+        .error {{
+            color: #e74c3c;
+            font-weight: 600;
+        }}
+        
+        .success {{
+            color: #27ae60;
+            font-weight: 600;
+        }}
+        
+        .warning {{
+            color: #ff9800;
+            font-weight: 600;
+        }}
+        
+        .info {{
+            color: #2196f3;
+            font-weight: 600;
+        }}
+        
+        .model-badge {{
+            display: inline-block;
+            background: linear-gradient(90deg, #00b09b, #96c93d);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            margin-left: 10px;
+        }}
+        
+        .free-badge {{
+            display: inline-block;
+            background: linear-gradient(90deg, #00b09b, #96c93d);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            margin-left: 5px;
+        }}
+        
+        .always-active-badge {{
+            display: inline-block;
+            background: linear-gradient(90deg, #ff6b6b, #ffa726);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            margin-left: 10px;
+            animation: pulse 2s infinite;
+        }}
+        
+        .batch-capacity {{
+            display: inline-block;
+            background: linear-gradient(90deg, #9C27B0, #E91E63);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            margin-left: 5px;
+        }}
+        
+        .multi-key-badge {{
+            display: inline-block;
+            background: linear-gradient(90deg, #00b09b, #96c93d);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            margin-left: 5px;
+        }}
+        
+        .key-status {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 5px 0;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }}
+        
+        .key-dot {{
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #00b09b;
+        }}
+        
+        .key-dot.active {{
+            background: #00b09b;
+            animation: pulse 1.5s infinite;
+        }}
+        
+        .key-dot.inactive {{
+            background: #ff6b6b;
+        }}
+        
+        @keyframes pulse {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.7; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Resume Analyzer API</h1>
+        <p class="subtitle">AI-powered resume analysis • Latest Groq Models • <span class="always-active-badge">Always Active</span> <span class="batch-capacity">Up to 12 Resumes</span> <span class="multi-key-badge">3 API Keys</span></p>
+        
+        <div class="api-status">
+            ⚡ GROQ API IS RUNNING • MULTI-KEY PROCESSING 12 RESUMES
+        </div>
+        
+        <div class="warmup-status">
+            <div class="warmup-dot"></div>
+            <div>
+                <strong>Groq Service Status:</strong> {warmup_status}
+                <br>
+                <small>Last activity: {inactive_minutes} minute(s) ago</small>
+            </div>
+        </div>
+        
+        <div class="status-card">
+            <div class="status-item">
+                <span class="status-label">Service Status:</span>
+                <span class="status-value"><span class="always-active-badge">⚡ Always Active</span></span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">AI Provider:</span>
+                <span class="status-value info">GROQ</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Model:</span>
+                <span class="status-value">{model_info['name']} <span class="model-badge">{model_info['provider']}</span> {model_info.get('free_tier', False) and '<span class="free-badge">FREE</span>' or ''}</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">API Keys:</span>
+                <span class="status-value"><span class="multi-key-badge">{len(ACTIVE_API_KEYS)} Active Keys</span></span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Batch Capacity:</span>
+                <span class="status-value"><span class="batch-capacity">Up to 12 resumes (4 per key)</span></span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">API Status:</span>
+                {'<span class="success">✅ Available</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
+            </div>
+            
+            <div class="status-item">
+                <span class="status-label">Key Distribution:</span>
+                <span class="status-value">Key 1: Resumes 1-4 • Key 2: Resumes 5-8 • Key 3: Resumes 9-12</span>
+            </div>
+            
+            <div class="status-item">
+                <span class="status-label">Key Usage:</span>
+                <span class="status-value">
+                    {', '.join([f'Key {i+1}: {KEY_USAGE[key]["count"]}/{KEY_LIMIT}' for i, key in enumerate(ACTIVE_API_KEYS)]) if ACTIVE_API_KEYS else 'No keys configured'}
+                </span>
+            </div>
+            
+            <div class="status-item">
+                <span class="status-label">Key Reset Interval:</span>
+                <span class="status-value success">Every 5 minutes</span>
+            </div>
+        </div>
+        
+        <div class="endpoints">
+            <h2>📡 API Endpoints</h2>
+            
+            <div class="endpoint">
+                <span class="method">POST</span>
+                <span class="path">/analyze</span>
+                <p class="description">Upload a single resume (PDF/DOCX/TXT) with job description for AI analysis</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">POST</span>
+                <span class="path">/analyze-batch</span>
+                <p class="description">Upload multiple resumes for batch analysis with ranking (Up to 12 resumes)</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">POST</span>
+                <span class="path">/analyze-batch-multi-key</span>
+                <p class="description">Multi-key optimized batch analysis for 12+ resumes</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/quick-check</span>
+                <p class="description">Quick Groq API availability check</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/warmup</span>
+                <p class="description">Force warm-up Groq API connection</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/health</span>
+                <p class="description">Check API health status and configuration</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/ping</span>
+                <p class="description">Simple ping to keep service awake</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/keys-status</span>
+                <p class="description">Check status of all API keys</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/download/&lt;filename&gt;</span>
+                <p class="description">Download generated Excel analysis reports</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/download-individual/&lt;analysis_id&gt;</span>
+                <p class="description">Download individual candidate report</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <span class="path">/models</span>
+                <p class="description">List available Groq models</p>
+            </div>
+        </div>
+        
+        <div class="buttons">
+            <a href="/health" class="btn">Check Health</a>
+            <a href="/warmup" class="btn btn-warmup">Warm Up Groq API</a>
+            <a href="/keys-status" class="btn">Check Keys Status</a>
+            <a href="/ping" class="btn btn-secondary">Ping Service</a>
+        </div>
+        
+        <div class="footer">
+            <p>Powered by Flask & Groq API | Deployed on Render | <span class="always-active-badge">Always Active Mode</span></p>
+            <p>AI Service: GROQ | Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
+            <p>Model: {model_info['name']} | Batch Capacity: 12 resumes (4 per key) | Active Keys: {len(ACTIVE_API_KEYS)}</p>
+        </div>
+    </div>
+</body>
+</html>
+    '''
+
 @app.route('/analyze', methods=['POST'])
 def analyze_resume():
     """Main endpoint to analyze single resume"""
@@ -1539,11 +1477,16 @@ def analyze_resume():
         print(f"❌ Unexpected error: {traceback.format_exc()}")
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
-def process_batch_resume_with_key(resume_file, job_description, index, total, batch_id, api_key):
-    """Process a single resume in batch mode with specific API key"""
+def process_batch_resume(resume_file, job_description, index, total, batch_id, api_key=None):
+    """Process a single resume in batch mode"""
     try:
+        if not api_key:
+            api_key = get_next_available_key()
+        
         print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
-        print(f"🔑 Using API key {ACTIVE_API_KEYS.index(api_key) + 1 if api_key in ACTIVE_API_KEYS else 'unknown'}")
+        if api_key:
+            key_index = ACTIVE_API_KEYS.index(api_key) + 1 if api_key in ACTIVE_API_KEYS else 0
+            print(f"🔑 Using API key {key_index}")
         
         # Save file temporarily
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
@@ -1559,7 +1502,8 @@ def process_batch_resume_with_key(resume_file, job_description, index, total, ba
         elif file_ext == '.txt':
             resume_text = extract_text_from_txt(file_path)
         else:
-            os.remove(file_path)
+            if os.path.exists(file_path):
+                os.remove(file_path)
             return {
                 'filename': resume_file.filename,
                 'error': f'Unsupported format: {file_ext}',
@@ -1567,7 +1511,8 @@ def process_batch_resume_with_key(resume_file, job_description, index, total, ba
             }
         
         if resume_text.startswith('Error'):
-            os.remove(file_path)
+            if os.path.exists(file_path):
+                os.remove(file_path)
             return {
                 'filename': resume_file.filename,
                 'error': resume_text,
@@ -1602,18 +1547,21 @@ def process_batch_resume_with_key(resume_file, job_description, index, total, ba
         if os.path.exists(file_path):
             os.remove(file_path)
         
-        key_index = ACTIVE_API_KEYS.index(api_key) + 1 if api_key in ACTIVE_API_KEYS else 0
-        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')} (Key: {key_index})")
+        if api_key:
+            key_index = ACTIVE_API_KEYS.index(api_key) + 1 if api_key in ACTIVE_API_KEYS else 0
+            print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')} (Key: {key_index})")
+        else:
+            print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
         
         return {
             'analysis': analysis,
             'status': 'success',
-            'api_key_used': key_index
+            'api_key_used': key_index if api_key else 0
         }
         
     except Exception as e:
         print(f"❌ Error processing {resume_file.filename}: {str(e)}")
-        if os.path.exists(file_path):
+        if 'file_path' in locals() and os.path.exists(file_path):
             os.remove(file_path)
         return {
             'filename': resume_file.filename,
@@ -1664,50 +1612,64 @@ def analyze_resume_batch():
         all_analyses = []
         errors = []
         
-        # Process resumes with ThreadPoolExecutor
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(resume_files), len(ACTIVE_API_KEYS) * MAX_CONCURRENT_REQUESTS_PER_KEY)) as executor:
-            futures = []
+        # Process resumes with ThreadPoolExecutor - SIMPLIFIED VERSION
+        # Process in smaller batches to prevent memory issues
+        batch_size = 3  # Process 3 at a time
+        total_batches = (len(resume_files) + batch_size - 1) // batch_size
+        
+        for batch_num in range(total_batches):
+            batch_start = batch_num * batch_size
+            batch_end = min((batch_num + 1) * batch_size, len(resume_files))
+            batch_files = resume_files[batch_start:batch_end]
             
-            for idx, resume_file in enumerate(resume_files):
-                if resume_file.filename == '':
-                    errors.append({'filename': 'Empty file', 'error': 'File has no name'})
-                    continue
-                
-                # Get API key for this resume (distribute across keys)
-                key_index = idx % len(ACTIVE_API_KEYS)
-                api_key = ACTIVE_API_KEYS[key_index]
-                
-                # Add delay based on key index to avoid rate limiting
-                delay = (key_index * 0.5) + random.uniform(0, 0.3)
-                if idx > 0:
-                    time.sleep(delay)
-                
-                # Submit task to executor
-                future = executor.submit(
-                    process_batch_resume_with_key,
-                    resume_file,
-                    job_description,
-                    idx,
-                    len(resume_files),
-                    batch_id,
-                    api_key
-                )
-                futures.append((resume_file.filename, future, key_index + 1))
+            print(f"\n🔄 Processing batch {batch_num + 1}/{total_batches} (files {batch_start + 1}-{batch_end})...")
             
-            # Collect results
-            for filename, future, key_num in futures:
-                try:
-                    result = future.result(timeout=120)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(batch_files), len(ACTIVE_API_KEYS))) as executor:
+                futures = []
+                
+                for idx_in_batch, resume_file in enumerate(batch_files):
+                    global_idx = batch_start + idx_in_batch
                     
-                    if result['status'] == 'success':
-                        all_analyses.append(result['analysis'])
-                    else:
-                        errors.append({'filename': filename, 'error': result.get('error', 'Unknown error')})
+                    if resume_file.filename == '':
+                        errors.append({'filename': 'Empty file', 'error': 'File has no name'})
+                        continue
+                    
+                    # Assign API key based on position
+                    key_index = global_idx % len(ACTIVE_API_KEYS)
+                    api_key = ACTIVE_API_KEYS[key_index]
+                    
+                    # Submit task to executor
+                    future = executor.submit(
+                        process_batch_resume,
+                        resume_file,
+                        job_description,
+                        global_idx,
+                        len(resume_files),
+                        batch_id,
+                        api_key
+                    )
+                    futures.append(future)
+                
+                # Collect results from this batch
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        result = future.result(timeout=120)
                         
-                except concurrent.futures.TimeoutError:
-                    errors.append({'filename': filename, 'error': f'Processing timeout (120 seconds) - Key {key_num}'})
-                except Exception as e:
-                    errors.append({'filename': filename, 'error': f'Processing error: {str(e)[:100]} - Key {key_num}'})
+                        if result['status'] == 'success':
+                            all_analyses.append(result['analysis'])
+                        else:
+                            errors.append({'filename': result.get('filename', 'Unknown'), 'error': result.get('error', 'Unknown error')})
+                            
+                    except concurrent.futures.TimeoutError:
+                        errors.append({'filename': 'Unknown', 'error': f'Processing timeout (120 seconds)'})
+                    except Exception as e:
+                        errors.append({'filename': 'Unknown', 'error': f'Processing error: {str(e)[:100]}'})
+            
+            # Add small delay between batches
+            if batch_num < total_batches - 1:
+                delay = 1 + random.uniform(0, 0.5)
+                print(f"⏳ Adding {delay:.1f}s delay before next batch...")
+                time.sleep(delay)
         
         print(f"\n📊 Batch processing complete. Successful: {len(all_analyses)}, Failed: {len(errors)}")
         
@@ -1760,151 +1722,8 @@ def analyze_resume_batch():
 
 @app.route('/analyze-batch-multi-key', methods=['POST'])
 def analyze_batch_multi_key():
-    """Multi-key optimized batch analysis endpoint specifically for handling 12+ resumes"""
-    update_activity()
-    
-    try:
-        print("\n" + "="*50)
-        print("🔑 MULTI-KEY batch analysis request received")
-        start_time = time.time()
-        
-        if 'resumes' not in request.files:
-            return jsonify({'error': 'No resume files provided'}), 400
-        
-        resume_files = request.files.getlist('resumes')
-        
-        if 'jobDescription' not in request.form:
-            return jsonify({'error': 'No job description provided'}), 400
-        
-        job_description = request.form['jobDescription']
-        
-        if len(resume_files) == 0:
-            return jsonify({'error': 'No files selected'}), 400
-        
-        print(f"🔑 MULTI-KEY batch size: {len(resume_files)} resumes")
-        print(f"🔑 Active API keys: {len(ACTIVE_API_KEYS)}")
-        
-        if len(resume_files) > MAX_BATCH_SIZE:
-            return jsonify({'error': f'Maximum {MAX_BATCH_SIZE} resumes allowed for multi-key batch'}), 400
-        
-        # Check API configuration
-        if not ACTIVE_API_KEYS:
-            return jsonify({'error': 'Groq API not configured'}), 500
-        
-        # Process in key-based chunks
-        batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        all_analyses = []
-        errors = []
-        
-        # Distribute resumes across keys (4 per key)
-        key_groups = {}
-        for i, key in enumerate(ACTIVE_API_KEYS):
-            start_idx = i * KEY_LIMIT
-            end_idx = start_idx + KEY_LIMIT
-            key_groups[key] = resume_files[start_idx:end_idx]
-            print(f"🔑 Key {i+1}: Processing resumes {start_idx+1}-{min(end_idx, len(resume_files))}")
-        
-        # Process each key group
-        for key_idx, (api_key, resumes) in enumerate(key_groups.items(), 1):
-            if not resumes:
-                continue
-                
-            print(f"\n🔄 Processing key {key_idx} ({len(resumes)} resumes)...")
-            
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(resumes), MAX_CONCURRENT_REQUESTS_PER_KEY)) as executor:
-                futures = []
-                
-                for idx_in_group, resume_file in enumerate(resumes):
-                    global_idx = (key_idx - 1) * KEY_LIMIT + idx_in_group
-                    
-                    if resume_file.filename == '':
-                        errors.append({'filename': 'Empty file', 'error': 'File has no name'})
-                        continue
-                    
-                    future = executor.submit(
-                        process_batch_resume_with_key,
-                        resume_file,
-                        job_description,
-                        global_idx,
-                        len(resume_files),
-                        batch_id,
-                        api_key
-                    )
-                    futures.append((resume_file.filename, future, key_idx))
-                
-                # Collect results from this key group
-                for filename, future, key_num in futures:
-                    try:
-                        result = future.result(timeout=90)
-                        
-                        if result['status'] == 'success':
-                            all_analyses.append(result['analysis'])
-                        else:
-                            errors.append({'filename': filename, 'error': result.get('error', 'Unknown error')})
-                            
-                    except concurrent.futures.TimeoutError:
-                        errors.append({'filename': filename, 'error': f'Processing timeout (90 seconds) - Key {key_num}'})
-                    except Exception as e:
-                        errors.append({'filename': filename, 'error': f'Processing error: {str(e)[:100]} - Key {key_num}'})
-            
-            # Add delay between key groups
-            if key_idx < len(key_groups):
-                delay = 2 + random.uniform(0, 1)
-                print(f"⏳ Adding {delay:.1f}s delay before next key group...")
-                time.sleep(delay)
-        
-        print(f"\n📊 Multi-key processing complete. Successful: {len(all_analyses)}, Failed: {len(errors)}")
-        
-        # Sort by score
-        all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
-        
-        # Add ranking
-        for rank, analysis in enumerate(all_analyses, 1):
-            analysis['rank'] = rank
-        
-        # Create batch Excel report
-        batch_excel_path = None
-        if all_analyses:
-            try:
-                print("📊 Creating multi-key batch Excel report...")
-                excel_filename = f"multi_key_batch_{batch_id}.xlsx"
-                batch_excel_path = create_batch_excel_report(all_analyses, job_description, excel_filename)
-                print(f"✅ Excel report created: {batch_excel_path}")
-            except Exception as e:
-                print(f"❌ Failed to create Excel report: {str(e)}")
-        
-        # Prepare response
-        batch_summary = {
-            'success': True,
-            'total_files': len(resume_files),
-            'successfully_analyzed': len(all_analyses),
-            'failed_files': len(errors),
-            'errors': errors,
-            'batch_excel_filename': os.path.basename(batch_excel_path) if batch_excel_path else None,
-            'batch_id': batch_id,
-            'analyses': all_analyses,
-            'model_used': GROQ_MODEL or DEFAULT_MODEL,
-            'ai_provider': "groq",
-            'ai_status': "Warmed up" if warmup_complete else "Warming up",
-            'processing_time': f"{time.time() - start_time:.2f}s",
-            'job_description_preview': job_description[:200] + ("..." if len(job_description) > 200 else ""),
-            'batch_size': len(resume_files),
-            'processing_method': 'multi_key_distributed',
-            'api_keys_used': len(ACTIVE_API_KEYS),
-            'key_distribution': f"Key 1: Resumes 1-4 • Key 2: Resumes 5-8 • Key 3: Resumes 9-12"
-        }
-        
-        total_time = time.time() - start_time
-        avg_time_per_resume = total_time / len(all_analyses) if all_analyses else 0
-        print(f"✅ Multi-key batch analysis completed in {total_time:.2f}s")
-        print(f"📈 Average time per resume: {avg_time_per_resume:.2f}s")
-        print("="*50 + "\n")
-        
-        return jsonify(batch_summary)
-        
-    except Exception as e:
-        print(f"❌ Multi-key batch analysis error: {traceback.format_exc()}")
-        return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
+    """Multi-key optimized batch analysis endpoint"""
+    return analyze_resume_batch()  # Use the same function
 
 def create_batch_excel_report(analyses, job_description, filename="batch_resume_analysis.xlsx"):
     """Create a comprehensive Excel report for batch analysis"""
@@ -1922,8 +1741,8 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
     # Skills Analysis Sheet
     ws_skills = wb.create_sheet("Skills Analysis")
     
-    # Individual Reports Sheets (limit to 10 to prevent memory issues)
-    max_individual_sheets = min(10, len(analyses))
+    # Individual Reports Sheets (limit to prevent memory issues)
+    max_individual_sheets = min(8, len(analyses))
     for idx, analysis in enumerate(analyses[:max_individual_sheets]):
         try:
             ws_individual = wb.create_sheet(f"Candidate {idx+1}")
@@ -2348,7 +2167,7 @@ def keys_status():
                 if isinstance(response, dict) and 'error' in response:
                     status = 'error'
                     message = response.get('error', 'Unknown error')
-                elif response and 'ready' in response.lower():
+                elif response and 'ready' in str(response).lower():
                     status = 'active'
                     message = 'Ready'
                 else:
@@ -2426,7 +2245,7 @@ def quick_check():
                     'api_keys': len(ACTIVE_API_KEYS),
                     'warmup_complete': warmup_complete
                 })
-            elif response and 'ready' in response.lower():
+            elif response and 'ready' in str(response).lower():
                 return jsonify({
                     'available': True,
                     'response_time': f'{response_time:.2f}s',
@@ -2476,9 +2295,6 @@ def ping():
     """Simple ping to keep service awake"""
     update_activity()
     
-    global last_keep_alive
-    last_keep_alive = datetime.now()
-    
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
     return jsonify({
         'status': 'pong',
@@ -2502,9 +2318,6 @@ def health_check():
     
     inactive_time = datetime.now() - last_activity_time
     inactive_minutes = int(inactive_time.total_seconds() / 60)
-    
-    keep_alive_time = datetime.now() - last_keep_alive
-    keep_alive_seconds = int(keep_alive_time.total_seconds())
     
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
     model_info = GROQ_MODELS.get(model_to_use, {'name': model_to_use, 'provider': 'Groq'})
@@ -2534,8 +2347,6 @@ def health_check():
         'upload_folder_path': UPLOAD_FOLDER,
         'reports_folder_path': REPORTS_FOLDER,
         'inactive_minutes': inactive_minutes,
-        'keep_alive_seconds': keep_alive_seconds,
-        'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
         'version': '10.0.0',
         'features': ['multi_key_support', 'always_active', 'groq_api_support', 'batch_processing_12', 'keep_alive', 'consistent_scoring', 'cache_system', 'individual_reports', 'parallel_processing', 'rate_limit_protection', 'key_usage_tracking'],
         'configuration': {
@@ -2625,6 +2436,25 @@ def cleanup_old_files():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def cleanup_on_exit():
+    """Cleanup function called on exit"""
+    global service_running
+    service_running = False
+    print("\n🛑 Shutting down service...")
+    
+    # Clean up temporary files
+    try:
+        for filename in os.listdir(UPLOAD_FOLDER):
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        print("✅ Cleaned up temporary files")
+    except:
+        pass
+
+# Register cleanup function
+atexit.register(cleanup_on_exit)
+
 if __name__ == '__main__':
     print("\n" + "="*50)
     print("🚀 Resume Analyzer Backend Starting...")
@@ -2656,6 +2486,26 @@ if __name__ == '__main__':
     
     # Enable garbage collection for memory optimization
     gc.enable()
+    
+    # Start warm-up in background
+    if ACTIVE_API_KEYS:
+        warmup_thread = threading.Thread(target=warmup_groq_service, daemon=True)
+        warmup_thread.start()
+        
+        # Start keep-warm thread
+        keep_warm_thread = threading.Thread(target=keep_service_warm, daemon=True)
+        keep_warm_thread.start()
+        
+        # Start periodic key reset
+        def periodic_key_reset():
+            while service_running:
+                time.sleep(300)  # Reset every 5 minutes
+                reset_key_usage()
+        
+        reset_thread = threading.Thread(target=periodic_key_reset, daemon=True)
+        reset_thread.start()
+        
+        print("✅ Background threads started")
     
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
     app.run(host='0.0.0.0', port=port, debug=debug_mode, threaded=True)
