@@ -4,57 +4,229 @@ import {
   Upload, FileText, Briefcase, CheckCircle, XCircle, 
   Download, Loader, TrendingUp, Award, BookOpen, 
   Target, AlertCircle, Sparkles, Star, Zap, User,
-  ChevronRight, Shield, BarChart3, Globe, Clock,
-  AlertTriangle, BatteryCharging, Brain, Rocket,
+  ChevronRight, BarChart3, Clock, Brain, Rocket,
   RefreshCw, Check, X, ExternalLink, BarChart,
-  Battery, Crown, Users, Coffee, ShieldCheck,
-  Lock, DownloadCloud, Edit3, FileDown, Info,
-  Wifi, WifiOff, Activity, Thermometer, ListOrdered,
-  BarChart4, Filter, Cpu, Zap as ZapIcon, Bolt,
-  PlayCircle, PauseCircle, Circle, ShieldAlert,
-  BatteryFull, BatteryMedium, BatteryLow, Signal,
-  Cloud, CloudOff, CloudLightning, CloudRain,
-  ArrowLeft, ChevronLeft, Home, Grid, Folder,
-  FileSpreadsheet, ClipboardList, Award as AwardIcon,
-  FileX, Calendar, Mail, Phone, MapPin, Link,
-  ThumbsUp, AlertOctagon, Lightbulb, GitBranch,
-  Code, Database, Server, Terminal, Palette,
-  Music, Camera, Video, Headphones, Mic,
-  MessageSquare, Heart, Share2, Bookmark,
-  Eye, EyeOff, Search, Settings, Bell,
-  HelpCircle, Shield as ShieldIcon, Key,
-  LogOut, UserPlus, UserCheck, UserX,
-  Star as StarIcon, Heart as HeartIcon,
-  Flag, Filter as FilterIcon, SortAsc,
-  SortDesc, MoreHorizontal, MoreVertical,
-  Maximize2, Minimize2, Plus, Minus,
-  Edit, Trash2, Copy, Scissors, Type,
-  Bold, Italic, Underline, List,
-  Hash, Quote, Divide, Percent,
-  DollarSign, Euro, Pound, Yen,
-  Bitcoin, CreditCard, ShoppingCart,
-  Package, Truck, Box, Warehouse,
-  Building, Home as HomeIcon, Navigation,
-  Compass, Map, Globe as GlobeIcon,
-  Sunrise, Sunset, Moon, CloudSun,
-  Umbrella, Wind, ThermometerSun,
-  Droplets, Waves, Tree, Flower,
-  Leaf, Bug, Fish, Bird, Cat,
-  Dog, Rabbit, Cow, Pig, Egg,
-  Apple, Carrot, Coffee as CoffeeIcon,
-  Wine, Beer, Cake, Cookie, IceCream,
-  Pizza, Hamburger, FrenchFries, Drumstick,
-  EggFried, Soup, Milk, GlassWater,
-  Citrus, Pepper, Salt, Sugar,
-  Wheat, Croissant, Sandwich, Donut,
-  Candy, Citrus as Lemon, Cherry,
-  Strawberry, Grape, Watermelon, Peach,
-  Pear, Banana, Avocado, Broccoli,
-  Corn, Eggplant, Mushroom, Onion,
-  Potato, Tomato, Pumpkin, Radish,
-  HotPepper, Garlic, Basil, Sprout,
-  Bone, Skull, Ghost, Smile, Frown,
-  Meh, Laugh, Angry, surprised
+  Users, Coffee, DownloadCloud, Info,
+  Activity, Thermometer, Cpu, Zap as ZapIcon,
+  ArrowLeft, Home, Grid, FileSpreadsheet,
+  Calendar, Mail, Phone, MapPin, ThumbsUp,
+  AlertTriangle, Lightbulb, Code, Database,
+  Server, Terminal, Percent, PieChart, Layers,
+  Target as TargetIcon, CircuitBoard, Microchip,
+  Code2, Binary, Workflow, Network, LineChart,
+  GitMerge, Wrench, Settings, Tool, Hammer,
+  Ruler, Building, Factory, Home as HomeIcon,
+  CreditCard, DollarSign, Euro, Pound, Coins,
+  TrendingDown, ArrowUp, ArrowDown, ArrowRight,
+  RotateCcw, RotateCw, Repeat, Sliders,
+  Bell, BellOff, Volume2, Headphones, Mic,
+  Camera, Film, Music, Play, Pause,
+  Maximize2, Minimize, Type, Bold, Italic,
+  Palette, Droplet, Sun, Moon, Heart,
+  Bookmark, Tag, Folder, FolderOpen,
+  Save, Printer, Share, Copy, Paste,
+  Clipboard, Edit, Pencil, Brush, Calculator,
+  Infinity, Sigma, Plus, Minus, Multiply,
+  Equal, ChevronUp, ChevronDown, ChevronLeft,
+  CornerUpLeft, CornerUpRight, Expand, Shrink,
+  Trash, Archive, Inbox, Package, Box,
+  Cube, Circle, Square, Triangle, Crosshair,
+  Wifi, Bluetooth, Battery, BatteryCharging,
+  BatteryFull, BatteryMedium, BatteryLow,
+  Monitor, Smartphone, Tablet, Laptop,
+  MessageSquare, Send, Paperclip, Link2,
+  Smile, Frown, Meh, Trophy, Medal,
+  QuestionMark, HelpCircle, Cloud, CloudOff,
+  CloudRain, CloudLightning, Wind, Umbrella,
+  Sunrise, Sunset, Watch, Timer, Hourglass,
+  Video, Headphones as HeadphonesIcon, Speaker,
+  MessageCircle, UserCheck, UserPlus, UserMinus,
+  UserCircle, UserSquare, Heartbeat, Flag,
+  Radio, Power, Wind as WindIcon,
+  Thermometer as ThermometerIcon, CalendarDays,
+  Battery as BatteryIcon, Cpu as CpuIcon,
+  HardDrive, Router, Tv, RadioTower,
+  Satellite, Antenna, Voicemail, MailOpen,
+  GitBranch, GitPullRequest, GitCommit,
+  BarChart2, Activity as ActivityIcon,
+  FileCode, FileImage, FileVideo, FileAudio,
+  FileDigit, FileSearch, FolderPlus, FolderMinus,
+  FolderTree, FilePlus, FileMinus, FileCheck,
+  FolderSync, FolderSearch, FolderKey, FolderLock,
+  SaveAll, Share2, ClipboardCheck, ClipboardCopy,
+  ClipboardX, Scissors, Cut, Edit2, PenTool,
+  PencilLine, Highlighter, Marker, Feather,
+  AtSign, Hash, Pi, RootSquare, Function,
+  Braces, Brackets, Parentheses, Divide,
+  NotEqual, GreaterThan, LessThan, ChevronsUp,
+  ChevronsDown, ChevronsLeft, ChevronsRight,
+  ArrowUpCircle, ArrowDownCircle, ArrowLeftCircle,
+  ArrowRightCircle, ArrowUpLeft, ArrowUpRight,
+  ArrowDownLeft, ArrowDownRight, CornerDownLeft,
+  CornerDownRight, CornerLeftUp, CornerLeftDown,
+  CornerRightUp, CornerRightDown, Move, RotateCw as RotateCwIcon,
+  RotateCcw as RotateCcwIcon, Repeat as RepeatIcon,
+  RefreshCcw, Undo, Redo, History, Trash2,
+  ArchiveRestore, Inbox as InboxIcon, Outbox,
+  Cuboid, Cylinder, Cone, Pyramid, Sphere,
+  Diameter, Radius, Hexagon, Octagon, Pentagon,
+  Scan, QrCode, Barcode, Hdmi, Plug,
+  PlugZap, Motherboard, MemoryStick, Database as DatabaseIcon,
+  MonitorSmartphone, Desktop, PhoneCall, PhoneForwarded,
+  PhoneIncoming, PhoneMissed, PhoneOff, PhoneOutgoing,
+  Paperclip as PaperclipIcon, Unlink, Tag as TagIcon,
+  UserX, Users as UsersIcon, Frown as FrownIcon,
+  Laugh, Angry, Surprised, Confused, Star as StarIcon,
+  ThumbsDown, Award as AwardIcon, Crown, Flag as FlagIcon,
+  Bookmark as BookmarkIcon, Bell as BellIcon,
+  AlertOctagon, XSquare, CheckSquare, Radio as RadioIcon,
+  ToggleLeft, ToggleRight, Toggle, PowerOff,
+  CloudSnow, CloudDrizzle, CloudFog, Droplets,
+  Thermometer as ThermometerIcon2, Watch as WatchIcon,
+  Battery as BatteryIcon2, Wifi as WifiIcon,
+  Bluetooth as BluetoothIcon, Nfc, Radio as RadioIcon2,
+  Tv as TvIcon, Monitor as MonitorIcon, Camera as CameraIcon,
+  Video as VideoIcon, Headphones as HeadphonesIcon2,
+  Mic as MicIcon, Phone as PhoneIcon, Mail as MailIcon,
+  MessageSquare as MessageSquareIcon, Send as SendIcon,
+  AtSign as AtSignIcon, Hash as HashIcon, User as UserIcon,
+  Smile as SmileIcon, Heart as HeartIcon, ThumbsUp as ThumbsUpIcon,
+  Trophy as TrophyIcon, Medal as MedalIcon, Crown as CrownIcon,
+  AlertTriangle as AlertTriangleIcon, AlertCircle as AlertCircleIcon,
+  CheckCircle as CheckCircleIcon, XCircle as XCircleIcon,
+  PlusCircle, MinusCircle, XSquare as XSquareIcon,
+  CheckSquare as CheckSquareIcon, Radio as RadioIcon3,
+  ToggleLeft as ToggleLeftIcon, ToggleRight as ToggleRightIcon,
+  Power as PowerIcon, Moon as MoonIcon, Sun as SunIcon,
+  Cloud as CloudIcon, CloudRain as CloudRainIcon,
+  CloudLightning as CloudLightningIcon, Wind as WindIcon2,
+  Calendar as CalendarIcon, Clock as ClockIcon,
+  Battery as BatteryIcon3, Wifi as WifiIcon2,
+  Bluetooth as BluetoothIcon2, Monitor as MonitorIcon2,
+  Smartphone as SmartphoneIcon, Tablet as TabletIcon,
+  Laptop as LaptopIcon, Camera as CameraIcon2,
+  Video as VideoIcon2, Headphones as HeadphonesIcon3,
+  Mic as MicIcon2, Phone as PhoneIcon2, Mail as MailIcon2,
+  MessageSquare as MessageSquareIcon2, Send as SendIcon2,
+  AtSign as AtSignIcon2, Hash as HashIcon2, User as UserIcon2,
+  Smile as SmileIcon2, Heart as HeartIcon2, ThumbsUp as ThumbsUpIcon2,
+  Award as AwardIcon2, Crown as CrownIcon2, AlertTriangle as AlertTriangleIcon2,
+  AlertCircle as AlertCircleIcon2, CheckCircle as CheckCircleIcon2,
+  XCircle as XCircleIcon2, X as XIcon, PlusCircle as PlusCircleIcon,
+  MinusCircle as MinusCircleIcon, CheckSquare as CheckSquareIcon2,
+  Radio as RadioIcon4, ToggleLeft as ToggleLeftIcon2,
+  ToggleRight as ToggleRightIcon2, Power as PowerIcon2,
+  Moon as MoonIcon2, Sun as SunIcon2, Cloud as CloudIcon2,
+  CloudRain as CloudRainIcon2, CloudLightning as CloudLightningIcon2,
+  Wind as WindIcon3, Calendar as CalendarIcon2, Clock as ClockIcon2,
+  Battery as BatteryIcon4, Wifi as WifiIcon3,
+  Bluetooth as BluetoothIcon3, Monitor as MonitorIcon3,
+  Smartphone as SmartphoneIcon2, Laptop as LaptopIcon2,
+  Camera as CameraIcon3, Video as VideoIcon3,
+  Headphones as HeadphonesIcon4, Mic as MicIcon3,
+  Phone as PhoneIcon3, Mail as MailIcon3,
+  MessageSquare as MessageSquareIcon3, Send as SendIcon3,
+  AtSign as AtSignIcon3, User as UserIcon3,
+  Smile as SmileIcon3, Heart as HeartIcon3,
+  ThumbsUp as ThumbsUpIcon3, Award as AwardIcon3,
+  Crown as CrownIcon3, AlertCircle as AlertCircleIcon3,
+  CheckCircle as CheckCircleIcon3, XCircle as XCircleIcon3,
+  PlusCircle as PlusCircleIcon2, MinusCircle as MinusCircleIcon2,
+  CheckSquare as CheckSquareIcon3, Radio as RadioIcon5,
+  ToggleLeft as ToggleLeftIcon3, ToggleRight as ToggleRightIcon3,
+  Power as PowerIcon3, Moon as MoonIcon3, Sun as SunIcon3,
+  Cloud as CloudIcon3, CloudRain as CloudRainIcon3,
+  CloudLightning as CloudLightningIcon3, Wind as WindIcon4,
+  Calendar as CalendarIcon3, Clock as ClockIcon3,
+  Battery as BatteryIcon5, Wifi as WifiIcon4,
+  Bluetooth as BluetoothIcon4, Monitor as MonitorIcon4,
+  Smartphone as SmartphoneIcon3, Laptop as LaptopIcon3,
+  Camera as CameraIcon4, Video as VideoIcon4,
+  Headphones as HeadphonesIcon5, Mic as MicIcon4,
+  Phone as PhoneIcon4, Mail as MailIcon4,
+  MessageSquare as MessageSquareIcon4, Send as SendIcon4,
+  User as UserIcon4, Smile as SmileIcon4,
+  Heart as HeartIcon4, ThumbsUp as ThumbsUpIcon4,
+  Award as AwardIcon4, Crown as CrownIcon4,
+  AlertCircle as AlertCircleIcon4, CheckCircle as CheckCircleIcon4,
+  XCircle as XCircleIcon4, PlusCircle as PlusCircleIcon3,
+  MinusCircle as MinusCircleIcon3, CheckSquare as CheckSquareIcon4,
+  Radio as RadioIcon6, ToggleLeft as ToggleLeftIcon4,
+  ToggleRight as ToggleRightIcon4, Power as PowerIcon4,
+  Moon as MoonIcon4, Sun as SunIcon4, Cloud as CloudIcon4,
+  CloudRain as CloudRainIcon4, CloudLightning as CloudLightningIcon4,
+  Wind as WindIcon5, Calendar as CalendarIcon4, Clock as ClockIcon4,
+  Battery as BatteryIcon6, Wifi as WifiIcon5,
+  Bluetooth as BluetoothIcon5, Monitor as MonitorIcon5,
+  Smartphone as SmartphoneIcon4, Laptop as LaptopIcon4,
+  Camera as CameraIcon5, Video as VideoIcon5,
+  Headphones as HeadphonesIcon6, Mic as MicIcon5,
+  Phone as PhoneIcon5, Mail as MailIcon5,
+  MessageSquare as MessageSquareIcon5, Send as SendIcon5,
+  User as UserIcon5, Smile as SmileIcon5,
+  Heart as HeartIcon5, ThumbsUp as ThumbsUpIcon5,
+  Award as AwardIcon5, Crown as CrownIcon5,
+  AlertCircle as AlertCircleIcon5, CheckCircle as CheckCircleIcon5,
+  XCircle as XCircleIcon5, PlusCircle as PlusCircleIcon4,
+  MinusCircle as MinusCircleIcon4, CheckSquare as CheckSquareIcon5,
+  Radio as RadioIcon7, ToggleLeft as ToggleLeftIcon5,
+  ToggleRight as ToggleRightIcon5, Power as PowerIcon5,
+  Moon as MoonIcon5, Sun as SunIcon5, Cloud as CloudIcon5,
+  CloudRain as CloudRainIcon5, CloudLightning as CloudLightningIcon5,
+  Wind as WindIcon6, Calendar as CalendarIcon5, Clock as ClockIcon5,
+  Battery as BatteryIcon7, Wifi as WifiIcon6,
+  Bluetooth as BluetoothIcon6, Monitor as MonitorIcon6,
+  Smartphone as SmartphoneIcon5, Laptop as LaptopIcon5,
+  Camera as CameraIcon6, Video as VideoIcon6,
+  Headphones as HeadphonesIcon7, Mic as MicIcon6,
+  Phone as PhoneIcon6, Mail as MailIcon6,
+  MessageSquare as MessageSquareIcon6, Send as SendIcon6,
+  User as UserIcon6, Smile as SmileIcon6,
+  Heart as HeartIcon6, ThumbsUp as ThumbsUpIcon6,
+  Award as AwardIcon6, Crown as CrownIcon6,
+  AlertCircle as AlertCircleIcon6, CheckCircle as CheckCircleIcon6,
+  XCircle as XCircleIcon6, PlusCircle as PlusCircleIcon5,
+  MinusCircle as MinusCircleIcon5, CheckSquare as CheckSquareIcon6,
+  Radio as RadioIcon8, ToggleLeft as ToggleLeftIcon6,
+  ToggleRight as ToggleRightIcon6, Power as PowerIcon6,
+  Moon as MoonIcon6, Sun as SunIcon6, Cloud as CloudIcon6,
+  CloudRain as CloudRainIcon6, CloudLightning as CloudLightningIcon6,
+  Wind as WindIcon7, Calendar as CalendarIcon6, Clock as ClockIcon6,
+  Battery as BatteryIcon8, Wifi as WifiIcon7,
+  Bluetooth as BluetoothIcon7, Monitor as MonitorIcon7,
+  Smartphone as SmartphoneIcon6, Laptop as LaptopIcon6,
+  Camera as CameraIcon7, Video as VideoIcon7,
+  Headphones as HeadphonesIcon8, Mic as MicIcon7,
+  Phone as PhoneIcon7, Mail as MailIcon7,
+  MessageSquare as MessageSquareIcon7, Send as SendIcon7,
+  User as UserIcon7, Smile as SmileIcon7,
+  Heart as HeartIcon7, ThumbsUp as ThumbsUpIcon7,
+  Award as AwardIcon7, Crown as CrownIcon7,
+  AlertCircle as AlertCircleIcon7, CheckCircle as CheckCircleIcon7,
+  XCircle as XCircleIcon7, PlusCircle as PlusCircleIcon6,
+  MinusCircle as MinusCircleIcon6, CheckSquare as CheckSquareIcon7,
+  Radio as RadioIcon9, ToggleLeft as ToggleLeftIcon7,
+  ToggleRight as ToggleRightIcon7, Power as PowerIcon7,
+  Moon as MoonIcon7, Sun as SunIcon7, Cloud as CloudIcon7,
+  CloudRain as CloudRainIcon7, CloudLightning as CloudLightningIcon7,
+  Wind as WindIcon8, Calendar as CalendarIcon7, Clock as ClockIcon7,
+  Battery as BatteryIcon9, Wifi as WifiIcon8,
+  Bluetooth as BluetoothIcon8, Monitor as MonitorIcon8,
+  Smartphone as SmartphoneIcon7, Laptop as LaptopIcon7,
+  Camera as CameraIcon8, Video as VideoIcon8,
+  Headphones as HeadphonesIcon9, Mic as MicIcon8,
+  Phone as PhoneIcon8, Mail as MailIcon8,
+  MessageSquare as MessageSquareIcon8, Send as SendIcon8,
+  User as UserIcon8, Smile as SmileIcon8,
+  Heart as HeartIcon8, ThumbsUp as ThumbsUpIcon8,
+  Award as AwardIcon8, Crown as CrownIcon8,
+  AlertCircle as AlertCircleIcon8, CheckCircle as CheckCircleIcon8,
+  XCircle as XCircleIcon8, PlusCircle as PlusCircleIcon7,
+  MinusCircle as MinusCircleIcon7, CheckSquare as CheckSquareIcon8,
+  Radio as RadioIcon10, ToggleLeft as ToggleLeftIcon8,
+  ToggleRight as ToggleRightIcon8, Power as PowerIcon8,
+  Moon as MoonIcon8, Sun as SunIcon8, Cloud as CloudIcon8,
+  CloudRain as CloudRainIcon8, CloudLightning as CloudLightningIcon8
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -78,7 +250,6 @@ function App() {
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
-  const [quotaInfo, setQuotaInfo] = useState(null);
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
   const [modelInfo, setModelInfo] = useState(null);
@@ -88,8 +259,8 @@ function App() {
     totalKeys: 0
   });
   
-  // View management for navigation
-  const [currentView, setCurrentView] = useState('main'); // 'main', 'single-results', 'batch-results', 'candidate-detail'
+  // View management
+  const [currentView, setCurrentView] = useState('main');
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(null);
   
   const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
@@ -171,7 +342,10 @@ function App() {
         });
         
         setDeepseekWarmup(healthResponse.data.ai_warmup_complete || false);
-        setModelInfo(healthResponse.data.model_info || { name: healthResponse.data.model });
+        setModelInfo(healthResponse.data.model_info || { 
+          name: healthResponse.data.model,
+          ats_configuration: healthResponse.data.ats_configuration 
+        });
         setBackendStatus('ready');
       }
       
@@ -288,7 +462,10 @@ function App() {
       setBackendStatus('ready');
       setDeepseekWarmup(response.data.ai_warmup_complete || false);
       if (response.data.model_info || response.data.model) {
-        setModelInfo(response.data.model_info || { name: response.data.model });
+        setModelInfo(response.data.model_info || { 
+          name: response.data.model,
+          ats_configuration: response.data.ats_configuration 
+        });
       }
       
       if (response.data.ai_warmup_complete) {
@@ -387,7 +564,6 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      // Allow up to 10 files (DeepSeek batch size)
       setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10));
       setError('');
     }
@@ -435,7 +611,7 @@ function App() {
     setAnalysis(null);
     setBatchAnalysis(null);
     setProgress(0);
-    setLoadingMessage('Starting analysis...');
+    setLoadingMessage('Starting advanced ATS analysis...');
 
     const formData = new FormData();
     formData.append('resume', resumeFile);
@@ -452,9 +628,9 @@ function App() {
       }, 500);
 
       if (aiStatus === 'available' && deepseekWarmup) {
-        setLoadingMessage('DeepSeek AI analysis...');
+        setLoadingMessage('Advanced ATS + DeepSeek AI analysis...');
       } else {
-        setLoadingMessage('Enhanced analysis (Warming up DeepSeek)...');
+        setLoadingMessage('Weighted Multi-Dimensional ATS analysis...');
       }
       setProgress(20);
 
@@ -478,7 +654,7 @@ function App() {
       clearInterval(progressInterval);
       setProgress(95);
       
-      setLoadingMessage('AI analysis complete!');
+      setLoadingMessage('Advanced ATS analysis complete!');
 
       await new Promise(resolve => setTimeout(resolve, 500));
       
@@ -537,7 +713,7 @@ function App() {
     setAnalysis(null);
     setBatchAnalysis(null);
     setBatchProgress(0);
-    setLoadingMessage(`Starting batch analysis of ${resumeFiles.length} resumes...`);
+    setLoadingMessage(`Starting batch ATS analysis of ${resumeFiles.length} resumes...`);
 
     const formData = new FormData();
     formData.append('jobDescription', jobDescription);
@@ -563,7 +739,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 300000, // 5 minutes for batch processing
+        timeout: 300000,
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -575,7 +751,7 @@ function App() {
 
       clearInterval(progressInterval);
       setBatchProgress(95);
-      setLoadingMessage('Batch analysis complete!');
+      setLoadingMessage('Batch ATS analysis complete!');
 
       await new Promise(resolve => setTimeout(resolve, 800));
       
@@ -633,17 +809,22 @@ function App() {
   };
 
   const getScoreColor = (score) => {
-    if (score >= 80) return '#00ff9d';
-    if (score >= 60) return '#ffd166';
-    return '#ff6b6b';
+    if (score >= 85) return '#00ff9d'; // Excellent - Bright Green
+    if (score >= 75) return '#4cd964'; // Very Good - Green
+    if (score >= 65) return '#ffd166'; // Good - Yellow
+    if (score >= 55) return '#ff9a3c'; // Fair - Orange
+    if (score >= 45) return '#ff6b6b'; // Poor - Red
+    return '#ff4757'; // Very Poor - Dark Red
   };
 
   const getScoreGrade = (score) => {
-    if (score >= 90) return 'Excellent Match 🎯';
-    if (score >= 80) return 'Great Match ✨';
-    if (score >= 70) return 'Good Match 👍';
-    if (score >= 60) return 'Fair Match 📊';
-    return 'Needs Improvement 📈';
+    if (score >= 90) return 'Exceptional Match 🎯';
+    if (score >= 85) return 'Strong Match ✨';
+    if (score >= 75) return 'Good Match 👍';
+    if (score >= 65) return 'Fair Match 📊';
+    if (score >= 55) return 'Borderline 🤔';
+    if (score >= 45) return 'Weak Match ⚠️';
+    return 'Poor Match ❌';
   };
 
   const getBackendStatusMessage = () => {
@@ -696,9 +877,9 @@ function App() {
         bgColor: 'rgba(0, 255, 157, 0.1)'
       };
       case 'unavailable': return { 
-        text: 'Enhanced Analysis', 
+        text: 'Advanced ATS Only', 
         color: '#ffd166', 
-        icon: <Info size={16} />,
+        icon: <BarChart3 size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       default: return { 
@@ -708,6 +889,120 @@ function App() {
         bgColor: 'rgba(148, 163, 184, 0.1)'
       };
     }
+  };
+
+  const getATSBreakdownComponent = (analysis) => {
+    if (!analysis?.ats_score_breakdown) return null;
+    
+    const breakdown = analysis.ats_score_breakdown;
+    const components = [
+      { key: 'skills_match', label: 'Skills Match', icon: <CheckCircle size={20} /> },
+      { key: 'experience_relevance', label: 'Experience', icon: <Briefcase size={20} /> },
+      { key: 'role_alignment', label: 'Role Alignment', icon: <Target size={20} /> },
+      { key: 'project_impact', label: 'Project Impact', icon: <Rocket size={20} /> },
+      { key: 'resume_quality', label: 'Resume Quality', icon: <FileText size={20} /> }
+    ];
+    
+    return components.map(comp => {
+      const component = breakdown[comp.key];
+      if (!component) return null;
+      
+      const score = component.score || 0;
+      const weight = (component.weight || 0) * 100;
+      const maxScore = weight; // Maximum possible score for this component
+      const percentage = maxScore > 0 ? (score / maxScore) * 100 : 0;
+      
+      return {
+        ...comp,
+        score: score.toFixed(1),
+        weight: `${weight.toFixed(0)}%`,
+        percentage: percentage.toFixed(0),
+        color: getScoreColor(percentage),
+        details: component.details || {}
+      };
+    }).filter(Boolean);
+  };
+
+  const renderATSScoreRadar = (analysis) => {
+    if (!analysis?.ats_score_breakdown) return null;
+    
+    const breakdown = getATSBreakdownComponent(analysis);
+    if (!breakdown || breakdown.length === 0) return null;
+    
+    return (
+      <div className="ats-radar-chart">
+        <div className="radar-grid">
+          {breakdown.map((comp, index) => {
+            const angle = (index * 72) * (Math.PI / 180); // 72 degrees between 5 components
+            const radius = 80; // Base radius
+            const valueRadius = radius * (parseInt(comp.percentage) / 100);
+            
+            const x = 100 + Math.cos(angle) * radius;
+            const y = 100 + Math.sin(angle) * radius;
+            const valueX = 100 + Math.cos(angle) * valueRadius;
+            const valueY = 100 + Math.sin(angle) * valueRadius;
+            
+            return (
+              <g key={comp.key}>
+                {/* Grid line */}
+                <line 
+                  x1="100" y1="100" 
+                  x2={x} y2={y} 
+                  stroke="rgba(255, 255, 255, 0.1)" 
+                  strokeWidth="1"
+                />
+                {/* Value point */}
+                <circle 
+                  cx={valueX} 
+                  cy={valueY} 
+                  r="4" 
+                  fill={comp.color}
+                  stroke="#fff"
+                  strokeWidth="1.5"
+                />
+                {/* Component label */}
+                <text 
+                  x={x + (Math.cos(angle) * 20)} 
+                  y={y + (Math.sin(angle) * 20)} 
+                  textAnchor="middle"
+                  fill="#fff"
+                  fontSize="10"
+                  fontWeight="600"
+                >
+                  {comp.label}
+                </text>
+                {/* Score label */}
+                <text 
+                  x={valueX} 
+                  y={valueY - 8} 
+                  textAnchor="middle"
+                  fill={comp.color}
+                  fontSize="9"
+                  fontWeight="700"
+                >
+                  {comp.score}
+                </text>
+              </g>
+            );
+          })}
+          
+          {/* Connect value points */}
+          <polygon 
+            points={breakdown.map((comp, index) => {
+              const angle = (index * 72) * (Math.PI / 180);
+              const radius = 80 * (parseInt(comp.percentage) / 100);
+              const x = 100 + Math.cos(angle) * radius;
+              const y = 100 + Math.sin(angle) * radius;
+              return `${x},${y}`;
+            }).join(' ')}
+            fill="rgba(0, 255, 157, 0.1)"
+            stroke="#00ff9d"
+            strokeWidth="1.5"
+            strokeOpacity="0.7"
+          />
+        </div>
+      </div>
+    );
   };
 
   const backendStatusInfo = getBackendStatusMessage();
@@ -738,22 +1033,17 @@ function App() {
   };
 
   const getModelDisplayName = (modelInfo) => {
-    if (!modelInfo) return 'DeepSeek AI';
+    if (!modelInfo) return 'Advanced ATS Algorithm';
     if (typeof modelInfo === 'string') return modelInfo;
-    return modelInfo.name || 'DeepSeek AI';
-  };
-
-  const getModelDescription = (modelInfo) => {
-    if (!modelInfo || typeof modelInfo === 'string') return '32K context length';
-    return modelInfo.description || 'DeepSeek 32K context';
+    return modelInfo.name || 'Advanced ATS Algorithm';
   };
 
   // Render functions for different views
   const renderMainView = () => (
     <div className="upload-section">
       <div className="section-header">
-        <h2>Start Your Analysis</h2>
-        <p>Upload resume(s) and job description to get detailed insights</p>
+        <h2>Advanced ATS Resume Analysis</h2>
+        <p>Weighted Multi-Dimensional Scoring with VLSI/CS Domain Expertise</p>
         <div className="service-status">
           <span className="status-badge backend">
             {backendStatusInfo.icon} {backendStatusInfo.text}
@@ -762,11 +1052,11 @@ function App() {
             {aiStatusInfo.icon} {aiStatusInfo.text}
           </span>
           <span className="status-badge always-active">
-            <ZapIcon size={14} /> Always Active
+            <ZapIcon size={14} /> Advanced ATS Scoring
           </span>
-          {modelInfo && (
+          {modelInfo?.ats_configuration && (
             <span className="status-badge model">
-              <Cpu size={14} /> {getModelDisplayName(modelInfo)}
+              <Cpu size={14} /> {modelInfo.ats_configuration.method.replace(/_/g, ' ').toUpperCase()}
             </span>
           )}
         </div>
@@ -968,19 +1258,19 @@ function App() {
               <div className="stat-icon">
                 <Brain size={14} />
               </div>
-              <span>DeepSeek AI analysis</span>
+              <span>Advanced ATS Scoring</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
                 <Cpu size={14} />
               </div>
-              <span>{getModelDisplayName(modelInfo)}</span>
+              <span>Weighted Multi-Dimensional</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
                 <Activity size={14} />
               </div>
-              <span>Batch Processing</span>
+              <span>VLSI/CS Domain Focus</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
@@ -1046,7 +1336,7 @@ function App() {
           <div className="loading-container">
             <div className="loading-header">
               <Loader className="spinner" />
-              <h3>{batchMode ? 'Batch Analysis' : 'Analysis in Progress'}</h3>
+              <h3>{batchMode ? 'Batch ATS Analysis' : 'Advanced ATS Analysis'}</h3>
             </div>
             
             <div className="progress-container">
@@ -1057,8 +1347,8 @@ function App() {
               <span className="loading-message">{loadingMessage}</span>
               <span className="loading-subtext">
                 {batchMode 
-                  ? `Processing ${resumeFiles.length} resume(s) with ${getModelDisplayName(modelInfo)}...` 
-                  : `Using ${getModelDisplayName(modelInfo)}...`}
+                  ? `Processing ${resumeFiles.length} resume(s) with Weighted Multi-Dimensional ATS...` 
+                  : `Using Advanced ATS Algorithm...`}
               </span>
             </div>
             
@@ -1067,11 +1357,11 @@ function App() {
               <span>•</span>
               <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
               <span>•</span>
-              <span>DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : 'Warming...'}</span>
-              {modelInfo && (
+              <span>ATS: {aiStatus === 'available' ? 'Enhanced 🧠' : 'Advanced Only'}</span>
+              {modelInfo?.ats_configuration && (
                 <>
                   <span>•</span>
-                  <span>Model: {getModelDisplayName(modelInfo)}</span>
+                  <span>Method: {modelInfo.ats_configuration.method.replace(/_/g, ' ')}</span>
                 </>
               )}
               {batchMode && (
@@ -1084,7 +1374,7 @@ function App() {
             
             <div className="loading-note info">
               <Info size={14} />
-              <span>DeepSeek AI offers 32K context length for comprehensive resume analysis</span>
+              <span>Advanced Weighted ATS Scoring evaluates 5 dimensions: Skills, Experience, Role, Projects, Resume</span>
             </div>
           </div>
         </div>
@@ -1116,8 +1406,8 @@ function App() {
                 <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                 <span className="button-subtext">
                   {batchMode 
-                    ? `${resumeFiles.length} resume(s) • ${getModelDisplayName(modelInfo)} • Batch` 
-                    : `${getModelDisplayName(modelInfo)} • Single`}
+                    ? `${resumeFiles.length} resume(s) • Advanced ATS • Batch` 
+                    : `Advanced ATS • Weighted Scoring`}
                 </span>
               </div>
             </div>
@@ -1126,44 +1416,145 @@ function App() {
         )}
       </button>
 
+      {/* ATS Scoring Explanation */}
+      <div className="ats-explanation glass">
+        <div className="explanation-header">
+          <BarChart3 size={24} />
+          <h3>Advanced ATS Scoring System</h3>
+        </div>
+        <div className="explanation-content">
+          <div className="scoring-grid">
+            <div className="scoring-component">
+              <div className="component-header">
+                <div className="component-icon" style={{ background: 'rgba(0, 255, 157, 0.1)' }}>
+                  <CheckCircle size={20} color="#00ff9d" />
+                </div>
+                <div className="component-title">
+                  <h4>Skills Match (35%)</h4>
+                  <p>Context-aware skill verification</p>
+                </div>
+              </div>
+              <ul className="component-features">
+                <li>✓ Required skills detection</li>
+                <li>✓ Context verification</li>
+                <li>✓ Partial skill scoring</li>
+                <li>✓ Tool vs experience distinction</li>
+              </ul>
+            </div>
+            
+            <div className="scoring-component">
+              <div className="component-header">
+                <div className="component-icon" style={{ background: 'rgba(255, 209, 102, 0.1)' }}>
+                  <Briefcase size={20} color="#ffd166" />
+                </div>
+                <div className="component-title">
+                  <h4>Experience (25%)</h4>
+                  <p>Seniority and relevance alignment</p>
+                </div>
+              </div>
+              <ul className="component-features">
+                <li>✓ Years of experience</li>
+                <li>✓ Seniority matching</li>
+                <li>✓ Domain relevance</li>
+                <li>✓ Industry alignment</li>
+              </ul>
+            </div>
+            
+            <div className="scoring-component">
+              <div className="component-header">
+                <div className="component-icon" style={{ background: 'rgba(255, 107, 107, 0.1)' }}>
+                  <Target size={20} color="#ff6b6b" />
+                </div>
+                <div className="component-title">
+                  <h4>Role Alignment (20%)</h4>
+                  <p>VLSI/CS domain expertise</p>
+                </div>
+              </div>
+              <ul className="component-features">
+                <li>✓ Responsibility matching</li>
+                <li>✓ Domain-specific skills</li>
+                <li>✓ Project relevance</li>
+                <li>✓ Career path alignment</li>
+              </ul>
+            </div>
+            
+            <div className="scoring-component">
+              <div className="component-header">
+                <div className="component-icon" style={{ background: 'rgba(147, 51, 234, 0.1)' }}>
+                  <Rocket size={20} color="#9333ea" />
+                </div>
+                <div className="component-title">
+                  <h4>Project Impact (15%)</h4>
+                  <p>Complexity and measurable results</p>
+                </div>
+              </div>
+              <ul className="component-features">
+                <li>✓ Project complexity</li>
+                <li>✓ Quantifiable achievements</li>
+                <li>✓ Leadership evidence</li>
+                <li>✓ Technical depth</li>
+              </ul>
+            </div>
+            
+            <div className="scoring-component">
+              <div className="component-header">
+                <div className="component-icon" style={{ background: 'rgba(59, 130, 246, 0.1)' }}>
+                  <FileText size={20} color="#3b82f6" />
+                </div>
+                <div className="component-title">
+                  <h4>Resume Quality (5%)</h4>
+                  <p>Structure and presentation</p>
+                </div>
+              </div>
+              <ul className="component-features">
+                <li>✓ Professional structure</li>
+                <li>✓ Action-oriented language</li>
+                <li>✓ Quantifiable metrics</li>
+                <li>✓ Clarity and conciseness</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Tips Section */}
       <div className="tips-section">
         {batchMode ? (
           <>
             <div className="tip">
               <Brain size={16} />
-              <span>DeepSeek AI with 32K context length for comprehensive analysis</span>
+              <span>Advanced Weighted ATS Scoring across 5 dimensions</span>
             </div>
             <div className="tip">
               <Activity size={16} />
-              <span>Process up to 10 resumes in a single batch</span>
+              <span>Process up to 10 resumes in a single batch with ranked results</span>
             </div>
             <div className="tip">
               <TrendingUp size={16} />
-              <span>Candidates will be ranked by ATS score from highest to lowest</span>
+              <span>Candidates ranked by comprehensive ATS score with detailed breakdown</span>
             </div>
             <div className="tip">
               <Download size={16} />
-              <span>Download comprehensive Excel report with all candidate data</span>
+              <span>Download comprehensive Excel reports with ATS score breakdowns</span>
             </div>
           </>
         ) : (
           <>
             <div className="tip">
               <Brain size={16} />
-              <span>DeepSeek AI offers high-quality resume analysis</span>
+              <span>Weighted Multi-Dimensional ATS Scoring (35-25-20-15-5)</span>
             </div>
             <div className="tip">
-              <Thermometer size={16} />
-              <span>DeepSeek API automatically warms up when idle</span>
+              <CircuitBoard size={16} />
+              <span>VLSI/CS domain expertise detection and evaluation</span>
             </div>
             <div className="tip">
               <Activity size={16} />
-              <span>Backend stays awake with automatic pings every 3 minutes</span>
+              <span>Context-aware skill matching with verification</span>
             </div>
             <div className="tip">
-              <Cpu size={16} />
-              <span>Using: {getModelDisplayName(modelInfo)}</span>
+              <Target size={16} />
+              <span>Seniority alignment and role relevance assessment</span>
             </div>
           </>
         )}
@@ -1174,6 +1565,8 @@ function App() {
   const renderSingleAnalysisView = () => {
     if (!analysis) return null;
 
+    const breakdown = getATSBreakdownComponent(analysis);
+
     return (
       <div className="results-section">
         {/* Navigation Header */}
@@ -1183,18 +1576,18 @@ function App() {
             <span>New Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>🧠 Resume Analysis Results</h2>
-            <p>{analysis.candidate_name}</p>
+            <h2>🧠 Advanced ATS Analysis Results</h2>
+            <p>{analysis.candidate_name} • {analysis.scoring_method?.replace(/_/g, ' ').toUpperCase() || 'ADVANCED ATS'}</p>
           </div>
           <div className="navigation-actions">
             <button className="download-report-btn" onClick={handleDownload}>
               <DownloadCloud size={18} />
-              <span>Download Report</span>
+              <span>Download ATS Report</span>
             </button>
           </div>
         </div>
 
-        {/* Candidate Header */}
+        {/* Candidate Header with ATS Score */}
         <div className="analysis-header">
           <div className="candidate-info">
             <div className="candidate-avatar">
@@ -1204,7 +1597,7 @@ function App() {
               <h2 className="candidate-name">{analysis.candidate_name}</h2>
               <div className="candidate-meta">
                 <span className="analysis-date">
-                  <Clock size={14} />
+                  <Calendar size={14} />
                   {new Date().toLocaleDateString('en-US', { 
                     weekday: 'long', 
                     year: 'numeric', 
@@ -1214,8 +1607,14 @@ function App() {
                 </span>
                 <span className="file-info">
                   <Cpu size={14} />
-                  Model: {analysis.ai_model || 'DeepSeek AI'}
+                  Scoring: {analysis.scoring_method?.replace(/_/g, ' ') || 'Advanced Weighted ATS'}
                 </span>
+                {analysis.scoring_version && (
+                  <span className="file-info">
+                    <Code size={14} />
+                    Version: {analysis.scoring_version}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -1236,19 +1635,19 @@ function App() {
                   <div className="score-value" style={{ color: getScoreColor(analysis.overall_score) }}>
                     {analysis.overall_score}
                   </div>
-                  <div className="score-label">ATS Score</div>
+                  <div className="score-label">ATS SCORE</div>
                 </div>
               </div>
             </div>
             <div className="score-info">
               <h3 className="score-grade">{getScoreGrade(analysis.overall_score)}</h3>
               <p className="score-description">
-                Based on skill matching, experience relevance, and qualifications
+                Based on weighted multi-dimensional evaluation across 5 key areas
               </p>
               <div className="score-meta">
                 <span className="meta-item">
                   <Brain size={12} />
-                  Response Time: {analysis.response_time || 'N/A'}
+                  Method: {analysis.scoring_method?.replace(/_/g, ' ') || 'Advanced ATS'}
                 </span>
                 <span className="meta-item">
                   <CheckCircle size={12} />
@@ -1260,8 +1659,164 @@ function App() {
                 </span>
               </div>
             </div>
+          </div>
         </div>
+
+        {/* ATS Score Breakdown */}
+        <div className="section-title">
+          <h2>ATS Score Breakdown</h2>
+          <p>Weighted Multi-Dimensional Evaluation</p>
         </div>
+        
+        {breakdown && breakdown.length > 0 && (
+          <div className="ats-breakdown-container glass">
+            <div className="breakdown-header">
+              <div className="breakdown-title">
+                <BarChart3 size={24} />
+                <div>
+                  <h3>Component Scores</h3>
+                  <p className="breakdown-subtitle">Weighted evaluation across 5 dimensions</p>
+                </div>
+              </div>
+              <div className="breakdown-total">
+                <span className="total-label">Total ATS Score</span>
+                <span className="total-value" style={{ color: getScoreColor(analysis.overall_score) }}>
+                  {analysis.overall_score}/100
+                </span>
+              </div>
+            </div>
+            
+            <div className="breakdown-content">
+              <div className="breakdown-grid">
+                {breakdown.map((component, index) => (
+                  <div key={component.key} className="breakdown-item">
+                    <div className="breakdown-item-header">
+                      <div className="component-icon-wrapper" style={{ color: component.color }}>
+                        {component.icon}
+                      </div>
+                      <div className="component-info">
+                        <h4 className="component-name">{component.label}</h4>
+                        <span className="component-weight">Weight: {component.weight}</span>
+                      </div>
+                      <div className="component-score" style={{ color: component.color }}>
+                        <span className="score-value">{component.score}</span>
+                        <span className="score-max">/{component.weight.replace('%', '')}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="progress-bar-container">
+                      <div 
+                        className="progress-bar-fill" 
+                        style={{ 
+                          width: `${component.percentage}%`,
+                          background: component.color
+                        }}
+                      ></div>
+                      <div className="progress-label">{component.percentage}% of weight achieved</div>
+                    </div>
+                    
+                    <div className="component-details">
+                      {component.key === 'skills_match' && component.details && (
+                        <div className="detail-stats">
+                          <span className="stat">
+                            <CheckCircle size={12} />
+                            {component.details.matched_skills?.length || 0} matched
+                          </span>
+                          <span className="stat">
+                            <XCircle size={12} />
+                            {component.details.missing_skills?.length || 0} missing
+                          </span>
+                          {component.details.context_verified && (
+                            <span className="stat">
+                              <CheckCircle size={12} />
+                              {component.details.context_verified} verified with context
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      
+                      {component.key === 'experience_relevance' && component.details && (
+                        <div className="detail-stats">
+                          {component.details.actual_years && (
+                            <span className="stat">
+                              <Briefcase size={12} />
+                              {component.details.actual_years} years experience
+                            </span>
+                          )}
+                          {component.details.seniority_match && (
+                            <span className="stat success">
+                              <CheckCircle size={12} />
+                              Seniority match
+                            </span>
+                          )}
+                          {component.details.bonuses && component.details.bonuses.length > 0 && (
+                            <span className="stat info">
+                              <Award size={12} />
+                              {component.details.bonuses.length} bonuses
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      
+                      {component.key === 'project_impact' && component.details && (
+                        <div className="detail-stats">
+                          <span className="stat">
+                            <Rocket size={12} />
+                            {component.details.project_count || 0} projects
+                          </span>
+                          {component.details.has_star_format && (
+                            <span className="stat success">
+                              <Star size={12} />
+                              STAR format
+                            </span>
+                          )}
+                          {component.details.quality_score && (
+                            <span className="stat">
+                              <TrendingUp size={12} />
+                              Quality: {component.details.quality_score}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Radar Chart Visualization */}
+              <div className="radar-container">
+                <div className="radar-header">
+                  <Target size={20} />
+                  <h4>ATS Score Radar</h4>
+                </div>
+                <div className="radar-chart-wrapper">
+                  <svg width="200" height="200" viewBox="0 0 200 200" className="radar-svg">
+                    {/* Background circles */}
+                    <circle cx="100" cy="100" r="80" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
+                    <circle cx="100" cy="100" r="60" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
+                    <circle cx="100" cy="100" r="40" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
+                    <circle cx="100" cy="100" r="20" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
+                    
+                    {/* Radar plot */}
+                    {renderATSScoreRadar(analysis)}
+                    
+                    {/* Center point */}
+                    <circle cx="100" cy="100" r="3" fill="#fff" />
+                  </svg>
+                  <div className="radar-legend">
+                    {breakdown.map((comp, index) => (
+                      <div key={comp.key} className="legend-item">
+                        <div className="legend-color" style={{ background: comp.color }}></div>
+                        <span className="legend-label">{comp.label}</span>
+                        <span className="legend-value" style={{ color: comp.color }}>{comp.score}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Recommendation Card */}
         <div className="recommendation-card glass" style={{
@@ -1269,11 +1824,11 @@ function App() {
           borderLeft: `4px solid ${getScoreColor(analysis.overall_score)}`
         }}>
           <div className="recommendation-header">
-            <AwardIcon size={28} style={{ color: getScoreColor(analysis.overall_score) }} />
+            <Award size={28} style={{ color: getScoreColor(analysis.overall_score) }} />
             <div>
-              <h3>Analysis Recommendation</h3>
+              <h3>ATS Recommendation</h3>
               <p className="recommendation-subtitle">
-                {analysis.ai_model || 'DeepSeek AI'} • Consistent ATS Scoring
+                {analysis.ai_model || 'Advanced ATS Algorithm'} • Weighted Multi-Dimensional Scoring
               </p>
             </div>
           </div>
@@ -1281,7 +1836,7 @@ function App() {
             <p className="recommendation-text">{analysis.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>DeepSeek AI Analysis</span>
+              <span>Advanced ATS Analysis</span>
             </div>
           </div>
         </div>
@@ -1289,7 +1844,7 @@ function App() {
         {/* Skills Analysis */}
         <div className="section-title">
           <h2>Skills Analysis</h2>
-          <p>Detailed breakdown of matched and missing skills</p>
+          <p>Detailed breakdown of matched and missing skills with context verification</p>
         </div>
         
         <div className="skills-grid">
@@ -1300,7 +1855,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Matched Skills</h3>
-                <p className="skills-subtitle">Found in resume</p>
+                <p className="skills-subtitle">Verified with practical context</p>
               </div>
               <div className="skills-count success">
                 <span>{analysis.skills_matched?.length || 0}</span>
@@ -1314,6 +1869,12 @@ function App() {
                       <CheckCircle size={16} />
                       <span>{skill}</span>
                     </div>
+                    {skill.includes('(verified with context)') && (
+                      <span className="skill-badge verified">Verified</span>
+                    )}
+                    {skill.includes('(mentioned)') && (
+                      <span className="skill-badge mentioned">Mentioned</span>
+                    )}
                   </li>
                 ))}
                 {(!analysis.skills_matched || analysis.skills_matched.length === 0) && (
@@ -1330,7 +1891,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Missing Skills</h3>
-                <p className="skills-subtitle">Suggested to learn</p>
+                <p className="skills-subtitle">Required but not found in resume</p>
               </div>
               <div className="skills-count warning">
                 <span>{analysis.skills_missing?.length || 0}</span>
@@ -1344,6 +1905,7 @@ function App() {
                       <XCircle size={16} />
                       <span>{skill}</span>
                     </div>
+                    <span className="skill-badge missing">Missing</span>
                   </li>
                 ))}
                 {(!analysis.skills_missing || analysis.skills_missing.length === 0) && (
@@ -1354,10 +1916,84 @@ function App() {
           </div>
         </div>
 
+        {/* Domain Expertise */}
+        {(analysis.ats_score_breakdown?.role_alignment?.details?.matches || 
+          analysis.ats_score_breakdown?.role_alignment?.details?.mismatches) && (
+          <>
+            <div className="section-title">
+              <h2>Domain Expertise</h2>
+              <p>VLSI and Computer Science domain assessment</p>
+            </div>
+            
+            <div className="domain-expertise-container glass">
+              <div className="domain-header">
+                <CircuitBoard size={24} />
+                <div>
+                  <h3>Technical Domain Assessment</h3>
+                  <p className="domain-subtitle">Specialized evaluation for VLSI and CS roles</p>
+                </div>
+              </div>
+              
+              <div className="domain-content">
+                {analysis.ats_score_breakdown.role_alignment.details.matches && 
+                 analysis.ats_score_breakdown.role_alignment.details.matches.length > 0 && (
+                  <div className="domain-section success">
+                    <div className="domain-section-header">
+                      <CheckCircle size={18} />
+                      <h4>Domain Strengths</h4>
+                    </div>
+                    <div className="domain-list">
+                      {analysis.ats_score_breakdown.role_alignment.details.matches.map((match, index) => (
+                        <div key={index} className="domain-item">
+                          <span className="domain-text">{match}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {analysis.ats_score_breakdown.role_alignment.details.mismatches && 
+                 analysis.ats_score_breakdown.role_alignment.details.mismatches.length > 0 && (
+                  <div className="domain-section warning">
+                    <div className="domain-section-header">
+                      <AlertCircle size={18} />
+                      <h4>Domain Gaps</h4>
+                    </div>
+                    <div className="domain-list">
+                      {analysis.ats_score_breakdown.role_alignment.details.mismatches.map((mismatch, index) => (
+                        <div key={index} className="domain-item">
+                          <span className="domain-text">{mismatch}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {analysis.ats_score_breakdown.experience_relevance?.details?.bonuses && 
+                 analysis.ats_score_breakdown.experience_relevance.details.bonuses.length > 0 && (
+                  <div className="domain-section info">
+                    <div className="domain-section-header">
+                      <Award size={18} />
+                      <h4>Experience Bonuses</h4>
+                    </div>
+                    <div className="domain-list">
+                      {analysis.ats_score_breakdown.experience_relevance.details.bonuses.map((bonus, index) => (
+                        <div key={index} className="domain-item">
+                          <span className="domain-text">{bonus}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
         {/* Summary Section */}
         <div className="section-title">
           <h2>Profile Summary</h2>
-          <p>Insights extracted from resume</p>
+          <p>Comprehensive assessment based on weighted ATS evaluation</p>
         </div>
         
         <div className="summary-grid">
@@ -1370,9 +2006,18 @@ function App() {
             </div>
             <div className="summary-content">
               <p className="detailed-summary">{analysis.experience_summary || "No experience summary available."}</p>
-              <div className="summary-footer">
-                <span className="summary-tag">Professional Experience</span>
-              </div>
+              {analysis.ats_score_breakdown?.experience_relevance?.details && (
+                <div className="summary-footer">
+                  <span className="summary-tag">
+                    <Target size={14} />
+                    {analysis.ats_score_breakdown.experience_relevance.details.actual_years || 0} years experience
+                  </span>
+                  <span className="summary-tag">
+                    <TrendingUp size={14} />
+                    {analysis.ats_score_breakdown.experience_relevance.details.seniority_match ? 'Seniority match' : 'Seniority mismatch'}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1384,18 +2029,27 @@ function App() {
               <h3>Education Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="detailed-summary">{analysis.education_summary || "No education summary available."}</p>
-              <div className="summary-footer">
-                <span className="summary-tag">Academic Background</span>
-              </div>
+              <p className="detailed-summary">{analysis.education_summary || "Educational background requires analysis."}</p>
+              {analysis.ats_score_breakdown?.resume_quality?.details && (
+                <div className="summary-footer">
+                  <span className="summary-tag">
+                    <FileText size={14} />
+                    {analysis.ats_score_breakdown.resume_quality.details.sections_found || 0} sections found
+                  </span>
+                  <span className="summary-tag">
+                    <BarChart3 size={14} />
+                    {analysis.ats_score_breakdown.resume_quality.details.metrics_count || 0} metrics
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Insights Section - Clean Version without bullet points */}
+        {/* Insights Section */}
         <div className="section-title">
           <h2>Insights & Recommendations</h2>
-          <p>Personalized suggestions to improve your match</p>
+          <p>Personalized suggestions based on ATS score analysis</p>
         </div>
         
         <div className="insights-grid">
@@ -1431,7 +2085,7 @@ function App() {
               </div>
               <div>
                 <h3>Areas for Improvement</h3>
-                <p className="insight-subtitle">Opportunities to grow</p>
+                <p className="insight-subtitle">Opportunities to improve ATS score</p>
               </div>
             </div>
             <div className="insight-content">
@@ -1455,18 +2109,26 @@ function App() {
           <div className="ai-details-header">
             <Brain size={24} />
             <div>
-              <h3>AI Analysis Details</h3>
-              <p className="ai-details-subtitle">Technical information about this analysis</p>
+              <h3>Analysis Details</h3>
+              <p className="ai-details-subtitle">Technical information about this ATS analysis</p>
             </div>
           </div>
           <div className="ai-details-content">
             <div className="ai-detail-item">
+              <span className="detail-label">Scoring Method:</span>
+              <span className="detail-value">{analysis.scoring_method?.replace(/_/g, ' ') || 'Advanced Weighted ATS'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">Scoring Version:</span>
+              <span className="detail-value">{analysis.scoring_version || '2.0'}</span>
+            </div>
+            <div className="ai-detail-item">
               <span className="detail-label">AI Provider:</span>
-              <span className="detail-value">{analysis.ai_provider || 'DeepSeek'}</span>
+              <span className="detail-value">{analysis.ai_provider || 'Advanced ATS Algorithm'}</span>
             </div>
             <div className="ai-detail-item">
               <span className="detail-label">AI Model:</span>
-              <span className="detail-value">{analysis.ai_model || 'DeepSeek AI'}</span>
+              <span className="detail-value">{analysis.ai_model || 'Advanced ATS Algorithm'}</span>
             </div>
             <div className="ai-detail-item">
               <span className="detail-label">Response Time:</span>
@@ -1479,7 +2141,7 @@ function App() {
             <div className="ai-detail-item">
               <span className="detail-label">AI Status:</span>
               <span className="detail-value" style={{ 
-                color: analysis.ai_status === 'Warmed up' ? '#00ff9d' : '#ffd166' 
+                color: analysis.ai_status?.includes('Warmed') ? '#00ff9d' : '#ffd166' 
               }}>
                 {analysis.ai_status || 'N/A'}
               </span>
@@ -1490,13 +2152,13 @@ function App() {
         {/* Action Section */}
         <div className="action-section glass">
           <div className="action-content">
-            <h3>Analysis Complete</h3>
-            <p>Download the detailed Excel report or start a new analysis</p>
+            <h3>Advanced ATS Analysis Complete</h3>
+            <p>Download detailed Excel report with ATS score breakdown or start a new analysis</p>
           </div>
           <div className="action-buttons">
             <button className="download-button" onClick={handleDownload}>
               <DownloadCloud size={20} />
-              <span>Download Excel Report</span>
+              <span>Download ATS Report</span>
             </button>
             <button className="reset-button" onClick={navigateToMain}>
               <RefreshCw size={20} />
@@ -1517,13 +2179,13 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>🧠 Batch Analysis Results</h2>
-          <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
+          <h2>🧠 Batch ATS Analysis Results</h2>
+          <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed with Weighted Multi-Dimensional ATS</p>
         </div>
         <div className="navigation-actions">
           <button className="download-report-btn" onClick={handleBatchDownload}>
             <DownloadCloud size={18} />
-            <span>Download Full Report</span>
+            <span>Download Full ATS Report</span>
           </button>
         </div>
       </div>
@@ -1564,11 +2226,11 @@ function App() {
         
         <div className="stat-card">
           <div className="stat-icon primary">
-            <Cpu size={24} />
+            <BarChart3 size={24} />
           </div>
           <div className="stat-content">
-            <div className="stat-value">{getModelDisplayName(batchAnalysis?.model_used)}</div>
-            <div className="stat-label">AI Model</div>
+            <div className="stat-value">Advanced ATS</div>
+            <div className="stat-label">Scoring Method</div>
           </div>
         </div>
         
@@ -1577,118 +2239,280 @@ function App() {
             <Brain size={24} />
           </div>
           <div className="stat-content">
-            <div className="stat-value">DeepSeek</div>
+            <div className="stat-value">{batchAnalysis?.ai_provider?.includes('ats') ? 'ATS + AI' : 'Advanced ATS'}</div>
             <div className="stat-label">AI Provider</div>
+          </div>
+        </div>
+        
+        <div className="stat-card">
+          <div className="stat-icon" style={{ background: 'rgba(147, 51, 234, 0.1)', color: '#9333ea' }}>
+            <CircuitBoard size={24} />
+          </div>
+          <div className="stat-content">
+            <div className="stat-value">VLSI/CS</div>
+            <div className="stat-label">Domain Focus</div>
           </div>
         </div>
       </div>
 
+      {/* ATS Scoring Summary */}
+      {batchAnalysis?.analyses && batchAnalysis.analyses.length > 0 && (
+        <div className="ats-summary-container glass">
+          <div className="ats-summary-header">
+            <PieChart size={24} />
+            <div>
+              <h3>Batch ATS Score Distribution</h3>
+              <p className="summary-subtitle">Weighted Multi-Dimensional scoring across all candidates</p>
+            </div>
+          </div>
+          
+          <div className="score-distribution">
+            <div className="distribution-row">
+              <span className="distribution-label">Excellent (85-100)</span>
+              <div className="distribution-bar">
+                <div 
+                  className="distribution-fill excellent"
+                  style={{ 
+                    width: `${(batchAnalysis.analyses.filter(a => a.overall_score >= 85).length / batchAnalysis.analyses.length) * 100}%`
+                  }}
+                ></div>
+              </div>
+              <span className="distribution-count">
+                {batchAnalysis.analyses.filter(a => a.overall_score >= 85).length}
+              </span>
+            </div>
+            
+            <div className="distribution-row">
+              <span className="distribution-label">Good (75-84)</span>
+              <div className="distribution-bar">
+                <div 
+                  className="distribution-fill good"
+                  style={{ 
+                    width: `${(batchAnalysis.analyses.filter(a => a.overall_score >= 75 && a.overall_score < 85).length / batchAnalysis.analyses.length) * 100}%`
+                  }}
+                ></div>
+              </div>
+              <span className="distribution-count">
+                {batchAnalysis.analyses.filter(a => a.overall_score >= 75 && a.overall_score < 85).length}
+              </span>
+            </div>
+            
+            <div className="distribution-row">
+              <span className="distribution-label">Fair (65-74)</span>
+              <div className="distribution-bar">
+                <div 
+                  className="distribution-fill fair"
+                  style={{ 
+                    width: `${(batchAnalysis.analyses.filter(a => a.overall_score >= 65 && a.overall_score < 75).length / batchAnalysis.analyses.length) * 100}%`
+                  }}
+                ></div>
+              </div>
+              <span className="distribution-count">
+                {batchAnalysis.analyses.filter(a => a.overall_score >= 65 && a.overall_score < 75).length}
+              </span>
+            </div>
+            
+            <div className="distribution-row">
+              <span className="distribution-label">Borderline (55-64)</span>
+              <div className="distribution-bar">
+                <div 
+                  className="distribution-fill borderline"
+                  style={{ 
+                    width: `${(batchAnalysis.analyses.filter(a => a.overall_score >= 55 && a.overall_score < 65).length / batchAnalysis.analyses.length) * 100}%`
+                  }}
+                ></div>
+              </div>
+              <span className="distribution-count">
+                {batchAnalysis.analyses.filter(a => a.overall_score >= 55 && a.overall_score < 65).length}
+              </span>
+            </div>
+            
+            <div className="distribution-row">
+              <span className="distribution-label">Weak (0-54)</span>
+              <div className="distribution-bar">
+                <div 
+                  className="distribution-fill weak"
+                  style={{ 
+                    width: `${(batchAnalysis.analyses.filter(a => a.overall_score < 55).length / batchAnalysis.analyses.length) * 100}%`
+                  }}
+                ></div>
+              </div>
+              <span className="distribution-count">
+                {batchAnalysis.analyses.filter(a => a.overall_score < 55).length}
+              </span>
+            </div>
+          </div>
+          
+          <div className="summary-stats">
+            <div className="summary-stat">
+              <span className="stat-label">Average ATS Score</span>
+              <span className="stat-value" style={{ color: getScoreColor(batchAnalysis.analyses.reduce((acc, a) => acc + a.overall_score, 0) / batchAnalysis.analyses.length) }}>
+                {(batchAnalysis.analyses.reduce((acc, a) => acc + a.overall_score, 0) / batchAnalysis.analyses.length).toFixed(1)}
+              </span>
+            </div>
+            <div className="summary-stat">
+              <span className="stat-label">Highest Score</span>
+              <span className="stat-value" style={{ color: getScoreColor(Math.max(...batchAnalysis.analyses.map(a => a.overall_score))) }}>
+                {Math.max(...batchAnalysis.analyses.map(a => a.overall_score)).toFixed(1)}
+              </span>
+            </div>
+            <div className="summary-stat">
+              <span className="stat-label">Lowest Score</span>
+              <span className="stat-value" style={{ color: getScoreColor(Math.min(...batchAnalysis.analyses.map(a => a.overall_score))) }}>
+                {Math.min(...batchAnalysis.analyses.map(a => a.overall_score)).toFixed(1)}
+              </span>
+            </div>
+            <div className="summary-stat">
+              <span className="stat-label">Score Range</span>
+              <span className="stat-value">
+                {(Math.max(...batchAnalysis.analyses.map(a => a.overall_score)) - Math.min(...batchAnalysis.analyses.map(a => a.overall_score))).toFixed(1)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Candidates Ranking */}
       <div className="section-title">
         <h2>Candidate Rankings</h2>
-        <p>Sorted by ATS Score (Highest to Lowest) • DeepSeek AI Processing</p>
+        <p>Sorted by ATS Score (Highest to Lowest) • Weighted Multi-Dimensional ATS</p>
       </div>
       
       <div className="batch-results-grid">
-        {batchAnalysis?.analyses?.map((candidate, index) => (
-          <div key={index} className="batch-candidate-card glass">
-            <div className="batch-card-header">
-              <div className="candidate-rank">
-                <div className="rank-badge">#{candidate.rank}</div>
-                <div className="candidate-main-info">
-                  <h3 className="candidate-name">{candidate.candidate_name}</h3>
-                  <div className="candidate-meta">
-                    <span className="file-info">{candidate.filename}</span>
-                    <span className="file-size">{candidate.file_size}</span>
+        {batchAnalysis?.analyses?.map((candidate, index) => {
+          const breakdown = getATSBreakdownComponent(candidate);
+          
+          return (
+            <div key={index} className="batch-candidate-card glass">
+              <div className="batch-card-header">
+                <div className="candidate-rank">
+                  <div className="rank-badge">#{candidate.rank}</div>
+                  <div className="candidate-main-info">
+                    <h3 className="candidate-name">{candidate.candidate_name}</h3>
+                    <div className="candidate-meta">
+                      <span className="file-info">{candidate.filename}</span>
+                      <span className="file-size">{candidate.file_size}</span>
+                      {candidate.scoring_method && (
+                        <span className="scoring-method">
+                          <Cpu size={12} />
+                          {candidate.scoring_method.replace(/_/g, ' ')}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="candidate-score-display">
-                <div className="score-large" style={{ color: getScoreColor(candidate.overall_score) }}>
-                  {candidate.overall_score}
+                <div className="candidate-score-display">
+                  <div className="score-large" style={{ color: getScoreColor(candidate.overall_score) }}>
+                    {candidate.overall_score}
+                  </div>
+                  <div className="score-label">ATS Score</div>
                 </div>
-                <div className="score-label">ATS Score</div>
-              </div>
-            </div>
-            
-            <div className="batch-card-content">
-              <div className="recommendation-badge" style={{ 
-                background: getScoreColor(candidate.overall_score) + '20',
-                color: getScoreColor(candidate.overall_score),
-                border: `1px solid ${getScoreColor(candidate.overall_score)}40`
-              }}>
-                {candidate.recommendation}
               </div>
               
-              <div className="skills-preview">
-                <div className="skills-section">
-                  <div className="skills-header">
-                    <CheckCircle size={14} />
-                    <span>Matched Skills ({candidate.skills_matched?.length || 0})</span>
+              <div className="batch-card-content">
+                <div className="recommendation-badge" style={{ 
+                  background: getScoreColor(candidate.overall_score) + '20',
+                  color: getScoreColor(candidate.overall_score),
+                  border: `1px solid ${getScoreColor(candidate.overall_score)}40`
+                }}>
+                  {candidate.recommendation}
+                </div>
+                
+                {/* ATS Component Scores */}
+                {breakdown && breakdown.length > 0 && (
+                  <div className="ats-components-preview">
+                    <div className="components-grid">
+                      {breakdown.slice(0, 3).map((comp, idx) => (
+                        <div key={idx} className="component-preview">
+                          <div className="component-name">{comp.label}</div>
+                          <div className="component-score" style={{ color: comp.color }}>
+                            {comp.score}<span className="component-weight">/{comp.weight.replace('%', '')}</span>
+                          </div>
+                          <div className="component-progress">
+                            <div 
+                              className="component-progress-fill" 
+                              style={{ 
+                                width: `${comp.percentage}%`,
+                                background: comp.color
+                              }}
+                            ></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="skills-list">
-                    {candidate.skills_matched?.slice(0, 2).map((skill, idx) => (
-                      <span key={idx} className="skill-tag success">{skill}</span>
-                    ))}
-                    {candidate.skills_matched?.length > 2 && (
-                      <span className="more-skills">+{candidate.skills_matched.length - 2} more</span>
-                    )}
+                )}
+                
+                <div className="skills-preview">
+                  <div className="skills-section">
+                    <div className="skills-header">
+                      <CheckCircle size={14} />
+                      <span>Matched Skills ({candidate.skills_matched?.length || 0})</span>
+                    </div>
+                    <div className="skills-list">
+                      {candidate.skills_matched?.slice(0, 3).map((skill, idx) => (
+                        <span key={idx} className="skill-tag success">{skill.replace(' (verified with context)', '').replace(' (mentioned)', '')}</span>
+                      ))}
+                      {candidate.skills_matched?.length > 3 && (
+                        <span className="more-skills">+{candidate.skills_matched.length - 3} more</span>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="skills-section">
+                    <div className="skills-header">
+                      <XCircle size={14} />
+                      <span>Missing Skills ({candidate.skills_missing?.length || 0})</span>
+                    </div>
+                    <div className="skills-list">
+                      {candidate.skills_missing?.slice(0, 2).map((skill, idx) => (
+                        <span key={idx} className="skill-tag error">{skill}</span>
+                      ))}
+                      {candidate.skills_missing?.length > 2 && (
+                        <span className="more-skills">+{candidate.skills_missing.length - 2} more</span>
+                      )}
+                    </div>
                   </div>
                 </div>
                 
-                <div className="skills-section">
-                  <div className="skills-header">
-                    <XCircle size={14} />
-                    <span>Missing Skills ({candidate.skills_missing?.length || 0})</span>
-                  </div>
-                  <div className="skills-list">
-                    {candidate.skills_missing?.slice(0, 2).map((skill, idx) => (
-                      <span key={idx} className="skill-tag error">{skill}</span>
-                    ))}
-                    {candidate.skills_missing?.length > 2 && (
-                      <span className="more-skills">+{candidate.skills_missing.length - 2} more</span>
-                    )}
-                  </div>
+                <div className="experience-preview">
+                  <p>{candidate.experience_summary?.substring(0, 120)}...</p>
                 </div>
               </div>
               
-              <div className="experience-preview">
-                <p>{candidate.experience_summary?.substring(0, 120)}...</p>
+              <div className="batch-card-footer">
+                <button 
+                  className="view-details-btn"
+                  onClick={() => navigateToCandidateDetail(index)}
+                >
+                  View ATS Breakdown
+                  <ChevronRight size={16} />
+                </button>
+                {candidate.analysis_id && (
+                  <button 
+                    className="download-individual-btn"
+                    onClick={() => handleIndividualDownload(candidate.analysis_id)}
+                    title="Download individual ATS report"
+                  >
+                    <FileDown size={16} />
+                  </button>
+                )}
               </div>
             </div>
-            
-            <div className="batch-card-footer">
-              <button 
-                className="view-details-btn"
-                onClick={() => navigateToCandidateDetail(index)}
-              >
-                View Full Details
-                <ChevronRight size={16} />
-              </button>
-              {candidate.analysis_id && (
-                <button 
-                  className="download-individual-btn"
-                  onClick={() => handleIndividualDownload(candidate.analysis_id)}
-                  title="Download individual report"
-                >
-                  <FileDown size={16} />
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Action Buttons */}
       <div className="action-section glass">
         <div className="action-content">
-          <h3>Batch Analysis Complete</h3>
-          <p>Download comprehensive Excel report with all candidate details</p>
+          <h3>Batch ATS Analysis Complete</h3>
+          <p>Download comprehensive Excel report with detailed ATS score breakdowns</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
             <DownloadCloud size={20} />
-            <span>Download Full Batch Report</span>
+            <span>Download Full ATS Report</span>
           </button>
           <button className="reset-button" onClick={navigateToMain}>
             <RefreshCw size={20} />
@@ -1715,6 +2539,8 @@ function App() {
       );
     }
 
+    const breakdown = getATSBreakdownComponent(candidate);
+
     return (
       <div className="results-section">
         {/* Navigation Header */}
@@ -1724,8 +2550,8 @@ function App() {
             <span>Back to Rankings</span>
           </button>
           <div className="navigation-title">
-            <h2>Candidate Details</h2>
-            <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
+            <h2>Candidate ATS Details</h2>
+            <p>Rank #{candidate.rank} • {candidate.candidate_name} • {candidate.scoring_method?.replace(/_/g, ' ').toUpperCase() || 'ADVANCED ATS'}</p>
           </div>
           <div className="navigation-actions">
             {candidate.analysis_id && (
@@ -1734,7 +2560,7 @@ function App() {
                 onClick={() => handleIndividualDownload(candidate.analysis_id)}
               >
                 <FileDown size={18} />
-                <span>Download Individual Report</span>
+                <span>Download ATS Report</span>
               </button>
             )}
             <button 
@@ -1757,13 +2583,19 @@ function App() {
               <h2 className="candidate-name">{candidate.candidate_name}</h2>
               <div className="candidate-meta">
                 <span className="analysis-date">
-                  <Clock size={14} />
+                  <Calendar size={14} />
                   Rank: #{candidate.rank}
                 </span>
                 <span className="file-info">
                   <FileText size={14} />
                   {candidate.filename} • {candidate.file_size}
                 </span>
+                {candidate.scoring_method && (
+                  <span className="file-info">
+                    <Cpu size={14} />
+                    {candidate.scoring_method.replace(/_/g, ' ')}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -1784,24 +2616,82 @@ function App() {
                   <div className="score-value" style={{ color: getScoreColor(candidate.overall_score) }}>
                     {candidate.overall_score}
                   </div>
-                  <div className="score-label">ATS Score</div>
+                  <div className="score-label">ATS SCORE</div>
                 </div>
               </div>
             </div>
             <div className="score-info">
               <h3 className="score-grade">{getScoreGrade(candidate.overall_score)}</h3>
               <p className="score-description">
-                Based on skill matching, experience relevance, and qualifications
+                Based on weighted multi-dimensional evaluation
               </p>
               <div className="score-meta">
                 <span className="meta-item">
-                  <Cpu size={12} />
-                  Model: {candidate.ai_model || 'DeepSeek AI'}
+                  <BarChart3 size={12} />
+                  Method: {candidate.scoring_method?.replace(/_/g, ' ') || 'Advanced ATS'}
+                </span>
+                <span className="meta-item">
+                  <Brain size={12} />
+                  Provider: {candidate.ai_provider || 'Advanced ATS Algorithm'}
                 </span>
               </div>
             </div>
           </div>
         </div>
+
+        {/* ATS Score Breakdown */}
+        {breakdown && breakdown.length > 0 && (
+          <div className="ats-breakdown-container glass">
+            <div className="breakdown-header">
+              <div className="breakdown-title">
+                <BarChart3 size={24} />
+                <div>
+                  <h3>ATS Score Breakdown</h3>
+                  <p className="breakdown-subtitle">Weighted evaluation across 5 dimensions</p>
+                </div>
+              </div>
+              <div className="breakdown-total">
+                <span className="total-label">Total ATS Score</span>
+                <span className="total-value" style={{ color: getScoreColor(candidate.overall_score) }}>
+                  {candidate.overall_score}/100
+                </span>
+              </div>
+            </div>
+            
+            <div className="breakdown-content">
+              <div className="breakdown-grid">
+                {breakdown.map((component, index) => (
+                  <div key={component.key} className="breakdown-item">
+                    <div className="breakdown-item-header">
+                      <div className="component-icon-wrapper" style={{ color: component.color }}>
+                        {component.icon}
+                      </div>
+                      <div className="component-info">
+                        <h4 className="component-name">{component.label}</h4>
+                        <span className="component-weight">Weight: {component.weight}</span>
+                      </div>
+                      <div className="component-score" style={{ color: component.color }}>
+                        <span className="score-value">{component.score}</span>
+                        <span className="score-max">/{component.weight.replace('%', '')}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="progress-bar-container">
+                      <div 
+                        className="progress-bar-fill" 
+                        style={{ 
+                          width: `${component.percentage}%`,
+                          background: component.color
+                        }}
+                      ></div>
+                      <div className="progress-label">{component.percentage}% of weight achieved</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Recommendation Card */}
         <div className="recommendation-card glass" style={{
@@ -1809,11 +2699,11 @@ function App() {
           borderLeft: `4px solid ${getScoreColor(candidate.overall_score)}`
         }}>
           <div className="recommendation-header">
-            <AwardIcon size={28} style={{ color: getScoreColor(candidate.overall_score) }} />
+            <Award size={28} style={{ color: getScoreColor(candidate.overall_score) }} />
             <div>
-              <h3>Analysis Recommendation</h3>
+              <h3>ATS Recommendation</h3>
               <p className="recommendation-subtitle">
-                {candidate.ai_model || 'DeepSeek AI'} • Batch Processing
+                {candidate.ai_model || 'Advanced ATS Algorithm'} • Batch Processing
               </p>
             </div>
           </div>
@@ -1821,7 +2711,7 @@ function App() {
             <p className="recommendation-text">{candidate.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>DeepSeek AI Analysis</span>
+              <span>Advanced ATS Analysis</span>
             </div>
           </div>
         </div>
@@ -1929,68 +2819,10 @@ function App() {
           </div>
         </div>
 
-        {/* Insights Section - Clean Version without bullet points */}
-        <div className="section-title">
-          <h2>Insights & Recommendations</h2>
-          <p>Personalized suggestions to improve your match</p>
-        </div>
-        
-        <div className="insights-grid">
-          <div className="insight-card glass">
-            <div className="insight-header">
-              <div className="insight-icon success">
-                <TrendingUp size={24} />
-              </div>
-              <div>
-                <h3>Key Strengths</h3>
-                <p className="insight-subtitle">Areas where candidate excels</p>
-              </div>
-            </div>
-            <div className="insight-content">
-              <div className="strengths-list">
-                {candidate.key_strengths?.map((strength, index) => (
-                  <div key={index} className="strength-item">
-                    <CheckCircle size={16} className="strength-icon" />
-                    <span className="strength-text">{strength}</span>
-                  </div>
-                ))}
-                {(!candidate.key_strengths || candidate.key_strengths.length === 0) && (
-                  <div className="no-items">No strengths identified</div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="insight-card glass">
-            <div className="insight-header">
-              <div className="insight-icon warning">
-                <Target size={24} />
-              </div>
-              <div>
-                <h3>Areas for Improvement</h3>
-                <p className="insight-subtitle">Opportunities to grow</p>
-              </div>
-            </div>
-            <div className="insight-content">
-              <div className="improvements-list">
-                {candidate.areas_for_improvement?.map((area, index) => (
-                  <div key={index} className="improvement-item">
-                    <AlertCircle size={16} className="improvement-icon" />
-                    <span className="improvement-text">{area}</span>
-                  </div>
-                ))}
-                {(!candidate.areas_for_improvement || candidate.areas_for_improvement.length === 0) && (
-                  <div className="no-items success-text">No areas for improvement identified</div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* Action Section */}
         <div className="action-section glass">
           <div className="action-content">
-            <h3>Candidate Analysis Complete</h3>
+            <h3>Candidate ATS Analysis Complete</h3>
             <p>Download individual report or full batch report</p>
           </div>
           <div className="action-buttons">
@@ -2000,12 +2832,12 @@ function App() {
                 onClick={() => handleIndividualDownload(candidate.analysis_id)}
               >
                 <FileDown size={20} />
-                <span>Download Individual Report</span>
+                <span>Download ATS Report</span>
               </button>
             )}
             <button className="download-button secondary" onClick={handleBatchDownload}>
               <DownloadCloud size={20} />
-              <span>Download Full Batch Report</span>
+              <span>Download Full Batch</span>
             </button>
             <button className="reset-button" onClick={navigateBack}>
               <ArrowLeft size={20} />
@@ -2031,6 +2863,9 @@ function App() {
     }
   };
 
+  const backendStatusInfoMsg = getBackendStatusMessage();
+  const aiStatusInfoMsg = getAiStatusMessage();
+
   return (
     <div className="app">
       {/* Animated Background Elements */}
@@ -2048,12 +2883,12 @@ function App() {
                 <Brain className="logo-icon" />
               </div>
               <div className="logo-text">
-                <h1>AI Resume Analyzer</h1>
+                <h1>Advanced ATS Resume Analyzer</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
-                  <span className="deepseek-badge">🧠 DeepSeek</span>
+                  <span className="deepseek-badge">🧠 DeepSeek + Advanced ATS</span>
                   <span className="divider">•</span>
-                  <span className="tagline">32K Context • Up to 10 Resumes • Always Active</span>
+                  <span className="tagline">Weighted Multi-Dimensional • VLSI/CS Focus • Up to 10 Resumes</span>
                 </div>
               </div>
             </div>
@@ -2090,13 +2925,13 @@ function App() {
             <div 
               className="feature backend-status-indicator" 
               style={{ 
-                backgroundColor: backendStatusInfo.bgColor,
-                borderColor: `${backendStatusInfo.color}30`,
-                color: backendStatusInfo.color
+                backgroundColor: backendStatusInfoMsg.bgColor,
+                borderColor: `${backendStatusInfoMsg.color}30`,
+                color: backendStatusInfoMsg.color
               }}
             >
-              {backendStatusInfo.icon}
-              <span>{backendStatusInfo.text}</span>
+              {backendStatusInfoMsg.icon}
+              <span>{backendStatusInfoMsg.text}</span>
               {backendStatus === 'waking' && <Loader size={12} className="pulse-spinner" />}
             </div>
             
@@ -2104,21 +2939,21 @@ function App() {
             <div 
               className="feature ai-status-indicator" 
               style={{ 
-                backgroundColor: aiStatusInfo.bgColor,
-                borderColor: `${aiStatusInfo.color}30`,
-                color: aiStatusInfo.color
+                backgroundColor: aiStatusInfoMsg.bgColor,
+                borderColor: `${aiStatusInfoMsg.color}30`,
+                color: aiStatusInfoMsg.color
               }}
             >
-              {aiStatusInfo.icon}
-              <span>{aiStatusInfo.text}</span>
+              {aiStatusInfoMsg.icon}
+              <span>{aiStatusInfoMsg.text}</span>
               {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
             </div>
             
-            {/* Model Info */}
-            {modelInfo && (
+            {/* ATS Method */}
+            {modelInfo?.ats_configuration && (
               <div className="feature model-info">
-                <Cpu size={16} />
-                <span>{getModelDisplayName(modelInfo)}</span>
+                <BarChart3 size={16} />
+                <span>{modelInfo.ats_configuration.method.replace(/_/g, ' ').toUpperCase()}</span>
               </div>
             )}
             
@@ -2126,9 +2961,9 @@ function App() {
             {currentView !== 'main' && (
               <div className="feature nav-indicator">
                 <Grid size={16} />
-                <span>{currentView === 'single-results' ? 'Single Analysis' : 
-                       currentView === 'batch-results' ? 'Batch Results' : 
-                       'Candidate Details'}</span>
+                <span>{currentView === 'single-results' ? 'Single ATS Analysis' : 
+                       currentView === 'batch-results' ? 'Batch ATS Results' : 
+                       'Candidate ATS Details'}</span>
               </div>
             )}
             
@@ -2155,7 +2990,7 @@ function App() {
               title="Show service status"
             >
               <BarChart size={16} />
-              <span>Service Status</span>
+              <span>ATS Status</span>
             </button>
           </div>
         </div>
@@ -2176,7 +3011,7 @@ function App() {
             <div className="quota-panel-header">
               <div className="quota-title">
                 <Activity size={20} />
-                <h3>DeepSeek Service Status</h3>
+                <h3>Advanced ATS Service Status</h3>
               </div>
               <button 
                 className="close-quota"
@@ -2196,17 +3031,17 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">DeepSeek API Status</div>
+                <div className="summary-label">ATS Scoring</div>
                 <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
-                  {aiStatus === 'available' ? '🧠 Ready' : 
+                  {aiStatus === 'available' ? '🧠 Enhanced' : 
                    aiStatus === 'warming' ? '🔥 Warming' : 
-                   '⚠️ Enhanced Mode'}
+                   '⚡ Advanced ATS'}
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">AI Model</div>
+                <div className="summary-label">Scoring Method</div>
                 <div className="summary-value">
-                  {getModelDisplayName(modelInfo)}
+                  {modelInfo?.ats_configuration?.method?.replace(/_/g, ' ').toUpperCase() || 'WEIGHTED ATS'}
                 </div>
               </div>
               <div className="summary-item">
@@ -2216,15 +3051,15 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Processing Method</div>
+                <div className="summary-label">Domains</div>
                 <div className="summary-value info">
-                  ⚡ Staggered Sequential
+                  🔬 VLSI/CS Focus
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Context Length</div>
+                <div className="summary-label">Scoring Dimensions</div>
                 <div className="summary-value">
-                  🧠 32K tokens
+                  📈 5 Weighted Areas
                 </div>
               </div>
             </div>
@@ -2263,18 +3098,18 @@ function App() {
               </div>
               <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
                 <div className="indicator-dot"></div>
-                <span>DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
+                <span>ATS: {aiStatus === 'available' ? 'Enhanced 🧠' : aiStatus === 'warming' ? 'Warming...' : 'Advanced ⚡'}</span>
               </div>
-              {modelInfo && (
+              {modelInfo?.ats_configuration && (
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Model: {getModelDisplayName(modelInfo)}</span>
+                  <span>Method: {modelInfo.ats_configuration.method.replace(/_/g, ' ')}</span>
                 </div>
               )}
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
-                <span>Mode: {currentView === 'single-results' ? 'Single Analysis' : 
-                              currentView === 'batch-results' ? 'Batch Analysis' : 
+                <span>Mode: {currentView === 'single-results' ? 'Single ATS' : 
+                              currentView === 'batch-results' ? 'Batch ATS' : 
                               currentView === 'candidate-detail' ? 'Candidate Details' : 
                               batchMode ? 'Batch' : 'Single'}</span>
               </div>
@@ -2284,26 +3119,30 @@ function App() {
                   <span>Capacity: Up to 10 resumes</span>
                 </div>
               )}
+              <div className="status-indicator active">
+                <div className="indicator-dot" style={{ background: '#9333ea' }}></div>
+                <span>Domains: VLSI/CS Focus</span>
+              </div>
             </div>
             
             {backendStatus !== 'ready' && (
               <div className="wakeup-message">
                 <AlertCircle size={16} />
-                <span>Backend is waking up. Analysis may be slower for the first request.</span>
+                <span>Backend is waking up. ATS analysis may be slower for the first request.</span>
               </div>
             )}
             
             {aiStatus === 'warming' && (
               <div className="wakeup-message">
                 <Thermometer size={16} />
-                <span>DeepSeek API is warming up. This ensures high-quality responses.</span>
+                <span>DeepSeek API is warming up for enhanced ATS scoring.</span>
               </div>
             )}
             
             {batchMode && (
               <div className="multi-key-message">
                 <Brain size={16} />
-                <span>Batch mode: Processing up to 10 resumes with DeepSeek AI</span>
+                <span>Batch mode: Processing up to 10 resumes with Advanced Weighted ATS</span>
               </div>
             )}
           </div>
@@ -2319,26 +3158,26 @@ function App() {
           <div className="footer-brand">
             <div className="footer-logo">
               <Brain size={20} />
-              <span>AI Resume Analyzer</span>
+              <span>Advanced ATS Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              DeepSeek AI with 32K context length • Up to 10 resumes per batch • Individual reports available
+              Weighted Multi-Dimensional ATS Scoring • VLSI/CS Domain Expertise • Up to 10 resumes per batch
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
-              <h4>Features</h4>
-              <a href="#">DeepSeek AI</a>
-              <a href="#">32K Context</a>
-              <a href="#">Batch Processing</a>
-              <a href="#">Excel Reports</a>
+              <h4>ATS Features</h4>
+              <a href="#">Weighted Scoring</a>
+              <a href="#">VLSI/CS Focus</a>
+              <a href="#">Context Verification</a>
+              <a href="#">Domain Expertise</a>
             </div>
             <div className="footer-section">
               <h4>Service</h4>
-              <a href="#">Auto Warm-up</a>
-              <a href="#">Keep-alive</a>
-              <a href="#">Health Checks</a>
+              <a href="#">Advanced ATS</a>
+              <a href="#">Batch Processing</a>
+              <a href="#">Excel Reports</a>
               <a href="#">Status Monitor</a>
             </div>
             <div className="footer-section">
@@ -2354,7 +3193,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + DeepSeek AI. 32K Context Mode.</p>
+          <p>© 2024 Advanced ATS Resume Analyzer. Built with React + Flask + Advanced Weighted ATS Algorithm.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
@@ -2362,11 +3201,11 @@ function App() {
             </span>
             <span className="stat">
               <Brain size={12} />
-              DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : 'Warming'}
+              ATS: {aiStatus === 'available' ? 'Enhanced 🧠' : 'Advanced ⚡'}
             </span>
             <span className="stat">
-              <Cpu size={12} />
-              Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
+              <BarChart3 size={12} />
+              Method: {modelInfo?.ats_configuration?.method?.replace(/_/g, ' ') || 'Weighted ATS'}
             </span>
             {batchMode && (
               <span className="stat">
