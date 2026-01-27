@@ -20,6 +20,7 @@ import queue
 import asyncio
 import hashlib
 import random
+from itertools import cycle
 
 # Load environment variables
 load_dotenv()
@@ -27,10 +28,24 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Configure Groq API
-GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+# Configure multiple Groq API keys
+GROQ_API_KEYS = [
+    os.getenv('GROQ_API_KEY_1'),
+    os.getenv('GROQ_API_KEY_2'),
+    os.getenv('GROQ_API_KEY_3')
+]
+
+# Filter out None values and create key pool
+ACTIVE_API_KEYS = [key for key in GROQ_API_KEYS if key]
+KEY_CYCLER = cycle(ACTIVE_API_KEYS) if ACTIVE_API_KEYS else None
+
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
+
+# Track API key usage and limits
+KEY_USAGE = {key: {'count': 0, 'last_used': None, 'available': True} for key in ACTIVE_API_KEYS}
+KEY_LIMIT = 4  # Each key handles 4 resumes max
+KEY_LOCK = threading.Lock()
 
 # Available Groq models
 GROQ_MODELS = {
@@ -41,7 +56,7 @@ GROQ_MODELS = {
         'description': 'Fast 8B model for quick responses',
         'status': 'production',
         'free_tier': True,
-        'max_batch_size': 10  # Increased batch capacity
+        'max_batch_size': 4  # Per key limit
     },
     'llama-3.3-70b-versatile': {
         'name': 'Llama 3.3 70B Versatile',
@@ -50,7 +65,7 @@ GROQ_MODELS = {
         'description': 'High-quality 70B model for complex tasks',
         'status': 'production',
         'free_tier': True,
-        'max_batch_size': 8
+        'max_batch_size': 4
     },
     'meta-llama/llama-4-scout-17b-16e-instruct': {
         'name': 'Llama 4 Scout 17B',
@@ -59,7 +74,7 @@ GROQ_MODELS = {
         'description': 'Multimodal 17B model with vision capabilities',
         'status': 'production',
         'free_tier': True,
-        'max_batch_size': 6
+        'max_batch_size': 4
     }
 }
 
@@ -86,18 +101,60 @@ print(f"📁 Reports folder: {REPORTS_FOLDER}")
 score_cache = {}
 cache_lock = threading.Lock()
 
-# Request queue for batch processing - OPTIMIZED for 10+ resumes
-MAX_CONCURRENT_REQUESTS = 4  # Increased to 4 concurrent requests
-MAX_BATCH_SIZE = 15  # Maximum number of resumes per batch
-PROCESSING_SEMAPHORE = threading.Semaphore(MAX_CONCURRENT_REQUESTS)
+# Request queue for batch processing - OPTIMIZED for 12+ resumes
+MAX_CONCURRENT_REQUESTS_PER_KEY = 2  # Reduced for better distribution
+MAX_BATCH_SIZE = 12  # Maximum number of resumes per batch (4 per key * 3 keys)
+PROCESSING_SEMAPHORE = threading.Semaphore(len(ACTIVE_API_KEYS) * MAX_CONCURRENT_REQUESTS_PER_KEY)
 
 # Service keep-alive
 SERVICE_KEEP_ALIVE_INTERVAL = 60
 last_keep_alive = datetime.now()
 
 # Rate limiting protection
-RATE_LIMIT_DELAY = 1.5  # Delay between API calls (reduced from 2s)
+RATE_LIMIT_DELAY = 1.5
 MAX_RETRIES = 3
+
+def get_next_available_key():
+    """Get next available API key using round-robin with usage tracking"""
+    with KEY_LOCK:
+        if not ACTIVE_API_KEYS:
+            return None
+        
+        # Find key with lowest usage
+        available_keys = []
+        for key in ACTIVE_API_KEYS:
+            if KEY_USAGE[key]['available'] and KEY_USAGE[key]['count'] < KEY_LIMIT:
+                available_keys.append((key, KEY_USAGE[key]['count']))
+        
+        if not available_keys:
+            # Reset usage if all keys are at limit
+            for key in ACTIVE_API_KEYS:
+                KEY_USAGE[key]['count'] = 0
+                KEY_USAGE[key]['available'] = True
+            available_keys = [(key, 0) for key in ACTIVE_API_KEYS]
+        
+        # Get key with lowest usage
+        available_keys.sort(key=lambda x: x[1])
+        selected_key = available_keys[0][0]
+        
+        # Update usage
+        KEY_USAGE[selected_key]['count'] += 1
+        KEY_USAGE[selected_key]['last_used'] = datetime.now()
+        
+        # Mark as unavailable if reached limit
+        if KEY_USAGE[selected_key]['count'] >= KEY_LIMIT:
+            KEY_USAGE[selected_key]['available'] = False
+        
+        print(f"🔑 Using API key {ACTIVE_API_KEYS.index(selected_key) + 1} (Usage: {KEY_USAGE[selected_key]['count']}/{KEY_LIMIT})")
+        return selected_key
+
+def reset_key_usage():
+    """Reset key usage counters periodically"""
+    with KEY_LOCK:
+        for key in ACTIVE_API_KEYS:
+            KEY_USAGE[key]['count'] = 0
+            KEY_USAGE[key]['available'] = True
+        print("🔄 Reset all API key usage counters")
 
 def calculate_resume_hash(resume_text, job_description):
     """Calculate a hash for caching consistent scores"""
@@ -140,14 +197,14 @@ def keep_service_active():
         except Exception as e:
             print(f"⚠️ Keep-alive thread error: {e}")
 
-def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_override=None, retry_count=0):
+def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_override=None, retry_count=0, api_key=None):
     """Call Groq API with the given prompt with optimized retry logic"""
-    if not GROQ_API_KEY:
-        print("❌ No Groq API key configured")
+    if not api_key:
+        print("❌ No API key provided")
         return {'error': 'no_api_key', 'status': 500}
     
     headers = {
-        'Authorization': f'Bearer {GROQ_API_KEY}',
+        'Authorization': f'Bearer {api_key}',
         'Content-Type': 'application/json'
     }
     
@@ -195,25 +252,25 @@ def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_ov
             
             if 'decommissioned' in error_msg.lower() or 'deprecated' in error_msg.lower():
                 print(f"⚠️ Model {model_to_use} is deprecated. Trying default model {DEFAULT_MODEL}...")
-                return call_groq_api(prompt, max_tokens, temperature, timeout, DEFAULT_MODEL)
+                return call_groq_api(prompt, max_tokens, temperature, timeout, DEFAULT_MODEL, retry_count, api_key)
             
             return {'error': f'api_error_400: {error_msg[:100]}', 'status': 400}
         elif response.status_code == 429:
-            print(f"❌ Groq API rate limit exceeded")
+            print(f"❌ Groq API rate limit exceeded for key")
             # Exponential backoff with jitter for rate limiting
             if retry_count < MAX_RETRIES:
-                wait_time = (2 ** retry_count) * 2 + random.uniform(0, 1)  # 2, 5, 11 seconds with jitter
+                wait_time = (2 ** retry_count) * 2 + random.uniform(0, 1)
                 print(f"⏳ Rate limited, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
                 time.sleep(wait_time)
-                return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
+                return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key)
             return {'error': 'rate_limit', 'status': 429}
         elif response.status_code == 503:
             print(f"❌ Groq API service unavailable")
             if retry_count < 2:
-                wait_time = 5 + random.uniform(0, 2)  # 5-7 seconds with jitter
+                wait_time = 5 + random.uniform(0, 2)
                 print(f"⏳ Service unavailable, retrying in {wait_time:.1f}s")
                 time.sleep(wait_time)
-                return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
+                return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key)
             return {'error': 'service_unavailable', 'status': 503}
         else:
             print(f"❌ Groq API Error {response.status_code}: {response.text[:200]}")
@@ -225,7 +282,7 @@ def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_ov
             wait_time = 3 + random.uniform(0, 2)
             print(f"⏳ Timeout, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/3)")
             time.sleep(wait_time)
-            return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
+            return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key)
         return {'error': 'timeout', 'status': 408}
     except requests.exceptions.ConnectionError:
         print(f"❌ Groq API connection error")
@@ -233,55 +290,58 @@ def call_groq_api(prompt, max_tokens=1000, temperature=0.2, timeout=30, model_ov
             wait_time = 3 + random.uniform(0, 2)
             print(f"⏳ Connection error, retrying in {wait_time:.1f}s")
             time.sleep(wait_time)
-            return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
+            return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key)
         return {'error': 'connection_error', 'status': 503}
     except Exception as e:
         print(f"❌ Groq API Exception: {str(e)}")
         return {'error': str(e), 'status': 500}
 
 def warmup_groq_service():
-    """Warm up Groq service connection"""
+    """Warm up Groq service connection for all keys"""
     global warmup_complete, api_available
     
-    if not GROQ_API_KEY:
-        print("⚠️ Skipping Groq warm-up: No API key configured")
+    if not ACTIVE_API_KEYS:
+        print("⚠️ Skipping Groq warm-up: No API keys configured")
         return False
     
     try:
         model_to_use = GROQ_MODEL or DEFAULT_MODEL
-        print(f"🔥 Warming up Groq connection...")
+        print(f"🔥 Warming up Groq connections...")
         print(f"📊 Using model: {model_to_use}")
-        start_time = time.time()
+        print(f"🔑 Active API keys: {len(ACTIVE_API_KEYS)}")
         
-        response = call_groq_api(
-            prompt="Hello, are you ready? Respond with just 'ready'.",
-            max_tokens=10,
-            temperature=0.1,
-            timeout=10
-        )
+        successful_warmups = 0
         
-        if isinstance(response, dict) and 'error' in response:
-            error_type = response.get('error')
-            if error_type == 'rate_limit':
-                print(f"⚠️ Rate limited, will retry later")
-            elif error_type == 'invalid_api_key':
-                print(f"❌ Invalid Groq API key")
+        for idx, api_key in enumerate(ACTIVE_API_KEYS, 1):
+            print(f"  Warming up key {idx}...")
+            start_time = time.time()
+            
+            response = call_groq_api(
+                prompt="Hello, are you ready? Respond with just 'ready'.",
+                max_tokens=10,
+                temperature=0.1,
+                timeout=10,
+                api_key=api_key
+            )
+            
+            if isinstance(response, dict) and 'error' in response:
+                error_type = response.get('error')
+                print(f"  ⚠️ Key {idx} warm-up failed: {error_type}")
+            elif response and 'ready' in response.lower():
+                elapsed = time.time() - start_time
+                print(f"  ✅ Key {idx} warmed up in {elapsed:.2f}s")
+                successful_warmups += 1
             else:
-                print(f"⚠️ Warm-up attempt failed: {error_type}")
-            
-            threading.Timer(10.0, warmup_groq_service).start()
-            return False
-        elif response and 'ready' in response.lower():
-            elapsed = time.time() - start_time
-            print(f"✅ Groq warmed up in {elapsed:.2f}s")
-            
+                print(f"  ⚠️ Key {idx} warm-up failed: Unexpected response")
+        
+        if successful_warmups > 0:
+            print(f"✅ {successful_warmups}/{len(ACTIVE_API_KEYS)} API keys warmed up successfully")
             with warmup_lock:
                 warmup_complete = True
                 api_available = True
-                
             return True
         else:
-            print("⚠️ Warm-up attempt failed: Unexpected response")
+            print("⚠️ All warm-up attempts failed")
             threading.Timer(10.0, warmup_groq_service).start()
             return False
         
@@ -295,26 +355,28 @@ def keep_service_warm():
     global last_activity_time
     
     while True:
-        time.sleep(45)  # Increased to 45 seconds for less frequent keep-alive
+        time.sleep(45)
         
         try:
             inactive_time = datetime.now() - last_activity_time
             
-            if GROQ_API_KEY:
-                print(f"♨️ Keeping Groq warm...")
+            if ACTIVE_API_KEYS:
+                print(f"♨️ Keeping Groq warm with {len(ACTIVE_API_KEYS)} keys...")
                 
-                try:
-                    response = call_groq_api(
-                        prompt="Ping - just say 'pong'",
-                        max_tokens=5,
-                        timeout=15
-                    )
-                    if response and 'pong' in response.lower():
-                        print("✅ Keep-alive ping successful")
-                    else:
-                        print("⚠️ Keep-alive ping got unexpected response")
-                except Exception as e:
-                    print(f"⚠️ Keep-alive ping failed: {str(e)}")
+                for idx, api_key in enumerate(ACTIVE_API_KEYS, 1):
+                    try:
+                        response = call_groq_api(
+                            prompt="Ping - just say 'pong'",
+                            max_tokens=5,
+                            timeout=15,
+                            api_key=api_key
+                        )
+                        if response and 'pong' in response.lower():
+                            print(f"  ✅ Key {idx} keep-alive successful")
+                        else:
+                            print(f"  ⚠️ Key {idx} keep-alive got unexpected response")
+                    except Exception as e:
+                        print(f"  ⚠️ Key {idx} keep-alive failed: {str(e)}")
                     
         except Exception as e:
             print(f"⚠️ Keep-warm thread error: {str(e)}")
@@ -325,10 +387,19 @@ def update_activity():
     last_activity_time = datetime.now()
 
 # Start warm-up on app start
-if GROQ_API_KEY:
-    print(f"🚀 Starting Groq warm-up...")
+if ACTIVE_API_KEYS:
+    print(f"🚀 Starting Groq warm-up with {len(ACTIVE_API_KEYS)} keys...")
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
     print(f"🤖 Using model: {model_to_use}")
+    
+    # Reset key usage periodically
+    def periodic_key_reset():
+        while True:
+            time.sleep(300)  # Reset every 5 minutes
+            reset_key_usage()
+    
+    reset_thread = threading.Thread(target=periodic_key_reset, daemon=True)
+    reset_thread.start()
     
     # Start warm-up in a separate thread
     warmup_thread = threading.Thread(target=warmup_groq_service, daemon=True)
@@ -344,9 +415,10 @@ if GROQ_API_KEY:
     
     print("✅ Keep-warm thread started")
     print("✅ Service keep-alive thread started")
+    print("✅ Periodic key reset started (every 5 minutes)")
 else:
-    print("⚠️ WARNING: No Groq API key found!")
-    print("Please set GROQ_API_KEY in Render environment variables")
+    print("⚠️ WARNING: No Groq API keys found!")
+    print("Please set GROQ_API_KEY_1, GROQ_API_KEY_2, GROQ_API_KEY_3 in Render environment variables")
 
 @app.route('/')
 def home():
@@ -614,6 +686,43 @@ def home():
             margin-left: 5px;
         }}
         
+        .multi-key-badge {{
+            display: inline-block;
+            background: linear-gradient(90deg, #00b09b, #96c93d);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            margin-left: 5px;
+        }}
+        
+        .key-status {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 5px 0;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }}
+        
+        .key-dot {{
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #00b09b;
+        }}
+        
+        .key-dot.active {{
+            background: #00b09b;
+            animation: pulse 1.5s infinite;
+        }}
+        
+        .key-dot.inactive {{
+            background: #ff6b6b;
+        }}
+        
         @keyframes pulse {{
             0%, 100% {{ opacity: 1; }}
             50% {{ opacity: 0.7; }}
@@ -623,10 +732,10 @@ def home():
 <body>
     <div class="container">
         <h1>🚀 Resume Analyzer API</h1>
-        <p class="subtitle">AI-powered resume analysis • Latest Groq Models • <span class="always-active-badge">Always Active</span> <span class="batch-capacity">Up to 15 Resumes</span></p>
+        <p class="subtitle">AI-powered resume analysis • Latest Groq Models • <span class="always-active-badge">Always Active</span> <span class="batch-capacity">Up to 12 Resumes</span> <span class="multi-key-badge">3 API Keys</span></p>
         
         <div class="api-status">
-            ⚡ GROQ API IS RUNNING • BATCH PROCESSING 10+ RESUMES
+            ⚡ GROQ API IS RUNNING • MULTI-KEY PROCESSING 12 RESUMES
         </div>
         
         <div class="warmup-status">
@@ -652,28 +761,33 @@ def home():
                 <span class="status-value">{model_info['name']} <span class="model-badge">{model_info['provider']}</span> {model_info.get('free_tier', False) and '<span class="free-badge">FREE</span>' or ''}</span>
             </div>
             <div class="status-item">
-                <span class="status-label">API Status:</span>
-                {'<span class="success">✅ Available</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
+                <span class="status-label">API Keys:</span>
+                <span class="status-value"><span class="multi-key-badge">{len(ACTIVE_API_KEYS)} Active Keys</span></span>
             </div>
             <div class="status-item">
                 <span class="status-label">Batch Capacity:</span>
-                <span class="status-value"><span class="batch-capacity">10-15 resumes simultaneously</span></span>
+                <span class="status-value"><span class="batch-capacity">Up to 12 resumes (4 per key)</span></span>
             </div>
             <div class="status-item">
-                <span class="status-label">Concurrent Processing:</span>
-                <span class="status-value">{MAX_CONCURRENT_REQUESTS} resumes at once</span>
+                <span class="status-label">API Status:</span>
+                {'<span class="success">✅ Available</span>' if warmup_complete else '<span class="warning">🔥 Warming...</span>'}
             </div>
+            
             <div class="status-item">
-                <span class="status-label">Context Length:</span>
-                <span class="status-value">{model_info.get('context_length', '8192'):,} tokens</span>
+                <span class="status-label">Key Distribution:</span>
+                <span class="status-value">Key 1: Resumes 1-4 • Key 2: Resumes 5-8 • Key 3: Resumes 9-12</span>
             </div>
+            
             <div class="status-item">
-                <span class="status-label">Keep-alive:</span>
-                <span class="status-value success">Every {SERVICE_KEEP_ALIVE_INTERVAL}s</span>
+                <span class="status-label">Key Usage:</span>
+                <span class="status-value">
+                    {', '.join([f'Key {i+1}: {KEY_USAGE[key]["count"]}/{KEY_LIMIT}' for i, key in enumerate(ACTIVE_API_KEYS)]) if ACTIVE_API_KEYS else 'No keys configured'}
+                </span>
             </div>
+            
             <div class="status-item">
-                <span class="status-label">Rate Limit Protection:</span>
-                <span class="status-value success">✅ Enabled (adaptive delays)</span>
+                <span class="status-label">Key Reset Interval:</span>
+                <span class="status-value success">Every 5 minutes</span>
             </div>
         </div>
         
@@ -689,13 +803,13 @@ def home():
             <div class="endpoint">
                 <span class="method">POST</span>
                 <span class="path">/analyze-batch</span>
-                <p class="description">Upload multiple resumes for batch analysis with ranking (Up to 15 resumes)</p>
+                <p class="description">Upload multiple resumes for batch analysis with ranking (Up to 12 resumes)</p>
             </div>
             
             <div class="endpoint">
                 <span class="method">POST</span>
-                <span class="path">/analyze-batch-optimized</span>
-                <p class="description">Optimized batch analysis with better rate limiting for 10+ resumes</p>
+                <span class="path">/analyze-batch-multi-key</span>
+                <p class="description">Multi-key optimized batch analysis for 12+ resumes</p>
             </div>
             
             <div class="endpoint">
@@ -724,6 +838,12 @@ def home():
             
             <div class="endpoint">
                 <span class="method">GET</span>
+                <span class="path">/keys-status</span>
+                <p class="description">Check status of all API keys</p>
+            </div>
+            
+            <div class="endpoint">
+                <span class="method">GET</span>
                 <span class="path">/download/&lt;filename&gt;</span>
                 <p class="description">Download generated Excel analysis reports</p>
             </div>
@@ -744,14 +864,14 @@ def home():
         <div class="buttons">
             <a href="/health" class="btn">Check Health</a>
             <a href="/warmup" class="btn btn-warmup">Warm Up Groq API</a>
-            <a href="/models" class="btn">Available Models</a>
+            <a href="/keys-status" class="btn">Check Keys Status</a>
             <a href="/ping" class="btn btn-secondary">Ping Service</a>
         </div>
         
         <div class="footer">
             <p>Powered by Flask & Groq API | Deployed on Render | <span class="always-active-badge">Always Active Mode</span></p>
             <p>AI Service: GROQ | Status: {'<span class="success">Ready</span>' if warmup_complete else '<span class="warning">Warming up...</span>'}</p>
-            <p>Model: {model_info['name']} | Batch Capacity: 10-15 resumes | Concurrent: {MAX_CONCURRENT_REQUESTS} | Keep-alive: {SERVICE_KEEP_ALIVE_INTERVAL}s</p>
+            <p>Model: {model_info['name']} | Batch Capacity: 12 resumes (4 per key) | Active Keys: {len(ACTIVE_API_KEYS)}</p>
         </div>
     </div>
 </body>
@@ -853,12 +973,15 @@ def fallback_response(reason, filename=None):
         "ai_status": "Warming up"
     }
 
-def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None):
+def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None, api_key=None):
     """Use Groq API to analyze resume against job description with consistent scoring"""
     update_activity()
     
-    if not GROQ_API_KEY:
-        print("❌ No Groq API key configured.")
+    if not api_key:
+        api_key = get_next_available_key()
+    
+    if not api_key:
+        print("❌ No available API key.")
         return fallback_response("API Configuration Error", filename)
     
     with warmup_lock:
@@ -870,8 +993,8 @@ def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis
     cached_score = get_cached_score(resume_hash)
     
     # Optimize text length for better performance with batch processing
-    resume_text = resume_text[:4000]  # Reduced from 6000
-    job_description = job_description[:1500]  # Reduced from 2000
+    resume_text = resume_text[:4000]
+    job_description = job_description[:1500]
     
     # Enhanced prompt for consistent and accurate ATS scoring
     prompt = f"""You are an expert ATS (Applicant Tracking System) analyzer and recruitment specialist. 
@@ -927,14 +1050,16 @@ CRITICAL:
 
     try:
         model_to_use = GROQ_MODEL or DEFAULT_MODEL
-        print(f"⚡ Sending to Groq API ({model_to_use})...")
+        key_index = ACTIVE_API_KEYS.index(api_key) + 1 if api_key in ACTIVE_API_KEYS else 0
+        print(f"⚡ Sending to Groq API (Key {key_index}, {model_to_use})...")
         start_time = time.time()
         
         response = call_groq_api(
             prompt=prompt,
-            max_tokens=800,  # Reduced from 1200 for faster processing
+            max_tokens=800,
             temperature=0.1,
-            timeout=45  # Reduced from 60
+            timeout=45,
+            api_key=api_key
         )
         
         if isinstance(response, dict) and 'error' in response:
@@ -965,7 +1090,7 @@ CRITICAL:
                 }
         
         elapsed_time = time.time() - start_time
-        print(f"✅ Groq API response in {elapsed_time:.2f} seconds")
+        print(f"✅ Groq API response in {elapsed_time:.2f} seconds (Key {key_index})")
         
         result_text = response.strip()
         
@@ -1042,10 +1167,10 @@ CRITICAL:
                 analysis['overall_score'] = 70
         
         # Limit array lengths for batch optimization
-        analysis['skills_matched'] = analysis['skills_matched'][:5]  # Reduced from 8
-        analysis['skills_missing'] = analysis['skills_missing'][:5]  # Reduced from 8
-        analysis['key_strengths'] = analysis['key_strengths'][:3]    # Reduced from 4
-        analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:3]  # Reduced from 4
+        analysis['skills_matched'] = analysis['skills_matched'][:5]
+        analysis['skills_missing'] = analysis['skills_missing'][:5]
+        analysis['key_strengths'] = analysis['key_strengths'][:3]
+        analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:3]
         
         # Ensure all values are strings (not lists)
         for field in ['experience_summary', 'education_summary', 'recommendation']:
@@ -1059,13 +1184,14 @@ CRITICAL:
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['ai_model'] = model_to_use
         analysis['response_time'] = f"{elapsed_time:.2f}s"
-        analysis['resume_hash'] = resume_hash  # For debugging consistency
+        analysis['resume_hash'] = resume_hash
+        analysis['api_key_used'] = f"key_{key_index}" if key_index > 0 else "unknown"
         
         # Add analysis ID if provided
         if analysis_id:
             analysis['analysis_id'] = analysis_id
         
-        print(f"✅ Analysis completed for: {analysis['candidate_name']} (Score: {analysis['overall_score']})")
+        print(f"✅ Analysis completed for: {analysis['candidate_name']} (Score: {analysis['overall_score']}, Key: {key_index})")
         
         return analysis
         
@@ -1134,7 +1260,14 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     ws[f'A{row}'].font = subheader_font
     ws[f'A{row}'].fill = subheader_fill
     ws[f'B{row}'] = model_to_use
-    row += 2
+    row += 1
+    
+    if analysis_data.get('api_key_used'):
+        ws[f'A{row}'] = "API Key Used"
+        ws[f'A{row}'].font = subheader_font
+        ws[f'A{row}'].fill = subheader_fill
+        ws[f'B{row}'] = f"Key {analysis_data['api_key_used'].replace('key_', '')}"
+        row += 2
     
     # Overall Score
     ws[f'A{row}'] = "Overall Match Score"
@@ -1336,9 +1469,9 @@ def analyze_resume():
         print(f"✅ Extracted {len(resume_text)} characters in {extraction_time:.2f}s")
         
         # Check API configuration
-        if not GROQ_API_KEY:
-            print("❌ No Groq API key configured")
-            return jsonify({'error': 'Groq API not configured. Please set GROQ_API_KEY in environment variables'}), 500
+        if not ACTIVE_API_KEYS:
+            print("❌ No Groq API keys configured")
+            return jsonify({'error': 'Groq API not configured. Please set GROQ_API_KEY_1, GROQ_API_KEY_2, GROQ_API_KEY_3 in environment variables'}), 500
         
         # Analyze with Groq API
         model_to_use = GROQ_MODEL or DEFAULT_MODEL
@@ -1347,7 +1480,8 @@ def analyze_resume():
         
         # Generate unique analysis ID
         analysis_id = f"single_{timestamp}"
-        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id)
+        api_key = get_next_available_key()
+        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key)
         ai_time = time.time() - ai_start
         
         print(f"✅ Groq API analysis completed in {ai_time:.2f}s")
@@ -1382,84 +1516,77 @@ def analyze_resume():
         print(f"❌ Unexpected error: {traceback.format_exc()}")
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
-def process_batch_resume_optimized(resume_file, job_description, index, total, batch_id, delay_multiplier=1):
-    """Process a single resume in batch mode with optimized rate limiting"""
+def process_batch_resume_with_key(resume_file, job_description, index, total, batch_id, api_key):
+    """Process a single resume in batch mode with specific API key"""
     try:
-        with PROCESSING_SEMAPHORE:
-            print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
-            
-            # Add adaptive delay to avoid rate limiting
-            base_delay = RATE_LIMIT_DELAY * delay_multiplier
-            jitter = random.uniform(0, 0.5)
-            delay = base_delay + jitter
-            
-            if index > 0:
-                print(f"⏳ Adding {delay:.2f}s delay to avoid rate limiting...")
-                time.sleep(delay)
-            
-            # Save file temporarily
-            file_ext = os.path.splitext(resume_file.filename)[1].lower()
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-            file_path = os.path.join(UPLOAD_FOLDER, f"batch_{batch_id}_{index}{file_ext}")
-            resume_file.save(file_path)
-            
-            # Extract text
-            if file_ext == '.pdf':
-                resume_text = extract_text_from_pdf(file_path)
-            elif file_ext in ['.docx', '.doc']:
-                resume_text = extract_text_from_docx(file_path)
-            elif file_ext == '.txt':
-                resume_text = extract_text_from_txt(file_path)
-            else:
-                os.remove(file_path)
-                return {
-                    'filename': resume_file.filename,
-                    'error': f'Unsupported format: {file_ext}',
-                    'status': 'failed'
-                }
-            
-            if resume_text.startswith('Error'):
-                os.remove(file_path)
-                return {
-                    'filename': resume_file.filename,
-                    'error': resume_text,
-                    'status': 'failed'
-                }
-            
-            # Analyze with Groq API
-            analysis_id = f"{batch_id}_candidate_{index}"
-            analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id)
-            analysis['filename'] = resume_file.filename
-            analysis['original_filename'] = resume_file.filename
-            
-            # Get file size
-            resume_file.seek(0, 2)
-            file_size = resume_file.tell()
-            resume_file.seek(0)
-            analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
-            
-            # Add analysis ID
-            analysis['analysis_id'] = analysis_id
-            
-            # Create individual Excel report
-            try:
-                excel_filename = f"individual_{analysis_id}.xlsx"
-                excel_path = create_excel_report(analysis, excel_filename)
-                analysis['individual_excel_filename'] = os.path.basename(excel_path)
-            except Exception as e:
-                print(f"⚠️ Failed to create individual report: {str(e)}")
-                analysis['individual_excel_filename'] = None
-            
-            # Clean up
+        print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
+        print(f"🔑 Using API key {ACTIVE_API_KEYS.index(api_key) + 1 if api_key in ACTIVE_API_KEYS else 'unknown'}")
+        
+        # Save file temporarily
+        file_ext = os.path.splitext(resume_file.filename)[1].lower()
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        file_path = os.path.join(UPLOAD_FOLDER, f"batch_{batch_id}_{index}{file_ext}")
+        resume_file.save(file_path)
+        
+        # Extract text
+        if file_ext == '.pdf':
+            resume_text = extract_text_from_pdf(file_path)
+        elif file_ext in ['.docx', '.doc']:
+            resume_text = extract_text_from_docx(file_path)
+        elif file_ext == '.txt':
+            resume_text = extract_text_from_txt(file_path)
+        else:
             os.remove(file_path)
-            
-            print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
-            
             return {
-                'analysis': analysis,
-                'status': 'success'
+                'filename': resume_file.filename,
+                'error': f'Unsupported format: {file_ext}',
+                'status': 'failed'
             }
-            
+        
+        if resume_text.startswith('Error'):
+            os.remove(file_path)
+            return {
+                'filename': resume_file.filename,
+                'error': resume_text,
+                'status': 'failed'
+            }
+        
+        # Analyze with Groq API
+        analysis_id = f"{batch_id}_candidate_{index}"
+        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key)
+        analysis['filename'] = resume_file.filename
+        analysis['original_filename'] = resume_file.filename
+        
+        # Get file size
+        resume_file.seek(0, 2)
+        file_size = resume_file.tell()
+        resume_file.seek(0)
+        analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
+        
+        # Add analysis ID
+        analysis['analysis_id'] = analysis_id
+        
+        # Create individual Excel report
+        try:
+            excel_filename = f"individual_{analysis_id}.xlsx"
+            excel_path = create_excel_report(analysis, excel_filename)
+            analysis['individual_excel_filename'] = os.path.basename(excel_path)
+        except Exception as e:
+            print(f"⚠️ Failed to create individual report: {str(e)}")
+            analysis['individual_excel_filename'] = None
+        
+        # Clean up
+        os.remove(file_path)
+        
+        key_index = ACTIVE_API_KEYS.index(api_key) + 1 if api_key in ACTIVE_API_KEYS else 0
+        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')} (Key: {key_index})")
+        
+        return {
+            'analysis': analysis,
+            'status': 'success',
+            'api_key_used': key_index
+        }
+        
     except Exception as e:
         print(f"❌ Error processing {resume_file.filename}: {str(e)}")
         return {
@@ -1470,7 +1597,7 @@ def process_batch_resume_optimized(resume_file, job_description, index, total, b
 
 @app.route('/analyze-batch', methods=['POST'])
 def analyze_resume_batch():
-    """Analyze multiple resumes against a single job description (up to 15 resumes)"""
+    """Analyze multiple resumes against a single job description (up to 12 resumes)"""
     update_activity()
     
     try:
@@ -1502,8 +1629,8 @@ def analyze_resume_batch():
             return jsonify({'error': f'Maximum {MAX_BATCH_SIZE} resumes allowed per batch'}), 400
         
         # Check API configuration
-        if not GROQ_API_KEY:
-            print("❌ No Groq API key configured")
+        if not ACTIVE_API_KEYS:
+            print("❌ No Groq API keys configured")
             return jsonify({'error': 'Groq API not configured'}), 500
         
         # Prepare batch analysis
@@ -1511,11 +1638,8 @@ def analyze_resume_batch():
         all_analyses = []
         errors = []
         
-        # Calculate adaptive delay multiplier based on batch size
-        delay_multiplier = max(1, len(resume_files) // 5)  # More delay for larger batches
-        
-        # Process resumes with ThreadPoolExecutor for parallel processing
-        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS) as executor:
+        # Process resumes with ThreadPoolExecutor
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(ACTIVE_API_KEYS) * MAX_CONCURRENT_REQUESTS_PER_KEY) as executor:
             futures = []
             
             for idx, resume_file in enumerate(resume_files):
@@ -1523,22 +1647,31 @@ def analyze_resume_batch():
                     errors.append({'filename': 'Empty file', 'error': 'File has no name'})
                     continue
                 
+                # Get API key for this resume (distribute across keys)
+                key_index = idx % len(ACTIVE_API_KEYS)
+                api_key = ACTIVE_API_KEYS[key_index]
+                
+                # Add delay based on key index to avoid rate limiting
+                delay = (key_index * 0.5) + random.uniform(0, 0.3)
+                if idx > 0:
+                    time.sleep(delay)
+                
                 # Submit task to executor
                 future = executor.submit(
-                    process_batch_resume_optimized,
+                    process_batch_resume_with_key,
                     resume_file,
                     job_description,
                     idx,
                     len(resume_files),
                     batch_id,
-                    delay_multiplier
+                    api_key
                 )
-                futures.append((resume_file.filename, future))
+                futures.append((resume_file.filename, future, key_index + 1))
             
             # Collect results
-            for filename, future in futures:
+            for filename, future, key_num in futures:
                 try:
-                    result = future.result(timeout=120)  # 2 minutes timeout per resume
+                    result = future.result(timeout=120)
                     
                     if result['status'] == 'success':
                         all_analyses.append(result['analysis'])
@@ -1546,9 +1679,9 @@ def analyze_resume_batch():
                         errors.append({'filename': filename, 'error': result.get('error', 'Unknown error')})
                         
                 except concurrent.futures.TimeoutError:
-                    errors.append({'filename': filename, 'error': 'Processing timeout (120 seconds)'})
+                    errors.append({'filename': filename, 'error': f'Processing timeout (120 seconds) - Key {key_num}'})
                 except Exception as e:
-                    errors.append({'filename': filename, 'error': f'Processing error: {str(e)[:100]}'})
+                    errors.append({'filename': filename, 'error': f'Processing error: {str(e)[:100]} - Key {key_num}'})
         
         print(f"\n📊 Batch processing complete. Successful: {len(all_analyses)}, Failed: {len(errors)}")
         
@@ -1586,7 +1719,8 @@ def analyze_resume_batch():
             'processing_time': f"{time.time() - start_time:.2f}s",
             'job_description_preview': job_description[:200] + ("..." if len(job_description) > 200 else ""),
             'batch_size': len(resume_files),
-            'concurrent_processing': MAX_CONCURRENT_REQUESTS
+            'api_keys_used': len(ACTIVE_API_KEYS),
+            'key_distribution': f"Key 1: Resumes 1-4, Key 2: Resumes 5-8, Key 3: Resumes 9-12"
         }
         
         print(f"✅ Batch analysis completed in {time.time() - start_time:.2f}s")
@@ -1598,14 +1732,14 @@ def analyze_resume_batch():
         print(f"❌ Batch analysis error: {traceback.format_exc()}")
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
-@app.route('/analyze-batch-optimized', methods=['POST'])
-def analyze_batch_optimized():
-    """Optimized batch analysis endpoint specifically for handling 10+ resumes"""
+@app.route('/analyze-batch-multi-key', methods=['POST'])
+def analyze_batch_multi_key():
+    """Multi-key optimized batch analysis endpoint specifically for handling 12+ resumes"""
     update_activity()
     
     try:
         print("\n" + "="*50)
-        print("🚀 OPTIMIZED batch analysis request received")
+        print("🔑 MULTI-KEY batch analysis request received")
         start_time = time.time()
         
         if 'resumes' not in request.files:
@@ -1621,56 +1755,61 @@ def analyze_batch_optimized():
         if len(resume_files) == 0:
             return jsonify({'error': 'No files selected'}), 400
         
-        print(f"🚀 OPTIMIZED batch size: {len(resume_files)} resumes")
+        print(f"🔑 MULTI-KEY batch size: {len(resume_files)} resumes")
+        print(f"🔑 Active API keys: {len(ACTIVE_API_KEYS)}")
         
-        # Increased limit for optimized endpoint
-        OPTIMIZED_MAX_BATCH = 15
-        if len(resume_files) > OPTIMIZED_MAX_BATCH:
-            return jsonify({'error': f'Maximum {OPTIMIZED_MAX_BATCH} resumes allowed for optimized batch'}), 400
+        if len(resume_files) > MAX_BATCH_SIZE:
+            return jsonify({'error': f'Maximum {MAX_BATCH_SIZE} resumes allowed for multi-key batch'}), 400
         
         # Check API configuration
-        if not GROQ_API_KEY:
+        if not ACTIVE_API_KEYS:
             return jsonify({'error': 'Groq API not configured'}), 500
         
-        # Process in smaller chunks for better reliability
+        # Process in key-based chunks
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         all_analyses = []
         errors = []
         
-        # Process resumes in chunks of 3
-        chunk_size = 3
-        chunks = [resume_files[i:i + chunk_size] for i in range(0, len(resume_files), chunk_size)]
+        # Distribute resumes across keys (4 per key)
+        key_groups = {}
+        for i, key in enumerate(ACTIVE_API_KEYS):
+            start_idx = i * KEY_LIMIT
+            end_idx = start_idx + KEY_LIMIT
+            key_groups[key] = resume_files[start_idx:end_idx]
+            print(f"🔑 Key {i+1}: Processing resumes {start_idx+1}-{min(end_idx, len(resume_files))}")
         
-        print(f"📊 Processing {len(resume_files)} resumes in {len(chunks)} chunks")
-        
-        for chunk_idx, chunk in enumerate(chunks):
-            print(f"\n🔄 Processing chunk {chunk_idx + 1}/{len(chunks)} ({len(chunk)} resumes)")
+        # Process each key group
+        for key_idx, (api_key, resumes) in enumerate(key_groups.items(), 1):
+            if not resumes:
+                continue
+                
+            print(f"\n🔄 Processing key {key_idx} ({len(resumes)} resumes)...")
             
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(3, len(chunk))) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS_PER_KEY) as executor:
                 futures = []
                 
-                for idx_in_chunk, resume_file in enumerate(chunk):
-                    global_idx = chunk_idx * chunk_size + idx_in_chunk
+                for idx_in_group, resume_file in enumerate(resumes):
+                    global_idx = (key_idx - 1) * KEY_LIMIT + idx_in_group
                     
                     if resume_file.filename == '':
                         errors.append({'filename': 'Empty file', 'error': 'File has no name'})
                         continue
                     
                     future = executor.submit(
-                        process_batch_resume_optimized,
+                        process_batch_resume_with_key,
                         resume_file,
                         job_description,
                         global_idx,
                         len(resume_files),
                         batch_id,
-                        delay_multiplier=0.5  # Reduced delay for optimized processing
+                        api_key
                     )
-                    futures.append((resume_file.filename, future))
+                    futures.append((resume_file.filename, future, key_idx))
                 
-                # Collect results from this chunk
-                for filename, future in futures:
+                # Collect results from this key group
+                for filename, future, key_num in futures:
                     try:
-                        result = future.result(timeout=90)  # 1.5 minutes timeout
+                        result = future.result(timeout=90)
                         
                         if result['status'] == 'success':
                             all_analyses.append(result['analysis'])
@@ -1678,17 +1817,17 @@ def analyze_batch_optimized():
                             errors.append({'filename': filename, 'error': result.get('error', 'Unknown error')})
                             
                     except concurrent.futures.TimeoutError:
-                        errors.append({'filename': filename, 'error': 'Processing timeout (90 seconds)'})
+                        errors.append({'filename': filename, 'error': f'Processing timeout (90 seconds) - Key {key_num}'})
                     except Exception as e:
-                        errors.append({'filename': filename, 'error': f'Processing error: {str(e)[:100]}'})
+                        errors.append({'filename': filename, 'error': f'Processing error: {str(e)[:100]} - Key {key_num}'})
             
-            # Add delay between chunks
-            if chunk_idx < len(chunks) - 1:
-                chunk_delay = 2 + random.uniform(0, 2)
-                print(f"⏳ Adding {chunk_delay:.1f}s delay between chunks...")
-                time.sleep(chunk_delay)
+            # Add delay between key groups
+            if key_idx < len(key_groups):
+                delay = 3 + random.uniform(0, 2)
+                print(f"⏳ Adding {delay:.1f}s delay before next key group...")
+                time.sleep(delay)
         
-        print(f"\n📊 Batch processing complete. Successful: {len(all_analyses)}, Failed: {len(errors)}")
+        print(f"\n📊 Multi-key processing complete. Successful: {len(all_analyses)}, Failed: {len(errors)}")
         
         # Sort by score
         all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
@@ -1701,8 +1840,8 @@ def analyze_batch_optimized():
         batch_excel_path = None
         if all_analyses:
             try:
-                print("📊 Creating optimized batch Excel report...")
-                excel_filename = f"optimized_batch_{batch_id}.xlsx"
+                print("📊 Creating multi-key batch Excel report...")
+                excel_filename = f"multi_key_batch_{batch_id}.xlsx"
                 batch_excel_path = create_batch_excel_report(all_analyses, job_description, excel_filename)
                 print(f"✅ Excel report created: {batch_excel_path}")
             except Exception as e:
@@ -1724,21 +1863,21 @@ def analyze_batch_optimized():
             'processing_time': f"{time.time() - start_time:.2f}s",
             'job_description_preview': job_description[:200] + ("..." if len(job_description) > 200 else ""),
             'batch_size': len(resume_files),
-            'processing_method': 'optimized_chunked',
-            'chunks_processed': len(chunks),
-            'chunk_size': chunk_size
+            'processing_method': 'multi_key_distributed',
+            'api_keys_used': len(ACTIVE_API_KEYS),
+            'key_distribution': f"Key 1: Resumes 1-4 • Key 2: Resumes 5-8 • Key 3: Resumes 9-12"
         }
         
         total_time = time.time() - start_time
         avg_time_per_resume = total_time / len(all_analyses) if all_analyses else 0
-        print(f"✅ Optimized batch analysis completed in {total_time:.2f}s")
+        print(f"✅ Multi-key batch analysis completed in {total_time:.2f}s")
         print(f"📈 Average time per resume: {avg_time_per_resume:.2f}s")
         print("="*50 + "\n")
         
         return jsonify(batch_summary)
         
     except Exception as e:
-        print(f"❌ Optimized batch analysis error: {traceback.format_exc()}")
+        print(f"❌ Multi-key batch analysis error: {traceback.format_exc()}")
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
 def create_batch_excel_report(analyses, job_description, filename="batch_resume_analysis.xlsx"):
@@ -1785,7 +1924,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
     # Title
     ws_summary.merge_cells('A1:E1')
     title_cell = ws_summary['A1']
-    title_cell.value = "⚡ GROQ BATCH RESUME ANALYSIS"
+    title_cell.value = "⚡ GROQ MULTI-KEY BATCH RESUME ANALYSIS"
     title_cell.font = Font(bold=True, size=16, color="FFFFFF")
     title_cell.fill = groq_fill
     title_cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -1796,6 +1935,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         ("Total Resumes", len(analyses)),
         ("AI Provider", "GROQ"),
         ("AI Model", GROQ_MODEL or DEFAULT_MODEL),
+        ("API Keys Used", f"{len(ACTIVE_API_KEYS)} keys (4 resumes per key)"),
         ("Job Description", job_description[:100] + ("..." if len(job_description) > 100 else "")),
     ]
     
@@ -1816,7 +1956,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
     row += 1
     
     # Table Headers
-    headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "Key Skills"]
+    headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "API Key Used"]
     for col, header in enumerate(headers, start=1):
         cell = ws_summary.cell(row=row, column=col)
         cell.value = header
@@ -1842,8 +1982,8 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         
         ws_summary.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
         
-        skills = ", ".join(analysis.get('skills_matched', [])[:3])
-        ws_summary.cell(row=row, column=5, value=skills)
+        api_key = analysis.get('api_key_used', 'N/A')
+        ws_summary.cell(row=row, column=5, value=f"Key {api_key.replace('key_', '')}" if api_key != 'N/A' else 'N/A')
         
         row += 1
     
@@ -1854,7 +1994,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
     
     # ========== DETAILED ANALYSIS SHEET ==========
     details_headers = [
-        "Rank", "Candidate Name", "ATS Score", "Recommendation", 
+        "Rank", "Candidate Name", "ATS Score", "API Key", 
         "Experience Summary", "Education Summary", "Key Strengths"
     ]
     
@@ -1870,7 +2010,10 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         ws_details.cell(row=idx, column=1, value=analysis.get('rank', '-'))
         ws_details.cell(row=idx, column=2, value=analysis.get('candidate_name', 'Unknown'))
         ws_details.cell(row=idx, column=3, value=analysis.get('overall_score', 0))
-        ws_details.cell(row=idx, column=4, value=analysis.get('recommendation', 'N/A'))
+        
+        api_key = analysis.get('api_key_used', 'N/A')
+        ws_details.cell(row=idx, column=4, value=f"Key {api_key.replace('key_', '')}" if api_key != 'N/A' else 'N/A')
+        
         ws_details.cell(row=idx, column=5, value=analysis.get('experience_summary', 'N/A'))
         ws_details.cell(row=idx, column=6, value=analysis.get('education_summary', 'N/A'))
         ws_details.cell(row=idx, column=7, value=", ".join(analysis.get('key_strengths', [])))
@@ -1884,7 +2027,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
             ws_details.cell(row=r, column=c).alignment = Alignment(wrap_text=True, vertical='top')
     
     # ========== SKILLS ANALYSIS SHEET ==========
-    skills_headers = ["Rank", "Candidate", "Matched Skills", "Missing Skills"]
+    skills_headers = ["Rank", "Candidate", "API Key", "Matched Skills", "Missing Skills"]
     for col, header in enumerate(skills_headers, start=1):
         cell = ws_skills.cell(row=1, column=col)
         cell.value = header
@@ -1896,14 +2039,18 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
     for idx, analysis in enumerate(analyses, start=2):
         ws_skills.cell(row=idx, column=1, value=analysis.get('rank', '-'))
         ws_skills.cell(row=idx, column=2, value=analysis.get('candidate_name', 'Unknown'))
-        ws_skills.cell(row=idx, column=3, value=", ".join(analysis.get('skills_matched', [])))
-        ws_skills.cell(row=idx, column=4, value=", ".join(analysis.get('skills_missing', [])))
+        
+        api_key = analysis.get('api_key_used', 'N/A')
+        ws_skills.cell(row=idx, column=3, value=f"Key {api_key.replace('key_', '')}" if api_key != 'N/A' else 'N/A')
+        
+        ws_skills.cell(row=idx, column=4, value=", ".join(analysis.get('skills_matched', [])))
+        ws_skills.cell(row=idx, column=5, value=", ".join(analysis.get('skills_missing', [])))
         
         ws_skills.row_dimensions[idx].height = 40
     
     # Add border to skills table
     for r in range(1, len(analyses) + 2):
-        for c in range(1, 5):
+        for c in range(1, 6):
             ws_skills.cell(row=r, column=c).border = border
             ws_skills.cell(row=r, column=c).alignment = Alignment(wrap_text=True, vertical='top')
     
@@ -1944,6 +2091,7 @@ def create_individual_sheet(ws, analysis, candidate_number):
         ("Filename", analysis.get('original_filename', 'N/A')),
         ("File Size", analysis.get('file_size', 'N/A')),
         ("AI Model", analysis.get('ai_model', 'N/A')),
+        ("API Key Used", f"Key {analysis.get('api_key_used', 'N/A').replace('key_', '')}" if analysis.get('api_key_used') else 'N/A'),
         ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     ]
     
@@ -2123,7 +2271,7 @@ def force_warmup():
     update_activity()
     
     try:
-        if not GROQ_API_KEY:
+        if not ACTIVE_API_KEYS:
             return jsonify({
                 'status': 'error',
                 'message': 'Groq API not configured',
@@ -2134,10 +2282,11 @@ def force_warmup():
         
         return jsonify({
             'status': 'success' if result else 'error',
-            'message': f'Groq API warmed up successfully' if result else 'Warm-up failed',
+            'message': f'Groq API warmed up successfully with {len(ACTIVE_API_KEYS)} keys' if result else 'Warm-up failed',
             'warmup_complete': warmup_complete,
             'ai_provider': 'groq',
             'model': GROQ_MODEL or DEFAULT_MODEL,
+            'api_keys': len(ACTIVE_API_KEYS),
             'timestamp': datetime.now().isoformat()
         })
         
@@ -2148,16 +2297,66 @@ def force_warmup():
             'warmup_complete': False
         })
 
+@app.route('/keys-status', methods=['GET'])
+def keys_status():
+    """Check status of all API keys"""
+    update_activity()
+    
+    try:
+        keys_info = []
+        for i, key in enumerate(ACTIVE_API_KEYS, 1):
+            # Check if key is working
+            try:
+                response = call_groq_api(
+                    prompt="Say 'ready'",
+                    max_tokens=10,
+                    timeout=10,
+                    api_key=key
+                )
+                
+                if isinstance(response, dict) and 'error' in response:
+                    status = 'error'
+                    message = response.get('error', 'Unknown error')
+                elif response and 'ready' in response.lower():
+                    status = 'active'
+                    message = 'Ready'
+                else:
+                    status = 'unknown'
+                    message = 'Unexpected response'
+            except Exception as e:
+                status = 'error'
+                message = str(e)[:100]
+            
+            keys_info.append({
+                'key_number': i,
+                'status': status,
+                'message': message,
+                'usage': KEY_USAGE.get(key, {}).get('count', 0),
+                'limit': KEY_LIMIT,
+                'available': KEY_USAGE.get(key, {}).get('available', True)
+            })
+        
+        return jsonify({
+            'total_keys': len(ACTIVE_API_KEYS),
+            'keys': keys_info,
+            'key_limit_per_key': KEY_LIMIT,
+            'max_batch_size': MAX_BATCH_SIZE,
+            'key_distribution': 'Key 1: Resumes 1-4 • Key 2: Resumes 5-8 • Key 3: Resumes 9-12'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/quick-check', methods=['GET'])
 def quick_check():
     """Quick endpoint to check if Groq API is responsive"""
     update_activity()
     
     try:
-        if not GROQ_API_KEY:
+        if not ACTIVE_API_KEYS:
             return jsonify({
                 'available': False, 
-                'reason': 'Groq API not configured',
+                'reason': 'No Groq API keys configured',
                 'warmup_complete': warmup_complete
             })
         
@@ -2168,26 +2367,20 @@ def quick_check():
                 'warmup_complete': False,
                 'ai_provider': 'groq',
                 'model': GROQ_MODEL or DEFAULT_MODEL,
+                'api_keys': len(ACTIVE_API_KEYS),
                 'suggestion': 'Try again in a few seconds or use /warmup endpoint'
             })
         
+        # Test first key
         start_time = time.time()
         
-        def groq_service_check():
-            try:
-                response = call_groq_api(
-                    prompt="Say 'ready'",
-                    max_tokens=10,
-                    timeout=10
-                )
-                return response
-            except Exception as e:
-                raise e
-        
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(groq_service_check)
-                response = future.result(timeout=15)
+            response = call_groq_api(
+                prompt="Say 'ready'",
+                max_tokens=10,
+                timeout=10,
+                api_key=ACTIVE_API_KEYS[0]
+            )
             
             response_time = time.time() - start_time
             
@@ -2199,6 +2392,7 @@ def quick_check():
                     'error': response.get('error'),
                     'ai_provider': 'groq',
                     'model': GROQ_MODEL or DEFAULT_MODEL,
+                    'api_keys': len(ACTIVE_API_KEYS),
                     'warmup_complete': warmup_complete
                 })
             elif response and 'ready' in response.lower():
@@ -2208,7 +2402,9 @@ def quick_check():
                     'status': 'ready',
                     'ai_provider': 'groq',
                     'model': GROQ_MODEL or DEFAULT_MODEL,
-                    'warmup_complete': True
+                    'api_keys': len(ACTIVE_API_KEYS),
+                    'warmup_complete': True,
+                    'max_batch_size': MAX_BATCH_SIZE
                 })
             else:
                 return jsonify({
@@ -2217,16 +2413,18 @@ def quick_check():
                     'status': 'no_response',
                     'ai_provider': 'groq',
                     'model': GROQ_MODEL or DEFAULT_MODEL,
+                    'api_keys': len(ACTIVE_API_KEYS),
                     'warmup_complete': warmup_complete
                 })
                 
-        except concurrent.futures.TimeoutError:
+        except Exception as e:
             return jsonify({
                 'available': False,
-                'reason': 'Request timed out after 15 seconds',
-                'status': 'timeout',
+                'reason': str(e)[:100],
+                'status': 'error',
                 'ai_provider': 'groq',
                 'model': GROQ_MODEL or DEFAULT_MODEL,
+                'api_keys': len(ACTIVE_API_KEYS),
                 'warmup_complete': warmup_complete
             })
             
@@ -2238,6 +2436,7 @@ def quick_check():
             'status': 'error',
             'ai_provider': 'groq',
             'model': GROQ_MODEL or DEFAULT_MODEL,
+            'api_keys': len(ACTIVE_API_KEYS),
             'warmup_complete': warmup_complete
         })
 
@@ -2257,9 +2456,12 @@ def ping():
         'ai_provider': 'groq',
         'ai_warmup': warmup_complete,
         'model': model_to_use,
+        'api_keys': len(ACTIVE_API_KEYS),
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
         'keep_alive_active': True,
-        'message': f'Service is alive and Groq is warm!' if warmup_complete else f'Service is alive, warming up Groq...'
+        'max_batch_size': MAX_BATCH_SIZE,
+        'key_distribution': '4 resumes per key',
+        'message': f'Service is alive with {len(ACTIVE_API_KEYS)} API keys!' if warmup_complete else f'Service is alive, warming up Groq with {len(ACTIVE_API_KEYS)} keys...'
     })
 
 @app.route('/health', methods=['GET'])
@@ -2276,11 +2478,23 @@ def health_check():
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
     model_info = GROQ_MODELS.get(model_to_use, {'name': model_to_use, 'provider': 'Groq'})
     
+    # Get key usage stats
+    key_stats = []
+    for i, key in enumerate(ACTIVE_API_KEYS, 1):
+        key_stats.append({
+            'key': i,
+            'usage': KEY_USAGE.get(key, {}).get('count', 0),
+            'limit': KEY_LIMIT,
+            'available': KEY_USAGE.get(key, {}).get('available', True)
+        })
+    
     return jsonify({
-        'status': 'Backend is running!', 
+        'status': 'Multi-key backend is running!', 
         'timestamp': datetime.now().isoformat(),
         'ai_provider': 'groq',
-        'ai_provider_configured': bool(GROQ_API_KEY),
+        'ai_provider_configured': bool(ACTIVE_API_KEYS),
+        'api_keys_count': len(ACTIVE_API_KEYS),
+        'api_key_stats': key_stats,
         'model': model_to_use,
         'model_info': model_info,
         'ai_warmup_complete': warmup_complete,
@@ -2291,14 +2505,16 @@ def health_check():
         'inactive_minutes': inactive_minutes,
         'keep_alive_seconds': keep_alive_seconds,
         'keep_warm_active': keep_warm_thread is not None and keep_warm_thread.is_alive(),
-        'version': '9.0.0',
-        'features': ['always_active', 'groq_api_support', 'batch_processing_15', 'keep_alive', 'consistent_scoring', 'cache_system', 'individual_reports', 'parallel_processing', 'optimized_batch_10plus', 'rate_limit_protection'],
+        'version': '10.0.0',
+        'features': ['multi_key_support', 'always_active', 'groq_api_support', 'batch_processing_12', 'keep_alive', 'consistent_scoring', 'cache_system', 'individual_reports', 'parallel_processing', 'rate_limit_protection', 'key_usage_tracking'],
         'configuration': {
-            'max_concurrent_requests': MAX_CONCURRENT_REQUESTS,
+            'max_concurrent_requests_per_key': MAX_CONCURRENT_REQUESTS_PER_KEY,
             'max_batch_size': MAX_BATCH_SIZE,
+            'key_limit': KEY_LIMIT,
             'rate_limit_delay': RATE_LIMIT_DELAY,
             'max_retries': MAX_RETRIES
-        }
+        },
+        'key_distribution': 'Key 1: Resumes 1-4 • Key 2: Resumes 5-8 • Key 3: Resumes 9-12'
     })
 
 @app.route('/models', methods=['GET'])
@@ -2313,6 +2529,9 @@ def list_models():
             'current_model': model_to_use,
             'current_model_info': GROQ_MODELS.get(model_to_use, {}),
             'default_model': DEFAULT_MODEL,
+            'api_keys_count': len(ACTIVE_API_KEYS),
+            'max_resumes_per_key': KEY_LIMIT,
+            'total_max_resumes': MAX_BATCH_SIZE,
             'documentation': 'https://console.groq.com/docs/models',
             'deprecation_info': 'https://console.groq.com/docs/deprecations'
         })
@@ -2337,6 +2556,7 @@ def switch_model(model_name):
         'model': model_name,
         'model_info': GROQ_MODELS[model_name],
         'note': 'To change model, update GROQ_MODEL environment variable',
+        'api_keys_count': len(ACTIVE_API_KEYS),
         'timestamp': datetime.now().isoformat()
     })
 
@@ -2383,21 +2603,24 @@ if __name__ == '__main__':
     print(f"⚡ AI Provider: GROQ")
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
     print(f"🤖 Model: {model_to_use}")
+    print(f"🔑 Active API Keys: {len(ACTIVE_API_KEYS)}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
-    print("✅ Always Active Mode: Enabled")
-    print(f"✅ Concurrent Processing: {MAX_CONCURRENT_REQUESTS} resumes at once")
-    print(f"✅ Batch Capacity: Up to {MAX_BATCH_SIZE} resumes")
-    print(f"✅ Rate Limit Protection: Enabled (adaptive delays)")
-    print("✅ Optimized for 10+ resumes: Chunked processing")
+    print("✅ Multi-Key Mode: Enabled")
+    print(f"✅ Batch Capacity: Up to {MAX_BATCH_SIZE} resumes (4 per key)")
+    print(f"✅ Key Distribution: Key 1: Resumes 1-4 • Key 2: Resumes 5-8 • Key 3: Resumes 9-12")
+    print(f"✅ Key Usage Tracking: Enabled")
+    print(f"✅ Key Reset: Every 5 minutes")
+    print(f"✅ Concurrent Processing: {MAX_CONCURRENT_REQUESTS_PER_KEY} resumes per key")
+    print("✅ Rate Limit Protection: Enabled (adaptive delays)")
     print("✅ Individual Reports: Each candidate gets separate Excel")
     print("✅ Consistent Scoring: Enabled with cache system")
     print("="*50 + "\n")
     
-    if not GROQ_API_KEY:
-        print("⚠️  WARNING: No Groq API key found!")
-        print("Please set GROQ_API_KEY in Render environment variables")
-        print("Get your API key from: https://console.groq.com/keys")
+    if not ACTIVE_API_KEYS:
+        print("⚠️  WARNING: No Groq API keys found!")
+        print("Please set GROQ_API_KEY_1, GROQ_API_KEY_2, GROQ_API_KEY_3 in Render environment variables")
+        print("Get your API keys from: https://console.groq.com/keys")
     
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
