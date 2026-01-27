@@ -82,6 +82,11 @@ function App() {
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
   const [modelInfo, setModelInfo] = useState(null);
+  const [apiKeysInfo, setApiKeysInfo] = useState({
+    count: 0,
+    keys: [],
+    maxResumes: 12
+  });
   const [serviceStatus, setServiceStatus] = useState({
     enhancedFallback: true,
     validKeys: 0,
@@ -173,7 +178,19 @@ function App() {
         setGroqWarmup(healthResponse.data.ai_warmup_complete || false);
         setModelInfo(healthResponse.data.model_info || { name: healthResponse.data.model });
         setBackendStatus('ready');
+        
+        // Get API keys info
+        if (healthResponse.data.api_keys_count) {
+          setApiKeysInfo({
+            count: healthResponse.data.api_keys_count,
+            keys: healthResponse.data.api_key_stats || [],
+            maxResumes: healthResponse.data.configuration?.max_batch_size || 12
+          });
+        }
       }
+      
+      // Get keys status
+      await checkKeysStatus();
       
       await forceGroqWarmup();
       
@@ -186,6 +203,24 @@ function App() {
       setTimeout(() => initializeService(), 5000);
     } finally {
       setIsWarmingUp(false);
+    }
+  };
+
+  const checkKeysStatus = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/keys-status`, {
+        timeout: 8000
+      });
+      
+      if (response.data) {
+        setApiKeysInfo({
+          count: response.data.total_keys,
+          keys: response.data.keys || [],
+          maxResumes: response.data.max_batch_size || 12
+        });
+      }
+    } catch (error) {
+      console.log('Failed to get keys status:', error.message);
     }
   };
 
@@ -265,6 +300,12 @@ function App() {
         if (response.data.model) {
           setModelInfo(response.data.model_info || { name: response.data.model });
         }
+        if (response.data.api_keys) {
+          setApiKeysInfo(prev => ({
+            ...prev,
+            count: response.data.api_keys
+          }));
+        }
       } else if (response.data.warmup_complete) {
         setAiStatus('available');
         setGroqWarmup(true);
@@ -295,6 +336,15 @@ function App() {
         setAiStatus('available');
       } else {
         setAiStatus('warming');
+      }
+      
+      // Update API keys info
+      if (response.data.api_keys_count) {
+        setApiKeysInfo({
+          count: response.data.api_keys_count,
+          keys: response.data.api_key_stats || [],
+          maxResumes: response.data.configuration?.max_batch_size || 12
+        });
       }
       
     } catch (error) {
@@ -387,8 +437,8 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      // Allow up to 15 files
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 15));
+      // Allow up to 12 files for multi-key support
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 12));
       setError('');
     }
   };
@@ -537,7 +587,7 @@ function App() {
     setAnalysis(null);
     setBatchAnalysis(null);
     setBatchProgress(0);
-    setLoadingMessage(`Starting batch analysis of ${resumeFiles.length} resumes...`);
+    setLoadingMessage(`Starting multi-key batch analysis of ${resumeFiles.length} resumes...`);
 
     const formData = new FormData();
     formData.append('jobDescription', jobDescription);
@@ -559,23 +609,25 @@ function App() {
       setLoadingMessage('Uploading files...');
       setBatchProgress(10);
 
-      const response = await axios.post(`${API_BASE_URL}/analyze-batch`, formData, {
+      // Use the multi-key endpoint for optimal performance
+      const endpoint = resumeFiles.length > 4 ? '/analyze-batch-multi-key' : '/analyze-batch';
+      const response = await axios.post(`${API_BASE_URL}${endpoint}`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 300000, // 5 minutes for batch processing (increased for 15 resumes)
+        timeout: 300000, // 5 minutes for batch processing
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
             setBatchProgress(10 + percentCompleted * 0.3);
-            setLoadingMessage(`Uploading ${resumeFiles.length} files...`);
+            setLoadingMessage(`Uploading ${resumeFiles.length} files (multi-key processing)...`);
           }
         }
       });
 
       clearInterval(progressInterval);
       setBatchProgress(95);
-      setLoadingMessage('Batch analysis complete!');
+      setLoadingMessage('Multi-key batch analysis complete!');
 
       await new Promise(resolve => setTimeout(resolve, 800));
       
@@ -710,6 +762,12 @@ function App() {
     }
   };
 
+  const getKeyStatusColor = (key) => {
+    if (key.status === 'active') return '#00ff9d';
+    if (key.status === 'error') return '#ff6b6b';
+    return '#ffd166';
+  };
+
   const backendStatusInfo = getBackendStatusMessage();
   const aiStatusInfo = getAiStatusMessage();
 
@@ -769,7 +827,31 @@ function App() {
               <Cpu size={14} /> {getModelDisplayName(modelInfo)}
             </span>
           )}
+          {apiKeysInfo.count > 0 && (
+            <span className="status-badge multi-key">
+              <Key size={14} /> {apiKeysInfo.count} API Keys
+            </span>
+          )}
         </div>
+        
+        {/* Key Distribution Info */}
+        {apiKeysInfo.count > 1 && (
+          <div className="key-distribution-info glass" style={{
+            marginTop: '1rem',
+            padding: '1rem',
+            borderRadius: '12px',
+            background: 'linear-gradient(135deg, rgba(0, 176, 155, 0.1), rgba(150, 201, 61, 0.1))',
+            border: '1px solid rgba(0, 176, 155, 0.3)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <Key size={16} style={{ color: '#00b09b' }} />
+              <strong>Multi-Key Distribution:</strong>
+            </div>
+            <div style={{ fontSize: '0.9rem', color: '#666' }}>
+              Key 1: Resumes 1-4 • Key 2: Resumes 5-8 • Key 3: Resumes 9-12
+            </div>
+          </div>
+        )}
         
         {/* Batch Mode Toggle */}
         <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
@@ -813,7 +895,7 @@ function App() {
               gap: '0.5rem'
             }}
           >
-            <Users size={16} /> Multiple Resumes (Up to 15)
+            <Users size={16} /> Multiple Resumes (Up to {apiKeysInfo.maxResumes || 12})
           </button>
         </div>
       </div>
@@ -830,7 +912,7 @@ function App() {
               <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
               <p className="card-subtitle">
                 {batchMode 
-                  ? 'Upload multiple resumes (Max 15, 15MB each)' 
+                  ? `Upload multiple resumes (Max ${apiKeysInfo.maxResumes || 12}, 15MB each)` 
                   : 'Supported: PDF, DOC, DOCX, TXT (Max 15MB)'}
               </p>
             </div>
@@ -945,7 +1027,7 @@ function App() {
                       <span className="upload-text">
                         Drag & drop multiple files or click to browse
                       </span>
-                      <span className="upload-hint">Max 15 files, 15MB each</span>
+                      <span className="upload-hint">Max {apiKeysInfo.maxResumes || 12} files, 15MB each</span>
                     </>
                   )}
                 </div>
@@ -982,6 +1064,14 @@ function App() {
               </div>
               <span>Always Active backend</span>
             </div>
+            {apiKeysInfo.count > 0 && (
+              <div className="stat">
+                <div className="stat-icon">
+                  <Key size={14} />
+                </div>
+                <span>{apiKeysInfo.count} API Keys</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1040,7 +1130,7 @@ function App() {
           <div className="loading-container">
             <div className="loading-header">
               <Loader className="spinner" />
-              <h3>{batchMode ? 'Batch Analysis in Progress' : 'Analysis in Progress'}</h3>
+              <h3>{batchMode ? 'Multi-Key Batch Analysis in Progress' : 'Analysis in Progress'}</h3>
             </div>
             
             <div className="progress-container">
@@ -1051,7 +1141,7 @@ function App() {
               <span className="loading-message">{loadingMessage}</span>
               <span className="loading-subtext">
                 {batchMode 
-                  ? `Processing ${resumeFiles.length} resume(s) with ${getModelDisplayName(modelInfo)}...` 
+                  ? `Processing ${resumeFiles.length} resume(s) with ${getModelDisplayName(modelInfo)} (${apiKeysInfo.count} API Keys)...` 
                   : `Using ${getModelDisplayName(modelInfo)} (Ultra-fast)...`}
               </span>
             </div>
@@ -1068,11 +1158,17 @@ function App() {
                   <span>Model: {getModelDisplayName(modelInfo)}</span>
                 </>
               )}
+              {batchMode && apiKeysInfo.count > 0 && (
+                <>
+                  <span>•</span>
+                  <span>API Keys: {apiKeysInfo.count}</span>
+                </>
+              )}
             </div>
             
             <div className="loading-note info">
               <Info size={14} />
-              <span>Groq API offers ultra-fast inference for quick responses</span>
+              <span>Multi-key processing enables up to {apiKeysInfo.maxResumes || 12} resumes simultaneously</span>
             </div>
           </div>
         </div>
@@ -1104,7 +1200,7 @@ function App() {
                 <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                 <span className="button-subtext">
                   {batchMode 
-                    ? `${resumeFiles.length} resume(s) • ${getModelDisplayName(modelInfo)}` 
+                    ? `${resumeFiles.length} resume(s) • ${getModelDisplayName(modelInfo)} • ${apiKeysInfo.count} Keys` 
                     : `${getModelDisplayName(modelInfo)} • Ultra-fast`}
                 </span>
               </div>
@@ -1119,8 +1215,8 @@ function App() {
         {batchMode ? (
           <>
             <div className="tip">
-              <ZapIcon size={16} />
-              <span>Groq API provides ultra-fast batch processing</span>
+              <Key size={16} />
+              <span>Multi-key processing: Up to {apiKeysInfo.maxResumes || 12} resumes with {apiKeysInfo.count || 3} API keys</span>
             </div>
             <div className="tip">
               <TrendingUp size={16} />
@@ -1204,10 +1300,12 @@ function App() {
                   <Cpu size={14} />
                   Model: {analysis.ai_model || 'Groq AI'}
                 </span>
-                <span className="provider-info">
-                  <ZapIcon size={14} />
-                  Provider: {analysis.ai_provider || 'Groq'}
-                </span>
+                {analysis.api_key_used && (
+                  <span className="key-info">
+                    <Key size={14} />
+                    API Key: {analysis.api_key_used.replace('key_', '')}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -1464,6 +1562,12 @@ function App() {
               <span className="detail-label">Response Time:</span>
               <span className="detail-value">{analysis.response_time || 'N/A'}</span>
             </div>
+            {analysis.api_key_used && (
+              <div className="ai-detail-item">
+                <span className="detail-label">API Key Used:</span>
+                <span className="detail-value">Key {analysis.api_key_used.replace('key_', '')}</span>
+              </div>
+            )}
             <div className="ai-detail-item">
               <span className="detail-label">Analysis ID:</span>
               <span className="detail-value">{analysis.analysis_id || 'N/A'}</span>
@@ -1509,7 +1613,7 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>⚡ Batch Analysis Results</h2>
+          <h2>⚡ Multi-Key Batch Analysis Results</h2>
           <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
         </div>
         <div className="navigation-actions">
@@ -1520,8 +1624,8 @@ function App() {
         </div>
       </div>
 
-      {/* Batch Stats */}
-      <div className="batch-stats-container glass">
+      {/* Multi-Key Stats */}
+      <div className="multi-key-stats-container glass">
         <div className="stat-card">
           <div className="stat-icon success">
             <Check size={24} />
@@ -1563,7 +1667,49 @@ function App() {
             <div className="stat-label">AI Model</div>
           </div>
         </div>
+        
+        {batchAnalysis?.api_keys_used && (
+          <div className="stat-card">
+            <div className="stat-icon warning">
+              <Key size={24} />
+            </div>
+            <div className="stat-content">
+              <div className="stat-value">{batchAnalysis.api_keys_used}</div>
+              <div className="stat-label">API Keys</div>
+            </div>
+          </div>
+        )}
+        
+        {batchAnalysis?.processing_method === 'multi_key_distributed' && (
+          <div className="stat-card wide">
+            <div className="stat-icon success">
+              <Activity size={24} />
+            </div>
+            <div className="stat-content">
+              <div className="stat-value">Multi-Key</div>
+              <div className="stat-label">Distribution</div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Key Distribution Info */}
+      {batchAnalysis?.key_distribution && (
+        <div className="key-distribution-card glass">
+          <div className="key-distribution-header">
+            <Key size={20} />
+            <h3>API Key Distribution</h3>
+          </div>
+          <div className="key-distribution-content">
+            <p>{batchAnalysis.key_distribution}</p>
+            <div className="key-badges">
+              <span className="key-badge">Key 1: Resumes 1-4</span>
+              <span className="key-badge">Key 2: Resumes 5-8</span>
+              <span className="key-badge">Key 3: Resumes 9-12</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Candidates Ranking */}
       <div className="section-title">
@@ -1582,6 +1728,9 @@ function App() {
                   <div className="candidate-meta">
                     <span className="file-info">{candidate.filename}</span>
                     <span className="file-size">{candidate.file_size}</span>
+                    {candidate.api_key_used && (
+                      <span className="key-badge-small">Key {candidate.api_key_used.replace('key_', '')}</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1664,8 +1813,8 @@ function App() {
       {/* Action Buttons */}
       <div className="action-section glass">
         <div className="action-content">
-          <h3>Batch Analysis Complete</h3>
-          <p>Download comprehensive Excel report with all candidate details</p>
+          <h3>Multi-Key Batch Analysis Complete</h3>
+          <p>Download comprehensive Excel report with all candidate details and API key usage</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
@@ -1746,6 +1895,12 @@ function App() {
                   <FileText size={14} />
                   {candidate.filename} • {candidate.file_size}
                 </span>
+                {candidate.api_key_used && (
+                  <span className="key-info">
+                    <Key size={14} />
+                    API Key: {candidate.api_key_used.replace('key_', '')}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -1780,6 +1935,12 @@ function App() {
                   <Cpu size={12} />
                   Model: {candidate.ai_model || 'Groq AI'}
                 </span>
+                {candidate.api_key_used && (
+                  <span className="meta-item">
+                    <Key size={12} />
+                    Key: {candidate.api_key_used.replace('key_', '')}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -1795,7 +1956,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {candidate.ai_model || 'Groq AI'} • Consistent ATS Scoring
+                {candidate.ai_model || 'Groq AI'} • Multi-Key Processing
               </p>
             </div>
           </div>
@@ -1803,7 +1964,7 @@ function App() {
             <p className="recommendation-text">{candidate.recommendation}</p>
             <div className="confidence-badge">
               <ZapIcon size={16} />
-              <span>Groq AI Analysis</span>
+              <span>Multi-Key Groq AI Analysis</span>
             </div>
           </div>
         </div>
@@ -2038,7 +2199,7 @@ function App() {
                   <span className="powered-by">Powered by</span>
                   <span className="groq-badge">⚡ Groq</span>
                   <span className="divider">•</span>
-                  <span className="tagline">Ultra-fast • Always Active</span>
+                  <span className="tagline">Multi-Key • Ultra-fast • Always Active</span>
                 </div>
               </div>
             </div>
@@ -2107,6 +2268,14 @@ function App() {
               </div>
             )}
             
+            {/* API Keys Info */}
+            {apiKeysInfo.count > 0 && (
+              <div className="feature api-keys-info">
+                <Key size={16} />
+                <span>{apiKeysInfo.count} Keys</span>
+              </div>
+            )}
+            
             {/* Navigation Indicator */}
             {currentView !== 'main' && (
               <div className="feature nav-indicator">
@@ -2161,7 +2330,7 @@ function App() {
             <div className="quota-panel-header">
               <div className="quota-title">
                 <Activity size={20} />
-                <h3>Service Status</h3>
+                <h3>Multi-Key Service Status</h3>
               </div>
               <button 
                 className="close-quota"
@@ -2195,18 +2364,50 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Batch Capacity</div>
+                <div className="summary-label">API Keys</div>
                 <div className="summary-value success">
-                  📊 Up to 15 resumes
+                  🔑 {apiKeysInfo.count} Active Keys
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Keep-alive</div>
+                <div className="summary-label">Batch Capacity</div>
+                <div className="summary-value success">
+                  📊 Up to {apiKeysInfo.maxResumes || 12} resumes
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Key Distribution</div>
                 <div className="summary-value info">
-                  ⚡ Always Active
+                  🔄 Key 1: 1-4 • Key 2: 5-8 • Key 3: 9-12
                 </div>
               </div>
             </div>
+            
+            {/* API Keys Status */}
+            {apiKeysInfo.keys.length > 0 && (
+              <div className="api-keys-status">
+                <h4>API Keys Status</h4>
+                <div className="keys-list">
+                  {apiKeysInfo.keys.map((key, index) => (
+                    <div key={index} className="key-status-item">
+                      <div className="key-info">
+                        <div className="key-name">Key {key.key_number}</div>
+                        <div className={`key-status ${key.status}`}>
+                          <div className="key-status-dot" style={{ backgroundColor: getKeyStatusColor(key) }}></div>
+                          <span>{key.status === 'active' ? 'Active' : 'Error'}</span>
+                        </div>
+                      </div>
+                      <div className="key-usage">
+                        <span>Usage: {key.usage}/{key.limit}</span>
+                        <span className={`key-availability ${key.available ? 'available' : 'unavailable'}`}>
+                          {key.available ? 'Available' : 'Limit Reached'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             
             <div className="action-buttons-panel">
               <button 
@@ -2215,6 +2416,13 @@ function App() {
               >
                 <RefreshCw size={16} />
                 Refresh Status
+              </button>
+              <button 
+                className="action-button keys"
+                onClick={checkKeysStatus}
+              >
+                <Key size={16} />
+                Check Keys
               </button>
               <button 
                 className="action-button warmup"
@@ -2250,10 +2458,16 @@ function App() {
                   <span>Model: {getModelDisplayName(modelInfo)}</span>
                 </div>
               )}
+              {apiKeysInfo.count > 0 && (
+                <div className="status-indicator active">
+                  <div className="indicator-dot" style={{ background: '#00b09b' }}></div>
+                  <span>API Keys: {apiKeysInfo.count}</span>
+                </div>
+              )}
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
                 <span>Mode: {currentView === 'single-results' ? 'Single Analysis' : 
-                              currentView === 'batch-results' ? 'Batch Results' : 
+                              currentView === 'batch-results' ? 'Multi-Key Batch' : 
                               currentView === 'candidate-detail' ? 'Candidate Details' : 
                               batchMode ? 'Batch' : 'Single'}</span>
               </div>
@@ -2272,6 +2486,13 @@ function App() {
                 <span>Groq API is warming up. This ensures ultra-fast responses.</span>
               </div>
             )}
+            
+            {apiKeysInfo.count > 1 && batchMode && (
+              <div className="multi-key-message">
+                <Key size={16} />
+                <span>Multi-key mode: Processing up to {apiKeysInfo.maxResumes || 12} resumes with {apiKeysInfo.count} API keys</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -2288,14 +2509,14 @@ function App() {
               <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Groq API offers ultra-fast inference for instant responses • Up to 15 resumes per batch • Individual reports available
+              Multi-key Groq API offers ultra-fast inference • Up to {apiKeysInfo.maxResumes || 12} resumes per batch • Individual reports available
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
               <h4>Features</h4>
-              <a href="#">Ultra-fast AI</a>
+              <a href="#">Multi-Key AI</a>
               <a href="#">Groq API</a>
               <a href="#">Batch Processing</a>
               <a href="#">Excel Reports</a>
@@ -2320,7 +2541,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq API. Ultra-fast Mode.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Multi-Key Groq API. Ultra-fast Mode.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
@@ -2334,6 +2555,12 @@ function App() {
               <Cpu size={12} />
               Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
             </span>
+            {apiKeysInfo.count > 0 && (
+              <span className="stat">
+                <Key size={12} />
+                Keys: {apiKeysInfo.count}
+              </span>
+            )}
           </div>
         </div>
       </footer>
