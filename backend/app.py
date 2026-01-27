@@ -44,9 +44,9 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
 
 # Track API key usage and limits
-KEY_USAGE = {key: {'count': 0, 'last_used': None, 'available': True, 'errors': 0, 'requests_today': 0, 'concurrent': 0} for key in ACTIVE_API_KEYS}
-KEY_LIMIT = 5  # Increased to 5 resumes per key for better distribution
-KEY_COOLDOWN = 60  # Seconds to cooldown if key has errors
+KEY_USAGE = {key: {'count': 0, 'last_used': None, 'available': True, 'errors': 0, 'requests_today': 0, 'concurrent': 0, 'cooling_until': None} for key in ACTIVE_API_KEYS}
+KEY_LIMIT = 4  # Reduced to 4 resumes per key to avoid rate limits
+KEY_COOLDOWN = 120  # Increased cooldown to 2 minutes
 
 # Available Groq models
 GROQ_MODELS = {
@@ -57,7 +57,7 @@ GROQ_MODELS = {
         'description': 'Fast 8B model for quick responses',
         'status': 'production',
         'free_tier': True,
-        'max_batch_size': 5
+        'max_batch_size': 4
     }
 }
 
@@ -82,13 +82,13 @@ score_cache = {}
 cache_lock = threading.Lock()
 
 # Batch processing configuration
-MAX_CONCURRENT_PER_KEY = 2  # Max concurrent requests per key
-MAX_BATCH_SIZE = 15  # Maximum number of resumes per batch (5 per key * 3 keys)
+MAX_CONCURRENT_PER_KEY = 1  # Reduced to 1 concurrent request per key to avoid rate limits
+MAX_BATCH_SIZE = 12  # Maximum number of resumes per batch (4 per key * 3 keys)
 MAX_INDIVIDUAL_REPORTS = 10  # Limit individual Excel reports
 
 # Rate limiting protection
-MAX_RETRIES = 5  # Increased retries
-RETRY_DELAY_BASE = 2
+MAX_RETRIES = 3
+RETRY_DELAY_BASE = 3
 
 # Memory optimization
 service_running = True
@@ -98,45 +98,64 @@ def update_activity():
     global last_activity_time
     last_activity_time = datetime.now()
 
-def get_key_for_index(index):
-    """Get API key for a specific resume index using round-robin distribution"""
+def get_key_for_resume(index, total_resumes):
+    """Get the best API key for a specific resume with intelligent distribution"""
     with threading.Lock():
         if not ACTIVE_API_KEYS:
             return None
         
-        # Round-robin distribution
-        key_index = index % len(ACTIVE_API_KEYS)
-        selected_key = ACTIVE_API_KEYS[key_index]
-        
-        # Check if key is available
-        key_info = KEY_USAGE[selected_key]
-        
-        # Reset if key is at limit and it's been a while
         current_time = datetime.now()
-        if key_info['count'] >= KEY_LIMIT and key_info['last_used']:
-            time_diff = (current_time - key_info['last_used']).seconds
-            if time_diff > 30:  # Reset if 30 seconds passed
-                key_info['count'] = 0
-                key_info['available'] = True
+        available_keys = []
         
-        # Skip if key has too many errors
-        if key_info['errors'] >= 3:
-            # Try next key
-            key_index = (index + 1) % len(ACTIVE_API_KEYS)
-            selected_key = ACTIVE_API_KEYS[key_index]
+        # Check all keys for availability
+        for key_idx, key in enumerate(ACTIVE_API_KEYS):
+            key_info = KEY_USAGE[key]
+            
+            # Skip keys that are cooling down
+            if key_info.get('cooling_until') and current_time < key_info['cooling_until']:
+                continue
+            
+            # Skip keys with too many errors
+            if key_info.get('errors', 0) >= 2:
+                continue
+            
+            # Check if key is under its limit
+            if key_info['count'] < KEY_LIMIT:
+                # Calculate score based on multiple factors
+                score = 0
+                
+                # Lower usage = higher score
+                score += (KEY_LIMIT - key_info['count']) * 10
+                
+                # Lower errors = higher score
+                score += (2 - key_info.get('errors', 0)) * 5
+                
+                # Lower concurrent = higher score
+                score += (MAX_CONCURRENT_PER_KEY - key_info.get('concurrent', 0)) * 3
+                
+                available_keys.append((key, score, key_idx))
+        
+        if available_keys:
+            # Sort by score (highest first)
+            available_keys.sort(key=lambda x: x[1], reverse=True)
+            selected_key, score, key_idx = available_keys[0]
+        else:
+            # If no keys are available, use round-robin
+            key_idx = index % len(ACTIVE_API_KEYS)
+            selected_key = ACTIVE_API_KEYS[key_idx]
+            
+            # Reset the key if it's over limit
+            KEY_USAGE[selected_key]['count'] = 0
+            KEY_USAGE[selected_key]['concurrent'] = 0
         
         # Update usage
-        key_info['count'] += 1
-        key_info['last_used'] = current_time
-        key_info['requests_today'] += 1
-        key_info['concurrent'] += 1
+        KEY_USAGE[selected_key]['count'] += 1
+        KEY_USAGE[selected_key]['last_used'] = current_time
+        KEY_USAGE[selected_key]['requests_today'] += 1
+        KEY_USAGE[selected_key]['concurrent'] += 1
         
-        # Check if key should be marked as unavailable
-        if key_info['count'] >= KEY_LIMIT:
-            key_info['available'] = False
-        
-        print(f"🔑 Assigning API key {key_index + 1} to resume {index + 1} (Usage: {key_info['count']}/{KEY_LIMIT}, Errors: {key_info['errors']})")
-        return selected_key
+        print(f"🔑 Assigning API key {key_idx + 1} to resume {index + 1}/{total_resumes} (Usage: {KEY_USAGE[selected_key]['count']}/{KEY_LIMIT}, Errors: {KEY_USAGE[selected_key]['errors']})")
+        return selected_key, key_idx + 1
 
 def mark_key_complete(key):
     """Mark key as having completed a request"""
@@ -144,30 +163,42 @@ def mark_key_complete(key):
         if key in KEY_USAGE:
             KEY_USAGE[key]['concurrent'] = max(0, KEY_USAGE[key]['concurrent'] - 1)
 
-def mark_key_as_error(key):
-    """Mark a key as having an error"""
+def mark_key_as_error(key, error_type='rate_limit'):
+    """Mark a key as having an error with appropriate cooling"""
     with threading.Lock():
         if key in KEY_USAGE:
             KEY_USAGE[key]['errors'] += 1
-            KEY_USAGE[key]['last_error'] = datetime.now()
             
-            # Put key in cooldown if too many errors
-            if KEY_USAGE[key]['errors'] >= 2:
-                cooldown_time = KEY_COOLDOWN * KEY_USAGE[key]['errors']
-                KEY_USAGE[key]['cooldown_until'] = datetime.now() + timedelta(seconds=cooldown_time)
-                print(f"⚠️ Key {ACTIVE_API_KEYS.index(key) + 1} in cooldown for {cooldown_time}s")
+            # Increase cooling time based on error type and count
+            if error_type == 'rate_limit':
+                cooling_time = KEY_COOLDOWN * (KEY_USAGE[key]['errors'] ** 1.5)
+            elif error_type == 'timeout':
+                cooling_time = KEY_COOLDOWN * (KEY_USAGE[key]['errors'] ** 1.2)
+            else:
+                cooling_time = KEY_COOLDOWN * KEY_USAGE[key]['errors']
+            
+            KEY_USAGE[key]['cooling_until'] = datetime.now() + timedelta(seconds=cooling_time)
+            KEY_USAGE[key]['concurrent'] = 0  # Reset concurrent count
+            
+            key_idx = ACTIVE_API_KEYS.index(key) + 1 if key in ACTIVE_API_KEYS else 0
+            print(f"⚠️ Key {key_idx} marked with error ({error_type}), cooling for {cooling_time:.0f}s")
 
 def reset_key_usage():
     """Reset key usage counters periodically"""
     with threading.Lock():
+        current_time = datetime.now()
         for key in ACTIVE_API_KEYS:
-            KEY_USAGE[key]['count'] = 0
-            KEY_USAGE[key]['available'] = True
-            KEY_USAGE[key]['concurrent'] = 0
-            # Reduce error counts gradually
-            if KEY_USAGE[key]['errors'] > 0:
-                KEY_USAGE[key]['errors'] = max(0, KEY_USAGE[key]['errors'] - 1)
-        print("🔄 Reset all API key usage counters")
+            # Only reset if key is not in cooldown
+            if not KEY_USAGE[key].get('cooling_until') or current_time >= KEY_USAGE[key]['cooling_until']:
+                KEY_USAGE[key]['count'] = 0
+                KEY_USAGE[key]['concurrent'] = 0
+                KEY_USAGE[key]['available'] = True
+                KEY_USAGE[key].pop('cooling_until', None)
+                
+                # Gradually reduce error count
+                if KEY_USAGE[key]['errors'] > 0:
+                    KEY_USAGE[key]['errors'] = max(0, KEY_USAGE[key]['errors'] - 1)
+        print("🔄 Reset key usage counters")
 
 def calculate_resume_hash(resume_text, job_description):
     """Calculate a hash for caching consistent scores"""
@@ -184,10 +215,10 @@ def set_cached_score(resume_hash, score):
     with cache_lock:
         score_cache[resume_hash] = score
 
-def call_groq_api(prompt, max_tokens=800, temperature=0.2, timeout=30, model_override=None, retry_count=0, api_key=None):
-    """Call Groq API with the given prompt with optimized retry logic"""
+def call_groq_api(prompt, max_tokens=600, temperature=0.1, timeout=45, model_override=None, retry_count=0, api_key=None, key_index=None):
+    """Call Groq API with optimized settings for batch processing"""
     if not api_key:
-        print("❌ No API key provided")
+        print(f"❌ No API key provided for key {key_index}")
         return {'error': 'no_api_key', 'status': 500}
     
     headers = {
@@ -208,7 +239,7 @@ def call_groq_api(prompt, max_tokens=800, temperature=0.2, timeout=30, model_ove
         ],
         'max_tokens': max_tokens,
         'temperature': temperature,
-        'top_p': 0.95,
+        'top_p': 0.9,
         'stream': False,
         'stop': None
     }
@@ -228,49 +259,54 @@ def call_groq_api(prompt, max_tokens=800, temperature=0.2, timeout=30, model_ove
             data = response.json()
             if 'choices' in data and len(data['choices']) > 0:
                 result = data['choices'][0]['message']['content']
-                print(f"✅ Groq API response in {response_time:.2f}s using {model_to_use}")
+                print(f"✅ Groq API response in {response_time:.2f}s using {model_to_use} (Key {key_index})")
                 return result
             else:
-                print(f"❌ Unexpected Groq API response format")
+                print(f"❌ Unexpected Groq API response format from Key {key_index}")
                 return {'error': 'invalid_response', 'status': response.status_code}
-        elif response.status_code == 429:
-            print(f"❌ Groq API rate limit exceeded for key")
-            mark_key_as_error(api_key)
+        
+        # Handle specific error codes
+        if response.status_code == 429:
+            print(f"❌ Rate limit exceeded for Key {key_index}")
+            mark_key_as_error(api_key, 'rate_limit')
             
             if retry_count < MAX_RETRIES:
-                wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(0, 2)
-                print(f"⏳ Rate limited, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
+                wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(1, 3)
+                print(f"⏳ Rate limited on Key {key_index}, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
                 time.sleep(wait_time)
-                return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key)
+                return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key, key_index)
             return {'error': 'rate_limit', 'status': 429}
+        
         elif response.status_code == 503:
-            print(f"❌ Groq API service unavailable")
-            mark_key_as_error(api_key)
+            print(f"❌ Service unavailable for Key {key_index}")
+            mark_key_as_error(api_key, 'service_unavailable')
             
-            if retry_count < 3:
-                wait_time = 10 + random.uniform(0, 5)
-                print(f"⏳ Service unavailable, retrying in {wait_time:.1f}s")
+            if retry_count < 2:
+                wait_time = 10 + random.uniform(2, 5)
+                print(f"⏳ Service unavailable for Key {key_index}, retrying in {wait_time:.1f}s")
                 time.sleep(wait_time)
-                return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key)
+                return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key, key_index)
             return {'error': 'service_unavailable', 'status': 503}
+        
         else:
-            print(f"❌ Groq API Error {response.status_code}: {response.text[:200]}")
-            mark_key_as_error(api_key)
+            print(f"❌ Groq API Error {response.status_code} from Key {key_index}: {response.text[:100]}")
+            mark_key_as_error(api_key, 'api_error')
             return {'error': f'api_error_{response.status_code}', 'status': response.status_code}
             
     except requests.exceptions.Timeout:
-        print(f"❌ Groq API timeout after {timeout}s")
-        mark_key_as_error(api_key)
+        print(f"❌ Groq API timeout after {timeout}s for Key {key_index}")
+        mark_key_as_error(api_key, 'timeout')
         
         if retry_count < 2:
-            wait_time = 5 + random.uniform(0, 3)
-            print(f"⏳ Timeout, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/3)")
+            wait_time = 8 + random.uniform(2, 4)
+            print(f"⏳ Timeout on Key {key_index}, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/3)")
             time.sleep(wait_time)
-            return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key)
+            return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key, key_index)
         return {'error': 'timeout', 'status': 408}
+    
     except Exception as e:
-        print(f"❌ Groq API Exception: {str(e)}")
-        mark_key_as_error(api_key)
+        print(f"❌ Groq API Exception on Key {key_index}: {str(e)}")
+        mark_key_as_error(api_key, 'exception')
         return {'error': str(e), 'status': 500}
 
 def warmup_groq_service():
@@ -293,17 +329,24 @@ def warmup_groq_service():
             print(f"  Warming up key {idx}...")
             start_time = time.time()
             
+            # Reset key status before warmup
+            KEY_USAGE[api_key]['errors'] = 0
+            KEY_USAGE[api_key]['cooling_until'] = None
+            
             response = call_groq_api(
                 prompt="Hello, are you ready? Respond with just 'ready'.",
                 max_tokens=10,
                 temperature=0.1,
-                timeout=10,
-                api_key=api_key
+                timeout=15,
+                api_key=api_key,
+                key_index=idx
             )
             
             if isinstance(response, dict) and 'error' in response:
                 error_type = response.get('error')
                 print(f"  ⚠️ Key {idx} warm-up failed: {error_type}")
+                # Don't mark as error during warmup
+                KEY_USAGE[api_key]['errors'] = max(0, KEY_USAGE[api_key]['errors'] - 1)
             elif response and 'ready' in response.lower():
                 elapsed = time.time() - start_time
                 print(f"  ✅ Key {idx} warmed up in {elapsed:.2f}s")
@@ -317,12 +360,12 @@ def warmup_groq_service():
             return True
         else:
             print("⚠️ All warm-up attempts failed")
-            threading.Timer(10.0, warmup_groq_service).start()
+            threading.Timer(30.0, warmup_groq_service).start()
             return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        threading.Timer(10.0, warmup_groq_service).start()
+        threading.Timer(30.0, warmup_groq_service).start()
         return False
 
 def keep_service_warm():
@@ -331,18 +374,24 @@ def keep_service_warm():
     
     while service_running:
         try:
-            time.sleep(120)  # Check every 120 seconds
+            time.sleep(180)  # Check every 3 minutes
             
             if ACTIVE_API_KEYS and warmup_complete:
                 print(f"♨️ Keeping Groq warm with {len(ACTIVE_API_KEYS)} keys...")
                 
                 for idx, api_key in enumerate(ACTIVE_API_KEYS, 1):
                     try:
+                        # Skip keys in cooldown
+                        key_info = KEY_USAGE.get(api_key, {})
+                        if key_info.get('cooling_until') and datetime.now() < key_info['cooling_until']:
+                            continue
+                        
                         response = call_groq_api(
                             prompt="Ping - just say 'pong'",
                             max_tokens=5,
-                            timeout=15,
-                            api_key=api_key
+                            timeout=20,
+                            api_key=api_key,
+                            key_index=idx
                         )
                         if response and 'pong' in str(response).lower():
                             print(f"  ✅ Key {idx} keep-alive successful")
@@ -353,7 +402,7 @@ def keep_service_warm():
                     
         except Exception as e:
             print(f"⚠️ Keep-warm thread error: {str(e)}")
-            time.sleep(120)
+            time.sleep(180)
 
 # Text extraction functions (keep the same as before)
 def extract_text_from_pdf(file_path):
@@ -367,7 +416,7 @@ def extract_text_from_pdf(file_path):
                 reader = PdfReader(file_path)
                 text = ""
                 
-                for page_num, page in enumerate(reader.pages[:5]):
+                for page_num, page in enumerate(reader.pages[:4]):  # Reduced to 4 pages
                     try:
                         page_text = page.extract_text()
                         if page_text:
@@ -388,15 +437,15 @@ def extract_text_from_pdf(file_path):
                             text = content.decode('utf-8', errors='ignore')
                             if text.strip():
                                 words = text.split()
-                                text = ' '.join(words[:800])
+                                text = ' '.join(words[:600])  # Reduced length
                     except:
                         text = "Error: Could not extract text from PDF file"
         
         if not text.strip():
             return "Error: PDF appears to be empty or text could not be extracted"
         
-        if len(text) > 3000:
-            text = text[:3000] + "\n[Text truncated for optimal processing...]"
+        if len(text) > 2000:  # Reduced from 3000
+            text = text[:2000] + "\n[Text truncated for optimal processing...]"
             
         return text
     except Exception as e:
@@ -407,13 +456,13 @@ def extract_text_from_docx(file_path):
     """Extract text from DOCX file"""
     try:
         doc = Document(file_path)
-        text = "\n".join([paragraph.text for paragraph in doc.paragraphs[:50] if paragraph.text.strip()])
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs[:40] if paragraph.text.strip()])  # Reduced to 40
         
         if not text.strip():
             return "Error: Document appears to be empty"
         
-        if len(text) > 3000:
-            text = text[:3000] + "\n[Text truncated for optimal processing...]"
+        if len(text) > 2000:  # Reduced from 3000
+            text = text[:2000] + "\n[Text truncated for optimal processing...]"
             
         return text
     except Exception as e:
@@ -433,8 +482,8 @@ def extract_text_from_txt(file_path):
                 if not text.strip():
                     return "Error: Text file appears to be empty"
                 
-                if len(text) > 3000:
-                    text = text[:3000] + "\n[Text truncated for optimal processing...]"
+                if len(text) > 2000:  # Reduced from 3000
+                    text = text[:2000] + "\n[Text truncated for optimal processing...]"
                     
                 return text
             except UnicodeDecodeError:
@@ -447,46 +496,41 @@ def extract_text_from_txt(file_path):
         return f"Error reading TXT: {str(e)}"
 
 def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None, api_key=None, key_index=None):
-    """Use Groq API to analyze resume against job description"""
+    """Use Groq API to analyze resume against job description with fallback"""
     
     if not api_key:
-        print("❌ No API key provided for analysis.")
-        return fallback_response("API Configuration Error", filename)
+        print(f"❌ No API key provided for key {key_index}.")
+        return generate_fallback_analysis(filename, "No API key available")
     
-    if not warmup_complete:
-        print(f"⚠️ Groq API not warmed up yet, analysis may be slower")
+    # Optimize text length to reduce API load
+    resume_text = resume_text[:1800]  # Reduced from 2500
+    job_description = job_description[:800]  # Reduced from 1000
     
     # Check cache for consistent scoring
     resume_hash = calculate_resume_hash(resume_text, job_description)
     cached_score = get_cached_score(resume_hash)
     
-    # Optimize text length
-    resume_text = resume_text[:2500]
-    job_description = job_description[:1000]
-    
-    # Optimized prompt for faster processing
-    prompt = f"""Analyze this resume against the job description:
+    # Optimized prompt for faster processing and lower token usage
+    prompt = f"""Analyze resume against job description:
 
-RESUME:
+RESUME (truncated):
 {resume_text}
 
-JOB DESCRIPTION:
+JOB DESCRIPTION (truncated):
 {job_description}
 
-Provide analysis in this JSON format:
+Provide analysis in this JSON format only:
 {{
-    "candidate_name": "Extract name from resume or use filename",
-    "skills_matched": ["skill 1", "skill 2", "skill 3"],
-    "skills_missing": ["skill 1", "skill 2"],
-    "experience_summary": "Brief summary of relevant experience",
-    "education_summary": "Brief education summary",
+    "candidate_name": "Extracted name or filename",
+    "skills_matched": ["skill1", "skill2"],
+    "skills_missing": ["skill1", "skill2"],
+    "experience_summary": "One sentence summary",
+    "education_summary": "One sentence summary",
     "overall_score": 75,
     "recommendation": "Recommended/Consider/Needs Improvement",
-    "key_strengths": ["strength 1", "strength 2"],
-    "areas_for_improvement": ["area 1", "area 2"]
-}}
-
-Keep responses concise and return ONLY the JSON."""
+    "key_strengths": ["strength1", "strength2"],
+    "areas_for_improvement": ["area1", "area2"]
+}}"""
 
     try:
         model_to_use = GROQ_MODEL or DEFAULT_MODEL
@@ -495,16 +539,19 @@ Keep responses concise and return ONLY the JSON."""
         
         response = call_groq_api(
             prompt=prompt,
-            max_tokens=500,
+            max_tokens=400,  # Reduced from 500
             temperature=0.1,
-            timeout=45,
-            api_key=api_key
+            timeout=30,  # Reduced from 45
+            api_key=api_key,
+            key_index=key_index
         )
         
         if isinstance(response, dict) and 'error' in response:
             error_type = response.get('error')
-            print(f"❌ Groq API error: {error_type}")
-            return fallback_response(f"Groq API Error: {error_type}", filename)
+            print(f"❌ Groq API error for Key {key_index}: {error_type}")
+            
+            # Return fallback analysis with partial success
+            return generate_fallback_analysis(filename, f"API Error: {error_type}", partial_success=True)
         
         elapsed_time = time.time() - start_time
         print(f"✅ Groq API response in {elapsed_time:.2f} seconds (Key {key_index})")
@@ -524,29 +571,15 @@ Keep responses concise and return ONLY the JSON."""
         
         try:
             analysis = json.loads(json_str)
-            print(f"✅ Successfully parsed JSON response")
+            print(f"✅ Successfully parsed JSON response for Key {key_index}")
         except json.JSONDecodeError as e:
-            print(f"❌ JSON Parse Error: {e}")
-            print(f"Response was: {result_text[:200]}")
+            print(f"❌ JSON Parse Error for Key {key_index}: {e}")
+            print(f"Response was: {result_text[:150]}")
             
-            return fallback_response("JSON Parse Error", filename)
+            return generate_fallback_analysis(filename, "JSON Parse Error", partial_success=True)
         
-        # Ensure required fields exist with defaults
-        required_fields = {
-            'candidate_name': 'Professional Candidate',
-            'skills_matched': ['Analysis completed'],
-            'skills_missing': ['Check requirements'],
-            'experience_summary': 'Candidate demonstrates relevant experience.',
-            'education_summary': 'Candidate has appropriate qualifications.',
-            'overall_score': 70,
-            'recommendation': 'Consider for Interview',
-            'key_strengths': ['Strong skills', 'Good communication'],
-            'areas_for_improvement': ['Could benefit from training']
-        }
-        
-        for field, default_value in required_fields.items():
-            if field not in analysis:
-                analysis[field] = default_value
+        # Validate and fill missing fields
+        analysis = validate_analysis(analysis, filename)
         
         # Ensure score is valid
         try:
@@ -561,66 +594,114 @@ Keep responses concise and return ONLY the JSON."""
             else:
                 analysis['overall_score'] = 70
         
-        # Limit array lengths
-        analysis['skills_matched'] = analysis['skills_matched'][:4]
-        analysis['skills_missing'] = analysis['skills_missing'][:4]
-        analysis['key_strengths'] = analysis['key_strengths'][:2]
-        analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:2]
-        
-        # Add AI provider info
+        # Add metadata
         analysis['ai_provider'] = "groq"
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['ai_model'] = model_to_use
         analysis['response_time'] = f"{elapsed_time:.2f}s"
-        analysis['api_key_used'] = f"key_{key_index}" if key_index else "unknown"
+        analysis['api_key_used'] = f"key_{key_index}"
         
         # Add analysis ID if provided
         if analysis_id:
             analysis['analysis_id'] = analysis_id
         
-        print(f"✅ Analysis completed for: {analysis['candidate_name']} (Score: {analysis['overall_score']}, Key: {key_index})")
+        print(f"✅ Analysis completed: {analysis['candidate_name']} (Score: {analysis['overall_score']}, Key: {key_index})")
         
         return analysis
         
     except Exception as e:
-        print(f"❌ Groq Analysis Error: {str(e)}")
-        traceback.print_exc()
-        return fallback_response(f"Groq API Error: {str(e)[:100]}", filename)
-
-def fallback_response(reason, filename=None):
-    """Return a fallback response when Groq API fails"""
-    candidate_name = "Professional Candidate"
-    if filename:
+        print(f"❌ Groq Analysis Error for Key {key_index}: {str(e)}")
+        return generate_fallback_analysis(filename, f"Analysis Error: {str(e)[:100]}")
+    
+def validate_analysis(analysis, filename):
+    """Validate analysis data and fill missing fields"""
+    required_fields = {
+        'candidate_name': 'Professional Candidate',
+        'skills_matched': ['Text analysis completed'],
+        'skills_missing': ['Compare with job description'],
+        'experience_summary': 'Candidate demonstrates relevant experience.',
+        'education_summary': 'Candidate has appropriate qualifications.',
+        'overall_score': 70,
+        'recommendation': 'Consider for Interview',
+        'key_strengths': ['Strong skills', 'Good communication'],
+        'areas_for_improvement': ['Could benefit from training']
+    }
+    
+    for field, default_value in required_fields.items():
+        if field not in analysis:
+            analysis[field] = default_value
+    
+    # Extract name from filename if candidate_name is default
+    if analysis['candidate_name'] == 'Professional Candidate' and filename:
         base_name = os.path.splitext(filename)[0]
         clean_name = base_name.replace('-', ' ').replace('_', ' ').title()
         if len(clean_name.split()) <= 4:
-            candidate_name = clean_name
+            analysis['candidate_name'] = clean_name
     
-    return {
-        "candidate_name": candidate_name,
-        "skills_matched": ["AI service is initializing", "Please try again in a moment"],
-        "skills_missing": ["Detailed analysis coming soon", "Service warming up"],
-        "experience_summary": f"The Groq AI analysis service is currently warming up.",
-        "education_summary": f"Educational background analysis will be available once the service is ready.",
-        "overall_score": 50,
-        "recommendation": "Service Warming Up - Please Retry",
-        "key_strengths": ["Ultra-fast analysis once model is loaded", "Accurate skill matching"],
-        "areas_for_improvement": ["Please wait for model to load", "Try again in 15 seconds"],
-        "ai_provider": "groq",
-        "ai_status": "Warming up",
-        "ai_model": GROQ_MODEL or DEFAULT_MODEL
-    }
+    # Limit array lengths to reduce response size
+    analysis['skills_matched'] = analysis['skills_matched'][:3]
+    analysis['skills_missing'] = analysis['skills_missing'][:3]
+    analysis['key_strengths'] = analysis['key_strengths'][:2]
+    analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:2]
+    
+    return analysis
+
+def generate_fallback_analysis(filename, reason, partial_success=False):
+    """Generate a better fallback analysis based on filename"""
+    candidate_name = "Professional Candidate"
+    
+    if filename:
+        base_name = os.path.splitext(filename)[0]
+        # Clean up the filename
+        clean_name = base_name.replace('-', ' ').replace('_', ' ').replace('resume', '').replace('cv', '').strip()
+        if clean_name:
+            # Extract potential name parts
+            parts = clean_name.split()
+            if len(parts) >= 2 and len(parts) <= 4:
+                candidate_name = ' '.join(part.title() for part in parts)
+    
+    if partial_success:
+        return {
+            "candidate_name": candidate_name,
+            "skills_matched": ["Partial analysis completed", "Basic skill matching done"],
+            "skills_missing": ["Full AI analysis pending", "Review required"],
+            "experience_summary": f"Basic analysis completed. Full Groq AI analysis was interrupted.",
+            "education_summary": "Educational background requires full AI analysis.",
+            "overall_score": 55,
+            "recommendation": "Needs Full Analysis",
+            "key_strengths": ["File processed successfully", "Ready for detailed analysis"],
+            "areas_for_improvement": ["Complete AI analysis pending", "Try single file analysis"],
+            "ai_provider": "groq",
+            "ai_status": "Partial",
+            "ai_model": GROQ_MODEL or DEFAULT_MODEL,
+            "api_key_used": "fallback"
+        }
+    else:
+        return {
+            "candidate_name": candidate_name,
+            "skills_matched": ["AI service is initializing", "Please try again in a moment"],
+            "skills_missing": ["Detailed analysis coming soon", "Service warming up"],
+            "experience_summary": f"The Groq AI analysis service is currently warming up.",
+            "education_summary": f"Educational background analysis will be available once the service is ready.",
+            "overall_score": 50,
+            "recommendation": "Service Warming Up - Please Retry",
+            "key_strengths": ["Ultra-fast analysis once model is loaded", "Accurate skill matching"],
+            "areas_for_improvement": ["Please wait for model to load", "Try again in 15 seconds"],
+            "ai_provider": "groq",
+            "ai_status": "Warming up",
+            "ai_model": GROQ_MODEL or DEFAULT_MODEL,
+            "api_key_used": "fallback"
+        }
 
 def process_single_resume(args):
-    """Process a single resume with thread-safe operations"""
+    """Process a single resume with intelligent error handling"""
     resume_file, job_description, index, total, batch_id = args
     
     try:
         print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
         
-        # Get API key for this resume index
-        api_key = get_key_for_index(index)
-        key_index = ACTIVE_API_KEYS.index(api_key) + 1 if api_key in ACTIVE_API_KEYS else 0
+        # Get API key for this resume
+        api_key, key_index = get_key_for_resume(index, total)
         
         if not api_key:
             return {
@@ -629,6 +710,12 @@ def process_single_resume(args):
                 'status': 'failed',
                 'index': index
             }
+        
+        # Add delay based on index to avoid overwhelming API
+        if index > 0:
+            delay = 0.5 + (index % 3) * 0.3  # Stagger delays
+            print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
+            time.sleep(delay)
         
         # Save file temporarily
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
@@ -667,14 +754,7 @@ def process_single_resume(args):
         analysis_id = f"{batch_id}_resume_{index}"
         analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key, key_index)
         
-        if 'error' in analysis:
-            return {
-                'filename': resume_file.filename,
-                'error': analysis.get('error', 'Unknown error'),
-                'status': 'failed',
-                'index': index
-            }
-        
+        # Add file info
         analysis['filename'] = resume_file.filename
         analysis['original_filename'] = resume_file.filename
         
@@ -684,9 +764,10 @@ def process_single_resume(args):
         resume_file.seek(0)
         analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
         
-        # Add analysis ID
+        # Add metadata
         analysis['analysis_id'] = analysis_id
         analysis['key_index'] = key_index
+        analysis['processing_order'] = index + 1
         
         # Create individual Excel report
         try:
@@ -764,7 +845,8 @@ def home():
             <p><strong>Model:</strong> ''' + model_to_use + '''</p>
             <p><strong>API Keys:</strong> ''' + str(len(ACTIVE_API_KEYS)) + ''' active</p>
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
-            <p><strong>Key Distribution:</strong> Round-robin across ''' + str(len(ACTIVE_API_KEYS)) + ''' keys</p>
+            <p><strong>Key Limit:</strong> ''' + str(KEY_LIMIT) + ''' resumes per key</p>
+            <p><strong>Processing:</strong> Staggered sequential with delays</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
             
             <h2>📡 Endpoints</h2>
@@ -860,8 +942,7 @@ def analyze_resume():
         ai_start = time.time()
         
         # Get API key
-        api_key = get_key_for_index(0)
-        key_index = ACTIVE_API_KEYS.index(api_key) + 1 if api_key in ACTIVE_API_KEYS else 0
+        api_key, key_index = get_key_for_resume(0, 1)
         
         analysis_id = f"single_{timestamp}"
         analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key, key_index)
@@ -905,7 +986,7 @@ def analyze_resume():
 
 @app.route('/analyze-batch', methods=['POST'])
 def analyze_resume_batch():
-    """Analyze multiple resumes against a single job description"""
+    """Analyze multiple resumes against a single job description with staggered processing"""
     update_activity()
     
     try:
@@ -944,56 +1025,52 @@ def analyze_resume_batch():
         # Prepare batch analysis
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         
-        # Prepare arguments for parallel processing
-        args_list = []
-        for index, resume_file in enumerate(resume_files):
-            if resume_file.filename == '':
-                continue
-            args_list.append((resume_file, job_description, index, len(resume_files), batch_id))
-        
-        # Process resumes in parallel with ThreadPoolExecutor
+        # Process resumes sequentially with delays to avoid rate limits
         all_analyses = []
         errors = []
         
-        print(f"🔄 Processing {len(args_list)} resumes with {len(ACTIVE_API_KEYS)} API keys...")
-        print(f"📊 Key distribution: Round-robin across {len(ACTIVE_API_KEYS)} keys")
+        print(f"🔄 Processing {len(resume_files)} resumes sequentially with delays...")
         
-        # Use ThreadPoolExecutor for parallel processing
-        max_workers = min(len(args_list), len(ACTIVE_API_KEYS) * MAX_CONCURRENT_PER_KEY)
-        max_workers = max(1, max_workers)  # At least 1 worker
-        
-        print(f"⚡ Using {max_workers} parallel workers")
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_args = {executor.submit(process_single_resume, args): args for args in args_list}
+        for index, resume_file in enumerate(resume_files):
+            if resume_file.filename == '':
+                errors.append({
+                    'filename': 'Empty file',
+                    'error': 'File has no name',
+                    'index': index
+                })
+                continue
             
-            for future in concurrent.futures.as_completed(future_to_args):
-                args = future_to_args[future]
-                try:
-                    result = future.result(timeout=120)  # 2 minute timeout per resume
-                    
-                    if result['status'] == 'success':
-                        all_analyses.append(result['analysis'])
-                        # Add delay between successful analyses to avoid rate limits
-                        time.sleep(0.5)  # 500ms delay
-                    else:
-                        errors.append({
-                            'filename': result.get('filename', 'Unknown'),
-                            'error': result.get('error', 'Unknown error'),
-                            'index': result.get('index')
-                        })
-                except concurrent.futures.TimeoutError:
-                    errors.append({
-                        'filename': args[0].filename if args else 'Unknown',
-                        'error': 'Processing timeout (120 seconds)',
-                        'index': args[2] if len(args) > 2 else None
-                    })
-                except Exception as e:
-                    errors.append({
-                        'filename': args[0].filename if args else 'Unknown',
-                        'error': f'Processing error: {str(e)[:100]}',
-                        'index': args[2] if len(args) > 2 else None
-                    })
+            # Get API key for this resume
+            api_key, key_index = get_key_for_resume(index, len(resume_files))
+            
+            if not api_key:
+                errors.append({
+                    'filename': resume_file.filename,
+                    'error': 'No available API key',
+                    'index': index
+                })
+                continue
+            
+            print(f"🔑 Processing resume {index + 1}/{len(resume_files)} with Key {key_index}")
+            
+            # Process the resume
+            args = (resume_file, job_description, index, len(resume_files), batch_id)
+            result = process_single_resume(args)
+            
+            if result['status'] == 'success':
+                all_analyses.append(result['analysis'])
+            else:
+                errors.append({
+                    'filename': result.get('filename', 'Unknown'),
+                    'error': result.get('error', 'Unknown error'),
+                    'index': result.get('index')
+                })
+            
+            # Add delay between processing to avoid rate limits
+            if index < len(resume_files) - 1:
+                delay = 1.0 + random.uniform(0, 0.5)  # Increased base delay
+                print(f"⏳ Adding {delay:.1f}s delay before next resume...")
+                time.sleep(delay)
         
         print(f"\n📊 Batch processing complete. Successful: {len(all_analyses)}, Failed: {len(errors)}")
         
@@ -1018,18 +1095,29 @@ def analyze_resume_batch():
         # Calculate key distribution
         key_distribution = {}
         for analysis in all_analyses:
-            key_used = analysis.get('api_key_used', 'unknown')
+            key_used = analysis.get('api_key_used', 'fallback')
             if key_used not in key_distribution:
                 key_distribution[key_used] = []
             key_distribution[key_used].append(analysis.get('candidate_name', 'Unknown'))
         
         # Prepare key distribution description
         key_distribution_desc = []
+        successful_by_key = {}
+        for analysis in all_analyses:
+            key_used = analysis.get('api_key_used', 'unknown')
+            if key_used != 'fallback':
+                successful_by_key[key_used] = successful_by_key.get(key_used, 0) + 1
+        
         for key_idx in range(1, len(ACTIVE_API_KEYS) + 1):
             key_name = f"key_{key_idx}"
-            if key_name in key_distribution:
-                count = len(key_distribution[key_name])
+            count = successful_by_key.get(key_name, 0)
+            if count > 0:
                 key_distribution_desc.append(f"Key {key_idx}: {count} resume(s)")
+        
+        # Check for fallback analyses
+        fallback_count = sum(1 for a in all_analyses if a.get('api_key_used') == 'fallback')
+        if fallback_count > 0:
+            key_distribution_desc.append(f"Fallback: {fallback_count} resume(s)")
         
         # Prepare response
         batch_summary = {
@@ -1048,11 +1136,13 @@ def analyze_resume_batch():
             'job_description_preview': job_description[:200] + ("..." if len(job_description) > 200 else ""),
             'batch_size': len(resume_files),
             'api_keys_used': len(ACTIVE_API_KEYS),
-            'key_distribution': ", ".join(key_distribution_desc),
+            'key_distribution': ", ".join(key_distribution_desc) if key_distribution_desc else "All fallback",
             'key_limit_per_key': KEY_LIMIT,
             'max_batch_size': MAX_BATCH_SIZE,
-            'processing_method': 'parallel_multi_key',
-            'key_details': key_distribution
+            'processing_method': 'staggered_sequential',
+            'key_details': key_distribution,
+            'fallback_analyses': fallback_count,
+            'success_rate': f"{(len(all_analyses) / len(resume_files)) * 100:.1f}%" if resume_files else "0%"
         }
         
         print(f"✅ Batch analysis completed in {time.time() - start_time:.2f}s")
@@ -1097,7 +1187,8 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
             ("Overall Score", f"{analysis_data.get('overall_score', 0)}/100"),
             ("Recommendation", analysis_data.get('recommendation', 'N/A')),
             ("AI Model", analysis_data.get('ai_model', 'Groq AI')),
-            ("API Key Used", analysis_data.get('api_key_used', 'N/A')),
+            ("API Key Used", analysis_data.get('api_key_used', 'N/A').replace('key_', 'Key ')),
+            ("AI Status", analysis_data.get('ai_status', 'N/A')),
         ]
         
         for label, value in info_fields:
@@ -1205,7 +1296,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         header_font = Font(bold=True, color="FFFFFF", size=11)
         
         # Title
-        ws_summary.merge_cells('A1:G1')
+        ws_summary.merge_cells('A1:H1')
         title_cell = ws_summary['A1']
         title_cell.value = "Batch Resume Analysis Report"
         title_cell.font = Font(bold=True, size=16, color="FFFFFF")
@@ -1219,12 +1310,15 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         ws_summary['B4'] = len(analyses)
         ws_summary['A5'] = "AI Model"
         ws_summary['B5'] = GROQ_MODEL or DEFAULT_MODEL
-        ws_summary['A6'] = "API Keys Used"
-        ws_summary['B6'] = len(ACTIVE_API_KEYS)
+        ws_summary['A6'] = "Processing Method"
+        ws_summary['B6'] = "Staggered Sequential"
+        ws_summary['A7'] = "Success Rate"
+        success_rate = f"{(len(analyses) / len(analyses)) * 100:.1f}%" if analyses else "100%"
+        ws_summary['B7'] = success_rate
         
         # Candidates Ranking Table
-        row = 8
-        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "API Key", "Key Strengths", "Skills Missing"]
+        row = 9
+        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "API Key", "AI Status", "Skills Matched", "Skills Missing"]
         for col, header in enumerate(headers, start=1):
             cell = ws_summary.cell(row=row, column=col)
             cell.value = header
@@ -1239,15 +1333,18 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
             ws_summary.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
             
             api_key = analysis.get('api_key_used', 'N/A')
-            ws_summary.cell(row=row, column=5, value=f"Key {api_key.replace('key_', '')}" if api_key != 'N/A' else 'N/A')
+            ws_summary.cell(row=row, column=5, value=f"Key {api_key.replace('key_', '')}" if api_key != 'N/A' and api_key != 'fallback' else 'Fallback')
             
-            # Key strengths (first 2)
-            strengths = analysis.get('key_strengths', [])
-            ws_summary.cell(row=row, column=6, value=", ".join(strengths[:2]) if strengths else "N/A")
+            ai_status = analysis.get('ai_status', 'N/A')
+            ws_summary.cell(row=row, column=6, value=ai_status)
+            
+            # Skills matched (first 2)
+            strengths = analysis.get('skills_matched', [])
+            ws_summary.cell(row=row, column=7, value=", ".join(strengths[:2]) if strengths else "N/A")
             
             # Missing skills (first 2)
             missing = analysis.get('skills_missing', [])
-            ws_summary.cell(row=row, column=7, value=", ".join(missing[:2]) if missing else "All skills matched")
+            ws_summary.cell(row=row, column=8, value=", ".join(missing[:2]) if missing else "All matched")
             
             row += 1
         
@@ -1261,7 +1358,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
                         max_length = len(str(cell.value))
                 except:
                     pass
-            adjusted_width = min(max_length + 2, 50)
+            adjusted_width = min(max_length + 2, 40)
             ws_summary.column_dimensions[column_letter].width = adjusted_width
         
         # Save the file
@@ -1385,8 +1482,22 @@ def keys_status():
     
     try:
         keys_info = []
+        current_time = datetime.now()
+        
         for i, key in enumerate(ACTIVE_API_KEYS, 1):
             key_info = KEY_USAGE.get(key, {})
+            
+            # Determine key status
+            if key_info.get('cooling_until') and current_time < key_info['cooling_until']:
+                status = 'cooling'
+                time_left = (key_info['cooling_until'] - current_time).seconds
+            elif key_info.get('errors', 0) >= 2:
+                status = 'error'
+                time_left = 0
+            else:
+                status = 'active'
+                time_left = 0
+            
             keys_info.append({
                 'key_number': i,
                 'usage': key_info.get('count', 0),
@@ -1395,24 +1506,18 @@ def keys_status():
                 'errors': key_info.get('errors', 0),
                 'requests_today': key_info.get('requests_today', 0),
                 'concurrent': key_info.get('concurrent', 0),
-                'status': 'active' if key_info.get('errors', 0) < 2 else 'error'
+                'status': status,
+                'cooling_seconds_left': time_left
             })
-        
-        # Calculate distribution
-        distribution = {}
-        for i in range(1, len(ACTIVE_API_KEYS) + 1):
-            start_idx = (i - 1) * KEY_LIMIT + 1
-            end_idx = i * KEY_LIMIT
-            distribution[f"Key {i}"] = f"Resumes {start_idx}-{end_idx}"
         
         return jsonify({
             'total_keys': len(ACTIVE_API_KEYS),
             'keys': keys_info,
             'key_limit_per_key': KEY_LIMIT,
             'max_batch_size': MAX_BATCH_SIZE,
-            'key_distribution': distribution,
             'max_concurrent_per_key': MAX_CONCURRENT_PER_KEY,
-            'round_robin_enabled': True
+            'staggered_processing': True,
+            'cooling_time_seconds': KEY_COOLDOWN
         })
         
     except Exception as e:
@@ -1441,63 +1546,52 @@ def quick_check():
                 'api_keys': len(ACTIVE_API_KEYS)
             })
         
-        # Test first key
-        start_time = time.time()
+        # Check each key
+        available_keys = 0
+        key_statuses = []
         
-        try:
-            response = call_groq_api(
-                prompt="Say 'ready'",
-                max_tokens=10,
-                timeout=10,
-                api_key=ACTIVE_API_KEYS[0]
-            )
-            
-            response_time = time.time() - start_time
-            
-            if isinstance(response, dict) and 'error' in response:
-                return jsonify({
-                    'available': False,
-                    'response_time': f'{response_time:.2f}s',
-                    'status': 'error',
-                    'error': response.get('error'),
-                    'ai_provider': 'groq',
-                    'model': GROQ_MODEL or DEFAULT_MODEL,
-                    'api_keys': len(ACTIVE_API_KEYS),
-                    'warmup_complete': warmup_complete
-                })
-            elif response and 'ready' in str(response).lower():
-                return jsonify({
-                    'available': True,
-                    'response_time': f'{response_time:.2f}s',
-                    'status': 'ready',
-                    'ai_provider': 'groq',
-                    'model': GROQ_MODEL or DEFAULT_MODEL,
-                    'api_keys': len(ACTIVE_API_KEYS),
-                    'warmup_complete': True,
-                    'max_batch_size': MAX_BATCH_SIZE,
-                    'key_limit': KEY_LIMIT
-                })
-            else:
-                return jsonify({
-                    'available': False,
-                    'response_time': f'{response_time:.2f}s',
-                    'status': 'no_response',
-                    'ai_provider': 'groq',
-                    'model': GROQ_MODEL or DEFAULT_MODEL,
-                    'api_keys': len(ACTIVE_API_KEYS),
-                    'warmup_complete': warmup_complete
-                })
+        for idx, api_key in enumerate(ACTIVE_API_KEYS, 1):
+            try:
+                # Check if key is in cooldown
+                key_info = KEY_USAGE.get(api_key, {})
+                if key_info.get('cooling_until') and datetime.now() < key_info['cooling_until']:
+                    key_statuses.append(f"Key {idx}: Cooling")
+                    continue
                 
-        except Exception as e:
-            return jsonify({
-                'available': False,
-                'reason': str(e)[:100],
-                'status': 'error',
-                'ai_provider': 'groq',
-                'model': GROQ_MODEL or DEFAULT_MODEL,
-                'api_keys': len(ACTIVE_API_KEYS),
-                'warmup_complete': warmup_complete
-            })
+                start_time = time.time()
+                
+                response = call_groq_api(
+                    prompt="Say 'ready'",
+                    max_tokens=10,
+                    timeout=15,
+                    api_key=api_key,
+                    key_index=idx
+                )
+                
+                response_time = time.time() - start_time
+                
+                if isinstance(response, dict) and 'error' in response:
+                    key_statuses.append(f"Key {idx}: Error")
+                elif response and 'ready' in str(response).lower():
+                    key_statuses.append(f"Key {idx}: Ready ({response_time:.2f}s)")
+                    available_keys += 1
+                else:
+                    key_statuses.append(f"Key {idx}: No response")
+                    
+            except Exception as e:
+                key_statuses.append(f"Key {idx}: Exception")
+        
+        return jsonify({
+            'available': available_keys > 0,
+            'available_keys': available_keys,
+            'total_keys': len(ACTIVE_API_KEYS),
+            'key_statuses': key_statuses,
+            'ai_provider': 'groq',
+            'model': GROQ_MODEL or DEFAULT_MODEL,
+            'warmup_complete': warmup_complete,
+            'max_batch_size': MAX_BATCH_SIZE,
+            'processing_method': 'staggered_sequential'
+        })
             
     except Exception as e:
         error_msg = str(e)
@@ -1529,7 +1623,7 @@ def ping():
         'keep_alive_active': True,
         'max_batch_size': MAX_BATCH_SIZE,
         'key_limit': KEY_LIMIT,
-        'processing_method': 'parallel_multi_key'
+        'processing_method': 'staggered_sequential'
     })
 
 @app.route('/health', methods=['GET'])
@@ -1542,12 +1636,19 @@ def health_check():
     
     model_to_use = GROQ_MODEL or DEFAULT_MODEL
     
-    # Calculate key distribution
-    key_distribution = {}
-    for i in range(len(ACTIVE_API_KEYS)):
-        start_resume = i * KEY_LIMIT + 1
-        end_resume = (i + 1) * KEY_LIMIT
-        key_distribution[f"Key {i + 1}"] = f"Resumes {start_resume}-{end_resume}"
+    # Check key status
+    active_keys = 0
+    cooling_keys = 0
+    error_keys = 0
+    
+    for key in ACTIVE_API_KEYS:
+        key_info = KEY_USAGE.get(key, {})
+        if key_info.get('cooling_until') and datetime.now() < key_info['cooling_until']:
+            cooling_keys += 1
+        elif key_info.get('errors', 0) >= 2:
+            error_keys += 1
+        else:
+            active_keys += 1
     
     return jsonify({
         'status': 'Service is running', 
@@ -1555,22 +1656,25 @@ def health_check():
         'ai_provider': 'groq',
         'ai_provider_configured': bool(ACTIVE_API_KEYS),
         'api_keys_count': len(ACTIVE_API_KEYS),
+        'active_keys': active_keys,
+        'cooling_keys': cooling_keys,
+        'error_keys': error_keys,
         'model': model_to_use,
         'ai_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'reports_folder_exists': os.path.exists(REPORTS_FOLDER),
         'inactive_minutes': inactive_minutes,
-        'version': '13.0.0',
-        'optimizations': ['parallel_processing', 'round_robin_keys', 'intelligent_retry', 'rate_limit_protection'],
+        'version': '14.0.0',
+        'optimizations': ['staggered_processing', 'intelligent_key_selection', 'reduced_token_usage', 'better_fallback'],
         'configuration': {
             'max_batch_size': MAX_BATCH_SIZE,
             'key_limit': KEY_LIMIT,
             'max_concurrent_per_key': MAX_CONCURRENT_PER_KEY,
             'max_retries': MAX_RETRIES,
-            'max_individual_reports': MAX_INDIVIDUAL_REPORTS
+            'max_individual_reports': MAX_INDIVIDUAL_REPORTS,
+            'cooling_time_seconds': KEY_COOLDOWN
         },
-        'key_distribution': key_distribution,
-        'processing_method': 'parallel_multi_key_round_robin'
+        'processing_method': 'staggered_sequential_with_delays'
     })
 
 def cleanup_on_exit():
@@ -1604,11 +1708,13 @@ if __name__ == '__main__':
     print(f"🔑 Active API Keys: {len(ACTIVE_API_KEYS)}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
-    print(f"✅ Parallel Processing: Enabled")
-    print(f"✅ Round-robin Key Distribution: Enabled")
+    print(f"✅ Staggered Sequential Processing: Enabled")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Key Limit: {KEY_LIMIT} resumes per key")
     print(f"✅ Max Concurrent per Key: {MAX_CONCURRENT_PER_KEY}")
+    print(f"✅ Cooling Time: {KEY_COOLDOWN}s")
+    print(f"✅ Optimized Token Usage: Enabled")
+    print(f"✅ Better Fallback Analysis: Enabled")
     print("="*50 + "\n")
     
     if not ACTIVE_API_KEYS:
@@ -1630,7 +1736,7 @@ if __name__ == '__main__':
         # Start periodic key reset
         def periodic_key_reset():
             while service_running:
-                time.sleep(300)  # Every 5 minutes
+                time.sleep(180)  # Every 3 minutes
                 reset_key_usage()
                 print("🔄 Periodic key usage reset")
         
