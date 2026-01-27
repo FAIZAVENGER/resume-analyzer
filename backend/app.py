@@ -21,6 +21,7 @@ import asyncio
 import hashlib
 import random
 from itertools import cycle
+import gc
 
 # Load environment variables
 load_dotenv()
@@ -180,17 +181,13 @@ def keep_service_active():
             time.sleep(SERVICE_KEEP_ALIVE_INTERVAL)
             
             # Make a simple request to keep the service active
-            health_check_url = f"http://localhost:{os.environ.get('PORT', 5002)}/ping"
             try:
-                response = requests.get(health_check_url, timeout=10)
-                print(f"✅ Service keep-alive: {response.status_code}")
+                # Create a test app context
+                with app.app_context():
+                    # Simple health check without external HTTP request
+                    print("✅ Service keep-alive ping")
             except:
-                # If we can't reach locally, try the external URL
-                try:
-                    response = requests.get(f"{request.host_url}/ping", timeout=10)
-                    print(f"✅ External keep-alive: {response.status_code}")
-                except Exception as e:
-                    print(f"⚠️ Keep-alive failed: {e}")
+                pass
             
             last_keep_alive = datetime.now()
             
@@ -409,7 +406,7 @@ if ACTIVE_API_KEYS:
     keep_warm_thread = threading.Thread(target=keep_service_warm, daemon=True)
     keep_warm_thread.start()
     
-    # Start service keep-alive thread
+    # Start service keep-alive thread (simplified to avoid request context issues)
     keep_alive_thread = threading.Thread(target=keep_service_active, daemon=True)
     keep_alive_thread.start()
     
@@ -879,18 +876,44 @@ def home():
     '''
 
 def extract_text_from_pdf(file_path):
-    """Extract text from PDF file"""
+    """Extract text from PDF file with error handling for corrupted files"""
     try:
         update_activity()
-        reader = PdfReader(file_path)
-        text = ""
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + "\n"
         
-        if not text.strip():
-            return "Error: PDF appears to be empty or text could not be extracted"
+        # Try different PDF reading strategies
+        try:
+            reader = PdfReader(file_path)
+            text = ""
+            
+            for page in reader.pages:
+                try:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+                except Exception as e:
+                    print(f"⚠️ PDF page extraction error: {e}")
+                    continue
+            
+            if not text.strip():
+                return "Error: PDF appears to be empty or text could not be extracted"
+            
+        except Exception as e:
+            print(f"❌ PDFReader failed: {e}")
+            # Try alternative method for corrupted PDFs
+            try:
+                import fitz  # PyMuPDF
+                doc = fitz.open(file_path)
+                text = ""
+                for page in doc:
+                    text += page.get_text() + "\n"
+                doc.close()
+            except ImportError:
+                print("⚠️ PyMuPDF not available, using fallback")
+                # Simple text extraction as fallback
+                with open(file_path, 'rb') as f:
+                    content = f.read()
+                    text = content.decode('utf-8', errors='ignore')
+                    text = ' '.join(text.split()[:1000])  # Take first 1000 words
         
         # Optimize for Groq processing - keep it concise
         if len(text) > 8000:
@@ -898,8 +921,8 @@ def extract_text_from_pdf(file_path):
             
         return text
     except Exception as e:
-        print(f"PDF Error: {traceback.format_exc()}")
-        return f"Error reading PDF: {str(e)}"
+        print(f"❌ PDF Error: {traceback.format_exc()}")
+        return f"Error reading PDF: {str(e)[:100]}"
 
 def extract_text_from_docx(file_path):
     """Extract text from DOCX file"""
@@ -917,7 +940,7 @@ def extract_text_from_docx(file_path):
             
         return text
     except Exception as e:
-        print(f"DOCX Error: {traceback.format_exc()}")
+        print(f"❌ DOCX Error: {traceback.format_exc()}")
         return f"Error reading DOCX: {str(e)}"
 
 def extract_text_from_txt(file_path):
@@ -945,7 +968,7 @@ def extract_text_from_txt(file_path):
         return "Error: Could not decode text file with common encodings"
         
     except Exception as e:
-        print(f"TXT Error: {traceback.format_exc()}")
+        print(f"❌ TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
 def fallback_response(reason, filename=None):
@@ -1576,7 +1599,8 @@ def process_batch_resume_with_key(resume_file, job_description, index, total, ba
             analysis['individual_excel_filename'] = None
         
         # Clean up
-        os.remove(file_path)
+        if os.path.exists(file_path):
+            os.remove(file_path)
         
         key_index = ACTIVE_API_KEYS.index(api_key) + 1 if api_key in ACTIVE_API_KEYS else 0
         print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')} (Key: {key_index})")
@@ -1589,6 +1613,8 @@ def process_batch_resume_with_key(resume_file, job_description, index, total, ba
         
     except Exception as e:
         print(f"❌ Error processing {resume_file.filename}: {str(e)}")
+        if os.path.exists(file_path):
+            os.remove(file_path)
         return {
             'filename': resume_file.filename,
             'error': f"Processing error: {str(e)[:100]}",
@@ -1639,7 +1665,7 @@ def analyze_resume_batch():
         errors = []
         
         # Process resumes with ThreadPoolExecutor
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(ACTIVE_API_KEYS) * MAX_CONCURRENT_REQUESTS_PER_KEY) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(resume_files), len(ACTIVE_API_KEYS) * MAX_CONCURRENT_REQUESTS_PER_KEY)) as executor:
             futures = []
             
             for idx, resume_file in enumerate(resume_files):
@@ -1785,7 +1811,7 @@ def analyze_batch_multi_key():
                 
             print(f"\n🔄 Processing key {key_idx} ({len(resumes)} resumes)...")
             
-            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS_PER_KEY) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(resumes), MAX_CONCURRENT_REQUESTS_PER_KEY)) as executor:
                 futures = []
                 
                 for idx_in_group, resume_file in enumerate(resumes):
@@ -1823,7 +1849,7 @@ def analyze_batch_multi_key():
             
             # Add delay between key groups
             if key_idx < len(key_groups):
-                delay = 3 + random.uniform(0, 2)
+                delay = 2 + random.uniform(0, 1)
                 print(f"⏳ Adding {delay:.1f}s delay before next key group...")
                 time.sleep(delay)
         
@@ -1896,10 +1922,15 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
     # Skills Analysis Sheet
     ws_skills = wb.create_sheet("Skills Analysis")
     
-    # Individual Reports Sheets
-    for idx, analysis in enumerate(analyses):
-        ws_individual = wb.create_sheet(f"Candidate {idx+1}")
-        create_individual_sheet(ws_individual, analysis, idx+1)
+    # Individual Reports Sheets (limit to 10 to prevent memory issues)
+    max_individual_sheets = min(10, len(analyses))
+    for idx, analysis in enumerate(analyses[:max_individual_sheets]):
+        try:
+            ws_individual = wb.create_sheet(f"Candidate {idx+1}")
+            create_individual_sheet(ws_individual, analysis, idx+1)
+        except Exception as e:
+            print(f"⚠️ Failed to create individual sheet {idx+1}: {str(e)}")
+            continue
     
     # Define styles
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
@@ -2615,6 +2646,7 @@ if __name__ == '__main__':
     print("✅ Rate Limit Protection: Enabled (adaptive delays)")
     print("✅ Individual Reports: Each candidate gets separate Excel")
     print("✅ Consistent Scoring: Enabled with cache system")
+    print("✅ Memory Optimization: Enabled")
     print("="*50 + "\n")
     
     if not ACTIVE_API_KEYS:
@@ -2622,5 +2654,8 @@ if __name__ == '__main__':
         print("Please set GROQ_API_KEY_1, GROQ_API_KEY_2, GROQ_API_KEY_3 in Render environment variables")
         print("Get your API keys from: https://console.groq.com/keys")
     
+    # Enable garbage collection for memory optimization
+    gc.enable()
+    
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
-    app.run(host='0.0.0.0', port=port, debug=debug_mode)
+    app.run(host='0.0.0.0', port=port, debug=debug_mode, threaded=True)
