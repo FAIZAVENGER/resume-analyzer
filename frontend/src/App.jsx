@@ -74,7 +74,7 @@ function App() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [aiStatus, setAiStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState('checking');
-  const [groqWarmup, setGroqWarmup] = useState(false);
+  const [deepseekWarmup, setDeepseekWarmup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -82,13 +82,6 @@ function App() {
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
   const [modelInfo, setModelInfo] = useState(null);
-  const [apiKeysInfo, setApiKeysInfo] = useState({
-    count: 0,
-    keys: [],
-    maxResumes: 15, // Updated to match backend
-    keyLimitPerKey: 5,
-    keyDistribution: {}
-  });
   const [serviceStatus, setServiceStatus] = useState({
     enhancedFallback: true,
     validKeys: 0,
@@ -177,29 +170,12 @@ function App() {
           totalKeys: healthResponse.data.api_key_configured ? 1 : 0
         });
         
-        setGroqWarmup(healthResponse.data.ai_warmup_complete || false);
+        setDeepseekWarmup(healthResponse.data.ai_warmup_complete || false);
         setModelInfo(healthResponse.data.model_info || { name: healthResponse.data.model });
         setBackendStatus('ready');
-        
-        // Get API keys info from health
-        if (healthResponse.data.api_keys_count) {
-          const keyLimit = healthResponse.data.configuration?.key_limit || 5;
-          const maxBatchSize = healthResponse.data.configuration?.max_batch_size || 15;
-          
-          setApiKeysInfo({
-            count: healthResponse.data.api_keys_count,
-            keys: healthResponse.data.api_key_stats || [],
-            maxResumes: maxBatchSize,
-            keyLimitPerKey: keyLimit,
-            keyDistribution: healthResponse.data.key_distribution || {}
-          });
-        }
       }
       
-      // Get detailed keys status
-      await checkKeysStatus();
-      
-      await forceGroqWarmup();
+      await forceDeepseekWarmup();
       
       setupPeriodicChecks();
       
@@ -210,27 +186,6 @@ function App() {
       setTimeout(() => initializeService(), 5000);
     } finally {
       setIsWarmingUp(false);
-    }
-  };
-
-  const checkKeysStatus = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/keys-status`, {
-        timeout: 8000
-      });
-      
-      if (response.data) {
-        setApiKeysInfo(prev => ({
-          ...prev,
-          count: response.data.total_keys,
-          keys: response.data.keys || [],
-          maxResumes: response.data.max_batch_size || 15,
-          keyLimitPerKey: response.data.key_limit_per_key || 5,
-          keyDistribution: response.data.key_distribution || {}
-        }));
-      }
-    } catch (error) {
-      console.log('Failed to get keys status:', error.message);
     }
   };
 
@@ -268,10 +223,10 @@ function App() {
     }
   };
 
-  const forceGroqWarmup = async () => {
+  const forceDeepseekWarmup = async () => {
     try {
       setAiStatus('warming');
-      setLoadingMessage('Warming up Groq API...');
+      setLoadingMessage('Warming up DeepSeek API...');
       
       const response = await axios.get(`${API_BASE_URL}/warmup`, {
         timeout: 15000
@@ -279,26 +234,26 @@ function App() {
       
       if (response.data.warmup_complete) {
         setAiStatus('available');
-        setGroqWarmup(true);
-        console.log('✅ Groq API warmed up successfully');
+        setDeepseekWarmup(true);
+        console.log('✅ DeepSeek API warmed up successfully');
       } else {
         setAiStatus('warming');
-        console.log('⚠️ Groq API still warming up');
+        console.log('⚠️ DeepSeek API still warming up');
         
-        setTimeout(() => checkGroqStatus(), 5000);
+        setTimeout(() => checkDeepseekStatus(), 5000);
       }
       
       setLoadingMessage('');
       
     } catch (error) {
-      console.log('⚠️ Groq API warm-up failed:', error.message);
+      console.log('⚠️ DeepSeek API warm-up failed:', error.message);
       setAiStatus('unavailable');
       
-      setTimeout(() => checkGroqStatus(), 3000);
+      setTimeout(() => checkDeepseekStatus(), 3000);
     }
   };
 
-  const checkGroqStatus = async () => {
+  const checkDeepseekStatus = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/quick-check`, {
         timeout: 10000
@@ -306,26 +261,20 @@ function App() {
       
       if (response.data.available) {
         setAiStatus('available');
-        setGroqWarmup(true);
+        setDeepseekWarmup(true);
         if (response.data.model) {
           setModelInfo(response.data.model_info || { name: response.data.model });
         }
-        if (response.data.api_keys) {
-          setApiKeysInfo(prev => ({
-            ...prev,
-            count: response.data.api_keys
-          }));
-        }
       } else if (response.data.warmup_complete) {
         setAiStatus('available');
-        setGroqWarmup(true);
+        setDeepseekWarmup(true);
       } else {
         setAiStatus('warming');
-        setGroqWarmup(false);
+        setDeepseekWarmup(false);
       }
       
     } catch (error) {
-      console.log('Groq API status check failed:', error.message);
+      console.log('DeepSeek API status check failed:', error.message);
       setAiStatus('unavailable');
     }
   };
@@ -337,7 +286,7 @@ function App() {
       });
       
       setBackendStatus('ready');
-      setGroqWarmup(response.data.ai_warmup_complete || false);
+      setDeepseekWarmup(response.data.ai_warmup_complete || false);
       if (response.data.model_info || response.data.model) {
         setModelInfo(response.data.model_info || { name: response.data.model });
       }
@@ -346,20 +295,6 @@ function App() {
         setAiStatus('available');
       } else {
         setAiStatus('warming');
-      }
-      
-      // Update API keys info
-      if (response.data.api_keys_count) {
-        const keyLimit = response.data.configuration?.key_limit || 5;
-        const maxBatchSize = response.data.configuration?.max_batch_size || 15;
-        
-        setApiKeysInfo({
-          count: response.data.api_keys_count,
-          keys: response.data.api_key_stats || [],
-          maxResumes: maxBatchSize,
-          keyLimitPerKey: keyLimit,
-          keyDistribution: response.data.key_distribution || {}
-        });
       }
       
     } catch (error) {
@@ -381,7 +316,7 @@ function App() {
     
     const statusCheckInterval = setInterval(() => {
       if (aiStatus === 'warming' || aiStatus === 'checking') {
-        checkGroqStatus();
+        checkDeepseekStatus();
       }
     }, 30000);
     
@@ -452,8 +387,8 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      // Allow up to maxResumes files
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, apiKeysInfo.maxResumes || 15));
+      // Allow up to 10 files (DeepSeek batch size)
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10));
       setError('');
     }
   };
@@ -516,10 +451,10 @@ function App() {
         });
       }, 500);
 
-      if (aiStatus === 'available' && groqWarmup) {
-        setLoadingMessage('Groq AI analysis (Ultra-fast)...');
+      if (aiStatus === 'available' && deepseekWarmup) {
+        setLoadingMessage('DeepSeek AI analysis...');
       } else {
-        setLoadingMessage('Enhanced analysis (Warming up Groq)...');
+        setLoadingMessage('Enhanced analysis (Warming up DeepSeek)...');
       }
       setProgress(20);
 
@@ -566,9 +501,9 @@ function App() {
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('Rate limit reached. Groq API has limits. Please try again later.');
+        setError('Rate limit reached. DeepSeek API has limits. Please try again later.');
       } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
-        setError('Groq API rate limit exceeded. Please wait a minute and try again.');
+        setError('DeepSeek API rate limit exceeded. Please wait a minute and try again.');
         setAiStatus('unavailable');
       } else {
         setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
@@ -602,7 +537,7 @@ function App() {
     setAnalysis(null);
     setBatchAnalysis(null);
     setBatchProgress(0);
-    setLoadingMessage(`Starting multi-key parallel analysis of ${resumeFiles.length} resumes...`);
+    setLoadingMessage(`Starting batch analysis of ${resumeFiles.length} resumes...`);
 
     const formData = new FormData();
     formData.append('jobDescription', jobDescription);
@@ -621,7 +556,7 @@ function App() {
         });
       }, 500);
 
-      setLoadingMessage('Uploading files for parallel processing...');
+      setLoadingMessage('Uploading files for batch processing...');
       setBatchProgress(10);
 
       const response = await axios.post(`${API_BASE_URL}/analyze-batch`, formData, {
@@ -633,14 +568,14 @@ function App() {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
             setBatchProgress(10 + percentCompleted * 0.3);
-            setLoadingMessage(`Uploading ${resumeFiles.length} files (parallel processing)...`);
+            setLoadingMessage(`Uploading ${resumeFiles.length} files...`);
           }
         }
       });
 
       clearInterval(progressInterval);
       setBatchProgress(95);
-      setLoadingMessage('Parallel multi-key analysis complete!');
+      setLoadingMessage('Batch analysis complete!');
 
       await new Promise(resolve => setTimeout(resolve, 800));
       
@@ -661,7 +596,7 @@ function App() {
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('Groq API rate limit reached. Please try again later or reduce batch size.');
+        setError('DeepSeek API rate limit reached. Please try again later or reduce batch size.');
       } else {
         setError(err.response?.data?.error || 'An error occurred during batch analysis.');
       }
@@ -743,21 +678,21 @@ function App() {
   const getAiStatusMessage = () => {
     switch(aiStatus) {
       case 'checking': return { 
-        text: 'Checking Groq...', 
+        text: 'Checking DeepSeek...', 
         color: '#ffd166', 
-        icon: <Bolt size={16} />,
+        icon: <Brain size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       case 'warming': return { 
-        text: 'Groq Warming', 
+        text: 'DeepSeek Warming', 
         color: '#ff9800', 
         icon: <Thermometer size={16} />,
         bgColor: 'rgba(255, 152, 0, 0.1)'
       };
       case 'available': return { 
-        text: 'Groq Ready ⚡', 
+        text: 'DeepSeek Ready 🧠', 
         color: '#00ff9d', 
-        icon: <ZapIcon size={16} />,
+        icon: <Brain size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
       };
       case 'unavailable': return { 
@@ -775,22 +710,6 @@ function App() {
     }
   };
 
-  const getKeyStatusColor = (key) => {
-    if (key.status === 'active') return '#00ff9d';
-    if (key.status === 'error') return '#ff6b6b';
-    return '#ffd166';
-  };
-
-  const getKeyDistributionText = () => {
-    if (!apiKeysInfo.keyDistribution || Object.keys(apiKeysInfo.keyDistribution).length === 0) {
-      return `Round-robin across ${apiKeysInfo.count} keys`;
-    }
-    
-    return Object.entries(apiKeysInfo.keyDistribution)
-      .map(([key, range]) => `${key}: ${range}`)
-      .join(' • ');
-  };
-
   const backendStatusInfo = getBackendStatusMessage();
   const aiStatusInfo = getAiStatusMessage();
 
@@ -806,10 +725,10 @@ function App() {
 
   const handleForceWarmup = async () => {
     setIsWarmingUp(true);
-    setLoadingMessage('Forcing Groq API warm-up...');
+    setLoadingMessage('Forcing DeepSeek API warm-up...');
     
     try {
-      await forceGroqWarmup();
+      await forceDeepseekWarmup();
       setLoadingMessage('');
     } catch (error) {
       console.log('Force warm-up failed:', error);
@@ -819,14 +738,14 @@ function App() {
   };
 
   const getModelDisplayName = (modelInfo) => {
-    if (!modelInfo) return 'Groq AI';
+    if (!modelInfo) return 'DeepSeek AI';
     if (typeof modelInfo === 'string') return modelInfo;
-    return modelInfo.name || 'Groq AI';
+    return modelInfo.name || 'DeepSeek AI';
   };
 
   const getModelDescription = (modelInfo) => {
-    if (!modelInfo || typeof modelInfo === 'string') return 'Ultra-fast inference';
-    return modelInfo.description || 'Groq ultra-fast inference';
+    if (!modelInfo || typeof modelInfo === 'string') return '32K context length';
+    return modelInfo.description || 'DeepSeek 32K context';
   };
 
   // Render functions for different views
@@ -850,34 +769,7 @@ function App() {
               <Cpu size={14} /> {getModelDisplayName(modelInfo)}
             </span>
           )}
-          {apiKeysInfo.count > 0 && (
-            <span className="status-badge multi-key">
-              <Key size={14} /> {apiKeysInfo.count} API Keys
-            </span>
-          )}
         </div>
-        
-        {/* Key Distribution Info */}
-        {apiKeysInfo.count > 0 && (
-          <div className="key-distribution-info glass" style={{
-            marginTop: '1rem',
-            padding: '1rem',
-            borderRadius: '12px',
-            background: 'linear-gradient(135deg, rgba(0, 176, 155, 0.1), rgba(150, 201, 61, 0.1))',
-            border: '1px solid rgba(0, 176, 155, 0.3)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              <Key size={16} style={{ color: '#00b09b' }} />
-              <strong>Multi-Key Distribution:</strong>
-            </div>
-            <div style={{ fontSize: '0.9rem', color: '#666' }}>
-              {getKeyDistributionText()}
-            </div>
-            <div style={{ fontSize: '0.8rem', marginTop: '0.5rem', color: '#888' }}>
-              {apiKeysInfo.keyLimitPerKey ? `Each key handles up to ${apiKeysInfo.keyLimitPerKey} resumes` : ''}
-            </div>
-          </div>
-        )}
         
         {/* Batch Mode Toggle */}
         <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
@@ -921,7 +813,7 @@ function App() {
               gap: '0.5rem'
             }}
           >
-            <Users size={16} /> Multiple Resumes (Up to {apiKeysInfo.maxResumes || 15})
+            <Users size={16} /> Multiple Resumes (Up to 10)
           </button>
         </div>
       </div>
@@ -938,7 +830,7 @@ function App() {
               <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
               <p className="card-subtitle">
                 {batchMode 
-                  ? `Upload multiple resumes (Max ${apiKeysInfo.maxResumes || 15}, 15MB each)` 
+                  ? 'Upload multiple resumes (Max 10, 15MB each)' 
                   : 'Supported: PDF, DOC, DOCX, TXT (Max 15MB)'}
               </p>
             </div>
@@ -1033,11 +925,6 @@ function App() {
                               <span className="batch-file-size">
                                 {(file.size / 1024).toFixed(1)}KB
                               </span>
-                              {apiKeysInfo.count > 0 && (
-                                <span className="batch-key-assignment">
-                                  Key: {((index % apiKeysInfo.count) + 1)}
-                                </span>
-                              )}
                             </div>
                             <button
                               onClick={(e) => {
@@ -1058,7 +945,7 @@ function App() {
                       <span className="upload-text">
                         Drag & drop multiple files or click to browse
                       </span>
-                      <span className="upload-hint">Max {apiKeysInfo.maxResumes || 15} files, 15MB each</span>
+                      <span className="upload-hint">Max 10 files, 15MB each</span>
                     </>
                   )}
                 </div>
@@ -1079,9 +966,9 @@ function App() {
           <div className="upload-stats">
             <div className="stat">
               <div className="stat-icon">
-                <ZapIcon size={14} />
+                <Brain size={14} />
               </div>
-              <span>Ultra-fast Groq analysis</span>
+              <span>DeepSeek AI analysis</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
@@ -1093,24 +980,14 @@ function App() {
               <div className="stat-icon">
                 <Activity size={14} />
               </div>
-              <span>Parallel Processing</span>
+              <span>Batch Processing</span>
             </div>
-            {apiKeysInfo.count > 0 && (
-              <div className="stat">
-                <div className="stat-icon">
-                  <Key size={14} />
-                </div>
-                <span>{apiKeysInfo.count} API Keys</span>
+            <div className="stat">
+              <div className="stat-icon">
+                <Users size={14} />
               </div>
-            )}
-            {apiKeysInfo.keyLimitPerKey && (
-              <div className="stat">
-                <div className="stat-icon">
-                  <Users size={14} />
-                </div>
-                <span>{apiKeysInfo.keyLimitPerKey} per key</span>
-              </div>
-            )}
+              <span>Up to 10 resumes</span>
+            </div>
           </div>
         </div>
 
@@ -1169,7 +1046,7 @@ function App() {
           <div className="loading-container">
             <div className="loading-header">
               <Loader className="spinner" />
-              <h3>{batchMode ? 'Parallel Multi-Key Batch Analysis' : 'Analysis in Progress'}</h3>
+              <h3>{batchMode ? 'Batch Analysis' : 'Analysis in Progress'}</h3>
             </div>
             
             <div className="progress-container">
@@ -1180,8 +1057,8 @@ function App() {
               <span className="loading-message">{loadingMessage}</span>
               <span className="loading-subtext">
                 {batchMode 
-                  ? `Processing ${resumeFiles.length} resume(s) with ${getModelDisplayName(modelInfo)} (${apiKeysInfo.count} API Keys)...` 
-                  : `Using ${getModelDisplayName(modelInfo)} (Ultra-fast)...`}
+                  ? `Processing ${resumeFiles.length} resume(s) with ${getModelDisplayName(modelInfo)}...` 
+                  : `Using ${getModelDisplayName(modelInfo)}...`}
               </span>
             </div>
             
@@ -1190,26 +1067,24 @@ function App() {
               <span>•</span>
               <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
               <span>•</span>
-              <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
+              <span>DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : 'Warming...'}</span>
               {modelInfo && (
                 <>
                   <span>•</span>
                   <span>Model: {getModelDisplayName(modelInfo)}</span>
                 </>
               )}
-              {batchMode && apiKeysInfo.count > 0 && (
+              {batchMode && (
                 <>
                   <span>•</span>
-                  <span>API Keys: {apiKeysInfo.count}</span>
-                  <span>•</span>
-                  <span>Parallel: Yes</span>
+                  <span>Batch Size: {resumeFiles.length}</span>
                 </>
               )}
             </div>
             
             <div className="loading-note info">
               <Info size={14} />
-              <span>Parallel multi-key processing enables up to {apiKeysInfo.maxResumes || 15} resumes simultaneously</span>
+              <span>DeepSeek AI offers 32K context length for comprehensive resume analysis</span>
             </div>
           </div>
         </div>
@@ -1236,13 +1111,13 @@ function App() {
         ) : (
           <>
             <div className="button-content">
-              <ZapIcon size={20} />
+              <Brain size={20} />
               <div className="button-text">
                 <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                 <span className="button-subtext">
                   {batchMode 
-                    ? `${resumeFiles.length} resume(s) • ${getModelDisplayName(modelInfo)} • ${apiKeysInfo.count} Keys • Parallel` 
-                    : `${getModelDisplayName(modelInfo)} • Ultra-fast`}
+                    ? `${resumeFiles.length} resume(s) • ${getModelDisplayName(modelInfo)} • Batch` 
+                    : `${getModelDisplayName(modelInfo)} • Single`}
                 </span>
               </div>
             </div>
@@ -1256,12 +1131,12 @@ function App() {
         {batchMode ? (
           <>
             <div className="tip">
-              <Key size={16} />
-              <span>Multi-key parallel processing: Up to {apiKeysInfo.maxResumes || 15} resumes with {apiKeysInfo.count || 3} API keys</span>
+              <Brain size={16} />
+              <span>DeepSeek AI with 32K context length for comprehensive analysis</span>
             </div>
             <div className="tip">
               <Activity size={16} />
-              <span>Round-robin distribution across all available API keys</span>
+              <span>Process up to 10 resumes in a single batch</span>
             </div>
             <div className="tip">
               <TrendingUp size={16} />
@@ -1269,18 +1144,18 @@ function App() {
             </div>
             <div className="tip">
               <Download size={16} />
-              <span>Download comprehensive Excel report with all candidate data and key usage</span>
+              <span>Download comprehensive Excel report with all candidate data</span>
             </div>
           </>
         ) : (
           <>
             <div className="tip">
-              <ZapIcon size={16} />
-              <span>Groq API offers ultra-fast responses (typically &lt;1s)</span>
+              <Brain size={16} />
+              <span>DeepSeek AI offers high-quality resume analysis</span>
             </div>
             <div className="tip">
               <Thermometer size={16} />
-              <span>Groq API automatically warms up when idle</span>
+              <span>DeepSeek API automatically warms up when idle</span>
             </div>
             <div className="tip">
               <Activity size={16} />
@@ -1308,7 +1183,7 @@ function App() {
             <span>New Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>⚡ Resume Analysis Results</h2>
+            <h2>🧠 Resume Analysis Results</h2>
             <p>{analysis.candidate_name}</p>
           </div>
           <div className="navigation-actions">
@@ -1339,14 +1214,8 @@ function App() {
                 </span>
                 <span className="file-info">
                   <Cpu size={14} />
-                  Model: {analysis.ai_model || 'Groq AI'}
+                  Model: {analysis.ai_model || 'DeepSeek AI'}
                 </span>
-                {analysis.api_key_used && (
-                  <span className="key-info">
-                    <Key size={14} />
-                    API Key: {analysis.api_key_used.replace('key_', '')}
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -1378,7 +1247,7 @@ function App() {
               </p>
               <div className="score-meta">
                 <span className="meta-item">
-                  <ZapIcon size={12} />
+                  <Brain size={12} />
                   Response Time: {analysis.response_time || 'N/A'}
                 </span>
                 <span className="meta-item">
@@ -1404,15 +1273,15 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {analysis.ai_model || 'Groq AI'} • Consistent ATS Scoring
+                {analysis.ai_model || 'DeepSeek AI'} • Consistent ATS Scoring
               </p>
             </div>
           </div>
           <div className="recommendation-content">
             <p className="recommendation-text">{analysis.recommendation}</p>
             <div className="confidence-badge">
-              <ZapIcon size={16} />
-              <span>Groq AI Analysis</span>
+              <Brain size={16} />
+              <span>DeepSeek AI Analysis</span>
             </div>
           </div>
         </div>
@@ -1593,22 +1462,16 @@ function App() {
           <div className="ai-details-content">
             <div className="ai-detail-item">
               <span className="detail-label">AI Provider:</span>
-              <span className="detail-value">{analysis.ai_provider || 'Groq'}</span>
+              <span className="detail-value">{analysis.ai_provider || 'DeepSeek'}</span>
             </div>
             <div className="ai-detail-item">
               <span className="detail-label">AI Model:</span>
-              <span className="detail-value">{analysis.ai_model || 'Groq AI'}</span>
+              <span className="detail-value">{analysis.ai_model || 'DeepSeek AI'}</span>
             </div>
             <div className="ai-detail-item">
               <span className="detail-label">Response Time:</span>
               <span className="detail-value">{analysis.response_time || 'N/A'}</span>
             </div>
-            {analysis.api_key_used && (
-              <div className="ai-detail-item">
-                <span className="detail-label">API Key Used:</span>
-                <span className="detail-value">Key {analysis.api_key_used.replace('key_', '')}</span>
-              </div>
-            )}
             <div className="ai-detail-item">
               <span className="detail-label">Analysis ID:</span>
               <span className="detail-value">{analysis.analysis_id || 'N/A'}</span>
@@ -1654,7 +1517,7 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>⚡ Parallel Multi-Key Batch Analysis Results</h2>
+          <h2>🧠 Batch Analysis Results</h2>
           <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
         </div>
         <div className="navigation-actions">
@@ -1665,7 +1528,7 @@ function App() {
         </div>
       </div>
 
-      {/* Multi-Key Stats */}
+      {/* Stats */}
       <div className="multi-key-stats-container glass">
         <div className="stat-card">
           <div className="stat-icon success">
@@ -1709,56 +1572,21 @@ function App() {
           </div>
         </div>
         
-        {batchAnalysis?.api_keys_used && (
-          <div className="stat-card">
-            <div className="stat-icon warning">
-              <Key size={24} />
-            </div>
-            <div className="stat-content">
-              <div className="stat-value">{batchAnalysis.api_keys_used}</div>
-              <div className="stat-label">API Keys</div>
-            </div>
-          </div>
-        )}
-        
-        <div className="stat-card wide">
-          <div className="stat-icon success">
-            <Activity size={24} />
+        <div className="stat-card">
+          <div className="stat-icon warning">
+            <Brain size={24} />
           </div>
           <div className="stat-content">
-            <div className="stat-value">Parallel</div>
-            <div className="stat-label">Processing</div>
+            <div className="stat-value">DeepSeek</div>
+            <div className="stat-label">AI Provider</div>
           </div>
         </div>
       </div>
 
-      {/* Key Distribution Info */}
-      {batchAnalysis?.key_distribution && (
-        <div className="key-distribution-card glass">
-          <div className="key-distribution-header">
-            <Key size={20} />
-            <h3>API Key Distribution</h3>
-          </div>
-          <div className="key-distribution-content">
-            <p>{batchAnalysis.key_distribution}</p>
-            {batchAnalysis?.key_details && (
-              <div className="key-details">
-                <h4>Detailed Distribution:</h4>
-                {Object.entries(batchAnalysis.key_details).map(([key, candidates]) => (
-                  <div key={key} className="key-detail-item">
-                    <strong>{key}:</strong> {Array.isArray(candidates) ? candidates.join(', ') : candidates}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* Candidates Ranking */}
       <div className="section-title">
         <h2>Candidate Rankings</h2>
-        <p>Sorted by ATS Score (Highest to Lowest) • Parallel Multi-Key Processing</p>
+        <p>Sorted by ATS Score (Highest to Lowest) • DeepSeek AI Processing</p>
       </div>
       
       <div className="batch-results-grid">
@@ -1772,12 +1600,6 @@ function App() {
                   <div className="candidate-meta">
                     <span className="file-info">{candidate.filename}</span>
                     <span className="file-size">{candidate.file_size}</span>
-                    {candidate.api_key_used && (
-                      <span className="key-badge-small">Key {candidate.api_key_used.replace('key_', '')}</span>
-                    )}
-                    {candidate.key_index && (
-                      <span className="key-badge-small">Key {candidate.key_index}</span>
-                    )}
                   </div>
                 </div>
               </div>
@@ -1860,8 +1682,8 @@ function App() {
       {/* Action Buttons */}
       <div className="action-section glass">
         <div className="action-content">
-          <h3>Parallel Multi-Key Batch Analysis Complete</h3>
-          <p>Download comprehensive Excel report with all candidate details and API key usage</p>
+          <h3>Batch Analysis Complete</h3>
+          <p>Download comprehensive Excel report with all candidate details</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
@@ -1942,18 +1764,6 @@ function App() {
                   <FileText size={14} />
                   {candidate.filename} • {candidate.file_size}
                 </span>
-                {candidate.api_key_used && (
-                  <span className="key-info">
-                    <Key size={14} />
-                    API Key: {candidate.api_key_used.replace('key_', '')}
-                  </span>
-                )}
-                {candidate.key_index && (
-                  <span className="key-info">
-                    <Key size={14} />
-                    Key Index: {candidate.key_index}
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -1986,14 +1796,8 @@ function App() {
               <div className="score-meta">
                 <span className="meta-item">
                   <Cpu size={12} />
-                  Model: {candidate.ai_model || 'Groq AI'}
+                  Model: {candidate.ai_model || 'DeepSeek AI'}
                 </span>
-                {candidate.api_key_used && (
-                  <span className="meta-item">
-                    <Key size={12} />
-                    Key: {candidate.api_key_used.replace('key_', '')}
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -2009,15 +1813,15 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {candidate.ai_model || 'Groq AI'} • Parallel Multi-Key Processing
+                {candidate.ai_model || 'DeepSeek AI'} • Batch Processing
               </p>
             </div>
           </div>
           <div className="recommendation-content">
             <p className="recommendation-text">{candidate.recommendation}</p>
             <div className="confidence-badge">
-              <ZapIcon size={16} />
-              <span>Parallel Multi-Key Groq AI Analysis</span>
+              <Brain size={16} />
+              <span>DeepSeek AI Analysis</span>
             </div>
           </div>
         </div>
@@ -2067,9 +1871,6 @@ function App() {
               <div className="skills-header-content">
                 <h3>Missing Skills</h3>
                 <p className="skills-subtitle">Suggested to learn</p>
-              </div>
-              <div className="skills-count warning">
-                <span>{candidate.skills_missing?.length || 0}</span>
               </div>
             </div>
             <div className="skills-content">
@@ -2244,15 +2045,15 @@ function App() {
             {/* Logo and Title */}
             <div className="logo">
               <div className="logo-glow">
-                <ZapIcon className="logo-icon" />
+                <Brain className="logo-icon" />
               </div>
               <div className="logo-text">
                 <h1>AI Resume Analyzer</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
-                  <span className="groq-badge">⚡ Groq</span>
+                  <span className="deepseek-badge">🧠 DeepSeek</span>
                   <span className="divider">•</span>
-                  <span className="tagline">Parallel Multi-Key • Ultra-fast • Always Active</span>
+                  <span className="tagline">32K Context • Up to 10 Resumes • Always Active</span>
                 </div>
               </div>
             </div>
@@ -2321,14 +2122,6 @@ function App() {
               </div>
             )}
             
-            {/* API Keys Info */}
-            {apiKeysInfo.count > 0 && (
-              <div className="feature api-keys-info">
-                <Key size={16} />
-                <span>{apiKeysInfo.count} Keys</span>
-              </div>
-            )}
-            
             {/* Navigation Indicator */}
             {currentView !== 'main' && (
               <div className="feature nav-indicator">
@@ -2383,7 +2176,7 @@ function App() {
             <div className="quota-panel-header">
               <div className="quota-title">
                 <Activity size={20} />
-                <h3>Parallel Multi-Key Service Status</h3>
+                <h3>DeepSeek Service Status</h3>
               </div>
               <button 
                 className="close-quota"
@@ -2403,9 +2196,9 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Groq API Status</div>
+                <div className="summary-label">DeepSeek API Status</div>
                 <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
-                  {aiStatus === 'available' ? '⚡ Ready' : 
+                  {aiStatus === 'available' ? '🧠 Ready' : 
                    aiStatus === 'warming' ? '🔥 Warming' : 
                    '⚠️ Enhanced Mode'}
                 </div>
@@ -2417,61 +2210,24 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">API Keys</div>
-                <div className="summary-value success">
-                  🔑 {apiKeysInfo.count} Active Keys
-                </div>
-              </div>
-              <div className="summary-item">
                 <div className="summary-label">Batch Capacity</div>
                 <div className="summary-value success">
-                  📊 Up to {apiKeysInfo.maxResumes || 15} resumes
+                  📊 Up to 10 resumes
                 </div>
               </div>
               <div className="summary-item">
                 <div className="summary-label">Processing Method</div>
                 <div className="summary-value info">
-                  ⚡ Parallel Multi-Key
+                  ⚡ Staggered Sequential
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Key Distribution</div>
+                <div className="summary-label">Context Length</div>
                 <div className="summary-value">
-                  🔄 {getKeyDistributionText()}
+                  🧠 32K tokens
                 </div>
               </div>
             </div>
-            
-            {/* API Keys Status */}
-            {apiKeysInfo.keys.length > 0 && (
-              <div className="api-keys-status">
-                <h4>API Keys Status</h4>
-                <div className="keys-list">
-                  {apiKeysInfo.keys.map((key, index) => (
-                    <div key={index} className="key-status-item">
-                      <div className="key-info">
-                        <div className="key-name">Key {key.key_number}</div>
-                        <div className={`key-status ${key.status}`}>
-                          <div className="key-status-dot" style={{ backgroundColor: getKeyStatusColor(key) }}></div>
-                          <span>{key.status === 'active' ? 'Active' : 'Error'}</span>
-                        </div>
-                      </div>
-                      <div className="key-usage">
-                        <span>Usage: {key.usage}/{key.limit}</span>
-                        <span className={`key-availability ${key.available ? 'available' : 'unavailable'}`}>
-                          {key.available ? 'Available' : 'Limit Reached'}
-                        </span>
-                        {key.concurrent > 0 && (
-                          <span className="key-concurrent">
-                            Concurrent: {key.concurrent}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
             
             <div className="action-buttons-panel">
               <button 
@@ -2480,13 +2236,6 @@ function App() {
               >
                 <RefreshCw size={16} />
                 Refresh Status
-              </button>
-              <button 
-                className="action-button keys"
-                onClick={checkKeysStatus}
-              >
-                <Key size={16} />
-                Check Keys
               </button>
               <button 
                 className="action-button warmup"
@@ -2514,7 +2263,7 @@ function App() {
               </div>
               <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
                 <div className="indicator-dot"></div>
-                <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
+                <span>DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
               </div>
               {modelInfo && (
                 <div className="status-indicator active">
@@ -2522,23 +2271,17 @@ function App() {
                   <span>Model: {getModelDisplayName(modelInfo)}</span>
                 </div>
               )}
-              {apiKeysInfo.count > 0 && (
-                <div className="status-indicator active">
-                  <div className="indicator-dot" style={{ background: '#00b09b' }}></div>
-                  <span>API Keys: {apiKeysInfo.count}</span>
-                </div>
-              )}
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
                 <span>Mode: {currentView === 'single-results' ? 'Single Analysis' : 
-                              currentView === 'batch-results' ? 'Parallel Multi-Key Batch' : 
+                              currentView === 'batch-results' ? 'Batch Analysis' : 
                               currentView === 'candidate-detail' ? 'Candidate Details' : 
                               batchMode ? 'Batch' : 'Single'}</span>
               </div>
-              {batchMode && apiKeysInfo.maxResumes && (
+              {batchMode && (
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
-                  <span>Capacity: Up to {apiKeysInfo.maxResumes} resumes</span>
+                  <span>Capacity: Up to 10 resumes</span>
                 </div>
               )}
             </div>
@@ -2553,14 +2296,14 @@ function App() {
             {aiStatus === 'warming' && (
               <div className="wakeup-message">
                 <Thermometer size={16} />
-                <span>Groq API is warming up. This ensures ultra-fast responses.</span>
+                <span>DeepSeek API is warming up. This ensures high-quality responses.</span>
               </div>
             )}
             
-            {apiKeysInfo.count > 0 && batchMode && (
+            {batchMode && (
               <div className="multi-key-message">
-                <Key size={16} />
-                <span>Parallel multi-key mode: Processing up to {apiKeysInfo.maxResumes || 15} resumes with {apiKeysInfo.count} API keys</span>
+                <Brain size={16} />
+                <span>Batch mode: Processing up to 10 resumes with DeepSeek AI</span>
               </div>
             )}
           </div>
@@ -2575,19 +2318,19 @@ function App() {
         <div className="footer-content">
           <div className="footer-brand">
             <div className="footer-logo">
-              <ZapIcon size={20} />
+              <Brain size={20} />
               <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Parallel multi-key Groq API offers ultra-fast inference • Up to {apiKeysInfo.maxResumes || 15} resumes per batch • Individual reports available
+              DeepSeek AI with 32K context length • Up to 10 resumes per batch • Individual reports available
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
               <h4>Features</h4>
-              <a href="#">Parallel Multi-Key AI</a>
-              <a href="#">Groq API</a>
+              <a href="#">DeepSeek AI</a>
+              <a href="#">32K Context</a>
               <a href="#">Batch Processing</a>
               <a href="#">Excel Reports</a>
             </div>
@@ -2611,30 +2354,24 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Parallel Multi-Key Groq API. Ultra-fast Mode.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + DeepSeek AI. 32K Context Mode.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
               Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
             </span>
             <span className="stat">
-              <ZapIcon size={12} />
-              Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming'}
+              <Brain size={12} />
+              DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : 'Warming'}
             </span>
             <span className="stat">
               <Cpu size={12} />
               Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
             </span>
-            {apiKeysInfo.count > 0 && (
-              <span className="stat">
-                <Key size={12} />
-                Keys: {apiKeysInfo.count}
-              </span>
-            )}
             {batchMode && (
               <span className="stat">
                 <Activity size={12} />
-                Parallel: Yes
+                Batch: {resumeFiles.length} resumes
               </span>
             )}
           </div>
