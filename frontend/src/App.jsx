@@ -19,42 +19,12 @@ import {
   FileX, Calendar, Mail, Phone, MapPin, Link,
   ThumbsUp, AlertOctagon, Lightbulb, GitBranch,
   Code, Database, Server, Terminal, Palette,
-  Music, Camera, Video, Headphones, Mic,
-  MessageSquare, Heart, Share2, Bookmark,
-  Eye, EyeOff, Search, Settings, Bell,
+  MessageSquare, Eye, EyeOff, Search, Settings, Bell,
   HelpCircle, Shield as ShieldIcon, Key,
-  LogOut, UserPlus, UserCheck, UserX,
-  Star as StarIcon, Heart as HeartIcon,
-  Flag, Filter as FilterIcon, SortAsc,
+  LogOut, Star as StarIcon, Flag, SortAsc,
   SortDesc, MoreHorizontal, MoreVertical,
   Maximize2, Minimize2, Plus, Minus,
-  Edit, Trash2, Copy, Scissors, Type,
-  Bold, Italic, Underline, List,
-  Hash, Quote, Divide, Percent,
-  DollarSign, Euro, Pound, Yen,
-  Bitcoin, CreditCard, ShoppingCart,
-  Package, Truck, Box, Warehouse,
-  Building, Home as HomeIcon, Navigation,
-  Compass, Map, Globe as GlobeIcon,
-  Sunrise, Sunset, Moon, CloudSun,
-  Umbrella, Wind, ThermometerSun,
-  Droplets, Waves, Tree, Flower,
-  Leaf, Bug, Fish, Bird, Cat,
-  Dog, Rabbit, Cow, Pig, Egg,
-  Apple, Carrot, Coffee as CoffeeIcon,
-  Wine, Beer, Cake, Cookie, IceCream,
-  Pizza, Hamburger, FrenchFries, Drumstick,
-  EggFried, Soup, Milk, GlassWater,
-  Citrus, Pepper, Salt, Sugar,
-  Wheat, Croissant, Sandwich, Donut,
-  Candy, Citrus as Lemon, Cherry,
-  Strawberry, Grape, Watermelon, Peach,
-  Pear, Banana, Avocado, Broccoli,
-  Corn, Eggplant, Mushroom, Onion,
-  Potato, Tomato, Pumpkin, Radish,
-  HotPepper, Garlic, Basil, Sprout,
-  Bone, Skull, Ghost, Smile, Frown,
-  Meh, Laugh, Angry, surprised
+  Edit, Trash2, Copy, Type
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -85,7 +55,8 @@ function App() {
   const [apiKeysInfo, setApiKeysInfo] = useState({
     count: 0,
     keys: [],
-    maxResumes: 12
+    maxResumes: 15,
+    keyLimit: 5
   });
   const [serviceStatus, setServiceStatus] = useState({
     enhancedFallback: true,
@@ -184,7 +155,8 @@ function App() {
           setApiKeysInfo({
             count: healthResponse.data.api_keys_count,
             keys: healthResponse.data.api_key_stats || [],
-            maxResumes: healthResponse.data.configuration?.max_batch_size || 12
+            maxResumes: healthResponse.data.configuration?.max_batch_size || 15,
+            keyLimit: healthResponse.data.configuration?.key_limit || 5
           });
         }
       }
@@ -216,7 +188,8 @@ function App() {
         setApiKeysInfo({
           count: response.data.total_keys,
           keys: response.data.keys || [],
-          maxResumes: response.data.max_batch_size || 12
+          maxResumes: response.data.max_batch_size || 15,
+          keyLimit: response.data.key_limit_per_key || 5
         });
       }
     } catch (error) {
@@ -343,7 +316,8 @@ function App() {
         setApiKeysInfo({
           count: response.data.api_keys_count,
           keys: response.data.api_key_stats || [],
-          maxResumes: response.data.configuration?.max_batch_size || 12
+          maxResumes: response.data.configuration?.max_batch_size || 15,
+          keyLimit: response.data.configuration?.key_limit || 5
         });
       }
       
@@ -437,8 +411,8 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      // Allow up to 12 files for multi-key support
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 12));
+      // Allow up to 15 files for multi-key support
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, apiKeysInfo.maxResumes || 15));
       setError('');
     }
   };
@@ -602,7 +576,7 @@ function App() {
       progressInterval = setInterval(() => {
         setBatchProgress(prev => {
           if (prev >= 85) return 85;
-          return prev + Math.random() * 3;
+          return prev + Math.random() * 2;
         });
       }, 500);
 
@@ -610,7 +584,7 @@ function App() {
       setBatchProgress(10);
 
       // Use the multi-key endpoint for optimal performance
-      const endpoint = resumeFiles.length > 4 ? '/analyze-batch-multi-key' : '/analyze-batch';
+      const endpoint = resumeFiles.length > 5 ? '/analyze-batch-multi-key' : '/analyze-batch';
       const response = await axios.post(`${API_BASE_URL}${endpoint}`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
@@ -848,7 +822,7 @@ function App() {
               <strong>Multi-Key Distribution:</strong>
             </div>
             <div style={{ fontSize: '0.9rem', color: '#666' }}>
-              Key 1: Resumes 1-4 • Key 2: Resumes 5-8 • Key 3: Resumes 9-12
+              Each key processes up to {apiKeysInfo.keyLimit || 5} resumes • Intelligent error recovery
             </div>
           </div>
         )}
@@ -895,7 +869,7 @@ function App() {
               gap: '0.5rem'
             }}
           >
-            <Users size={16} /> Multiple Resumes (Up to {apiKeysInfo.maxResumes || 12})
+            <Users size={16} /> Multiple Resumes (Up to {apiKeysInfo.maxResumes || 15})
           </button>
         </div>
       </div>
@@ -912,7 +886,7 @@ function App() {
               <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
               <p className="card-subtitle">
                 {batchMode 
-                  ? `Upload multiple resumes (Max ${apiKeysInfo.maxResumes || 12}, 15MB each)` 
+                  ? `Upload multiple resumes (Max ${apiKeysInfo.maxResumes || 15}, 15MB each)` 
                   : 'Supported: PDF, DOC, DOCX, TXT (Max 15MB)'}
               </p>
             </div>
@@ -1027,7 +1001,7 @@ function App() {
                       <span className="upload-text">
                         Drag & drop multiple files or click to browse
                       </span>
-                      <span className="upload-hint">Max {apiKeysInfo.maxResumes || 12} files, 15MB each</span>
+                      <span className="upload-hint">Max {apiKeysInfo.maxResumes || 15} files, 15MB each</span>
                     </>
                   )}
                 </div>
@@ -1168,7 +1142,7 @@ function App() {
             
             <div className="loading-note info">
               <Info size={14} />
-              <span>Multi-key processing enables up to {apiKeysInfo.maxResumes || 12} resumes simultaneously</span>
+              <span>Multi-key processing enables up to {apiKeysInfo.maxResumes || 15} resumes simultaneously ({apiKeysInfo.keyLimit || 5} per key)</span>
             </div>
           </div>
         </div>
@@ -1216,7 +1190,7 @@ function App() {
           <>
             <div className="tip">
               <Key size={16} />
-              <span>Multi-key processing: Up to {apiKeysInfo.maxResumes || 12} resumes with {apiKeysInfo.count || 3} API keys</span>
+              <span>Multi-key processing: Up to {apiKeysInfo.maxResumes || 15} resumes with {apiKeysInfo.count || 3} API keys</span>
             </div>
             <div className="tip">
               <TrendingUp size={16} />
@@ -1482,7 +1456,7 @@ function App() {
           </div>
         </div>
 
-        {/* Insights Section - Clean Version without bullet points */}
+        {/* Insights Section */}
         <div className="section-title">
           <h2>Insights & Recommendations</h2>
           <p>Personalized suggestions to improve your match</p>
@@ -1687,25 +1661,25 @@ function App() {
             </div>
             <div className="stat-content">
               <div className="stat-value">Multi-Key</div>
-              <div className="stat-label">Distribution</div>
+              <div className="stat-label">Processing</div>
             </div>
           </div>
         )}
       </div>
 
       {/* Key Distribution Info */}
-      {batchAnalysis?.key_distribution && (
+      {batchAnalysis?.key_limit_per_key && (
         <div className="key-distribution-card glass">
           <div className="key-distribution-header">
             <Key size={20} />
             <h3>API Key Distribution</h3>
           </div>
           <div className="key-distribution-content">
-            <p>{batchAnalysis.key_distribution}</p>
+            <p>{batchAnalysis?.api_keys_used || 3} API keys used • {batchAnalysis?.key_limit_per_key || 5} resumes per key</p>
             <div className="key-badges">
-              <span className="key-badge">Key 1: Resumes 1-4</span>
-              <span className="key-badge">Key 2: Resumes 5-8</span>
-              <span className="key-badge">Key 3: Resumes 9-12</span>
+              <span className="key-badge">Intelligent Key Selection</span>
+              <span className="key-badge">Auto Error Recovery</span>
+              <span className="key-badge">60s Cooldown on Errors</span>
             </div>
           </div>
         </div>
@@ -2075,7 +2049,7 @@ function App() {
           </div>
         </div>
 
-        {/* Insights Section - Clean Version without bullet points */}
+        {/* Insights Section */}
         <div className="section-title">
           <h2>Insights & Recommendations</h2>
           <p>Personalized suggestions to improve your match</p>
@@ -2372,13 +2346,13 @@ function App() {
               <div className="summary-item">
                 <div className="summary-label">Batch Capacity</div>
                 <div className="summary-value success">
-                  📊 Up to {apiKeysInfo.maxResumes || 12} resumes
+                  📊 Up to {apiKeysInfo.maxResumes || 15} resumes
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Key Distribution</div>
+                <div className="summary-label">Resumes per Key</div>
                 <div className="summary-value info">
-                  🔄 Key 1: 1-4 • Key 2: 5-8 • Key 3: 9-12
+                  🔄 {apiKeysInfo.keyLimit || 5} per key
                 </div>
               </div>
             </div>
@@ -2399,9 +2373,7 @@ function App() {
                       </div>
                       <div className="key-usage">
                         <span>Usage: {key.usage}/{key.limit}</span>
-                        <span className={`key-availability ${key.available ? 'available' : 'unavailable'}`}>
-                          {key.available ? 'Available' : 'Limit Reached'}
-                        </span>
+                        <span>Errors: {key.errors || 0}</span>
                       </div>
                     </div>
                   ))}
@@ -2490,7 +2462,7 @@ function App() {
             {apiKeysInfo.count > 1 && batchMode && (
               <div className="multi-key-message">
                 <Key size={16} />
-                <span>Multi-key mode: Processing up to {apiKeysInfo.maxResumes || 12} resumes with {apiKeysInfo.count} API keys</span>
+                <span>Multi-key mode: Processing up to {apiKeysInfo.maxResumes || 15} resumes with {apiKeysInfo.count} API keys ({apiKeysInfo.keyLimit || 5} per key)</span>
               </div>
             )}
           </div>
@@ -2509,7 +2481,7 @@ function App() {
               <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Multi-key Groq API offers ultra-fast inference • Up to {apiKeysInfo.maxResumes || 12} resumes per batch • Individual reports available
+              Multi-key Groq API offers ultra-fast inference • Up to {apiKeysInfo.maxResumes || 15} resumes per batch • Intelligent error recovery
             </p>
           </div>
           
