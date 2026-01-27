@@ -19,7 +19,6 @@ import {
   FileX, Calendar, Mail, Phone, MapPin, Link,
   ThumbsUp, AlertOctagon, Lightbulb, GitBranch,
   Code, Database, Server, Terminal, Palette,
-  Music, Camera, Video, Headphones, Mic,
   MessageSquare, Heart, Share2, Bookmark,
   Eye, EyeOff, Search, Settings, Bell,
   HelpCircle, Shield as ShieldIcon, Key,
@@ -83,7 +82,7 @@ function App() {
   const [batchMode, setBatchMode] = useState(false);
   const [modelInfo, setModelInfo] = useState(null);
   const [serviceStatus, setServiceStatus] = useState({
-    enhancedFallback: true,
+    enhancedATS: true,
     validKeys: 0,
     totalKeys: 0
   });
@@ -91,6 +90,7 @@ function App() {
   // View management for navigation
   const [currentView, setCurrentView] = useState('main'); // 'main', 'single-results', 'batch-results', 'candidate-detail'
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(null);
+  const [expandedATSBreakdown, setExpandedATSBreakdown] = useState(false);
   
   const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
   
@@ -165,9 +165,9 @@ function App() {
       
       if (healthResponse?.data) {
         setServiceStatus({
-          enhancedFallback: healthResponse.data.client_initialized || false,
-          validKeys: healthResponse.data.client_initialized ? 1 : 0,
-          totalKeys: healthResponse.data.api_key_configured ? 1 : 0
+          enhancedATS: healthResponse.data.features?.includes('enhanced_ats_scoring') || false,
+          validKeys: healthResponse.data.ai_provider_configured ? 1 : 0,
+          totalKeys: healthResponse.data.ai_provider_configured ? 1 : 0
         });
         
         setDeepseekWarmup(healthResponse.data.ai_warmup_complete || false);
@@ -387,7 +387,7 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      // Allow up to 10 files (DeepSeek batch size)
+      // Allow up to 10 files
       setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10));
       setError('');
     }
@@ -435,7 +435,7 @@ function App() {
     setAnalysis(null);
     setBatchAnalysis(null);
     setProgress(0);
-    setLoadingMessage('Starting analysis...');
+    setLoadingMessage('Starting enhanced ATS analysis...');
 
     const formData = new FormData();
     formData.append('resume', resumeFile);
@@ -452,9 +452,9 @@ function App() {
       }, 500);
 
       if (aiStatus === 'available' && deepseekWarmup) {
-        setLoadingMessage('DeepSeek AI analysis...');
+        setLoadingMessage('Enhanced ATS analysis in progress...');
       } else {
-        setLoadingMessage('Enhanced analysis (Warming up DeepSeek)...');
+        setLoadingMessage('Enhanced ATS analysis (Warming up DeepSeek)...');
       }
       setProgress(20);
 
@@ -478,7 +478,7 @@ function App() {
       clearInterval(progressInterval);
       setProgress(95);
       
-      setLoadingMessage('AI analysis complete!');
+      setLoadingMessage('Enhanced ATS analysis complete!');
 
       await new Promise(resolve => setTimeout(resolve, 500));
       
@@ -506,7 +506,7 @@ function App() {
         setError('DeepSeek API rate limit exceeded. Please wait a minute and try again.');
         setAiStatus('unavailable');
       } else {
-        setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
+        setError(err.response?.data?.error || 'An error occurred during enhanced ATS analysis. Please try again.');
       }
       
       setProgress(0);
@@ -537,10 +537,10 @@ function App() {
     setAnalysis(null);
     setBatchAnalysis(null);
     setBatchProgress(0);
-    setLoadingMessage(`Starting batch analysis of ${resumeFiles.length} resumes...`);
+    setLoadingMessage(`Starting enhanced ATS batch analysis of ${resumeFiles.length} resumes...`);
 
     const formData = new FormData();
-    formData.append('jobDescription', jobDescription);
+    formData.append('jobDescription', job_description);
     
     resumeFiles.forEach((file, index) => {
       formData.append('resumes', file);
@@ -556,7 +556,7 @@ function App() {
         });
       }, 500);
 
-      setLoadingMessage('Uploading files for batch processing...');
+      setLoadingMessage('Uploading files for enhanced ATS batch processing...');
       setBatchProgress(10);
 
       const response = await axios.post(`${API_BASE_URL}/analyze-batch`, formData, {
@@ -575,7 +575,7 @@ function App() {
 
       clearInterval(progressInterval);
       setBatchProgress(95);
-      setLoadingMessage('Batch analysis complete!');
+      setLoadingMessage('Enhanced ATS batch analysis complete!');
 
       await new Promise(resolve => setTimeout(resolve, 800));
       
@@ -598,7 +598,7 @@ function App() {
       } else if (err.response?.status === 429) {
         setError('DeepSeek API rate limit reached. Please try again later or reduce batch size.');
       } else {
-        setError(err.response?.data?.error || 'An error occurred during batch analysis.');
+        setError(err.response?.data?.error || 'An error occurred during enhanced ATS batch analysis.');
       }
       
       setBatchProgress(0);
@@ -612,7 +612,7 @@ function App() {
     if (analysis?.excel_filename) {
       window.open(`${API_BASE_URL}/download/${analysis.excel_filename}`, '_blank');
     } else {
-      setError('No analysis report available for download.');
+      setError('No enhanced ATS analysis report available for download.');
     }
   };
 
@@ -620,7 +620,7 @@ function App() {
     if (batchAnalysis?.batch_excel_filename) {
       window.open(`${API_BASE_URL}/download/${batchAnalysis.batch_excel_filename}`, '_blank');
     } else {
-      setError('No batch analysis report available for download.');
+      setError('No enhanced ATS batch analysis report available for download.');
     }
   };
 
@@ -628,22 +628,49 @@ function App() {
     if (analysisId) {
       window.open(`${API_BASE_URL}/download-individual/${analysisId}`, '_blank');
     } else {
-      setError('No individual report available for download.');
+      setError('No individual enhanced ATS report available for download.');
     }
   };
 
   const getScoreColor = (score) => {
-    if (score >= 80) return '#00ff9d';
-    if (score >= 60) return '#ffd166';
+    if (score >= 85) return '#00ff9d';
+    if (score >= 75) return '#80ff80';
+    if (score >= 65) return '#ffd166';
+    if (score >= 55) return '#ff9d6d';
     return '#ff6b6b';
   };
 
   const getScoreGrade = (score) => {
-    if (score >= 90) return 'Excellent Match 🎯';
-    if (score >= 80) return 'Great Match ✨';
-    if (score >= 70) return 'Good Match 👍';
-    if (score >= 60) return 'Fair Match 📊';
+    if (score >= 85) return 'Exceptional Match 🎯';
+    if (score >= 75) return 'Strong Match ✨';
+    if (score >= 65) return 'Good Match 👍';
+    if (score >= 55) return 'Fair Match 📊';
+    if (score >= 45) return 'Basic Match ⚠️';
     return 'Needs Improvement 📈';
+  };
+
+  const getDomainColor = (domain) => {
+    switch(domain) {
+      case 'VLSI': return '#ff6b6b';
+      case 'CS/Software': return '#4ECDC4';
+      default: return '#94a3b8';
+    }
+  };
+
+  const getDomainIcon = (domain) => {
+    switch(domain) {
+      case 'VLSI': return <Cpu size={16} />;
+      case 'CS/Software': return <Code size={16} />;
+      default: return <Cpu size={16} />;
+    }
+  };
+
+  const getSeniorityColor = (seniority) => {
+    const seniorityLower = seniority?.toLowerCase() || '';
+    if (seniorityLower.includes('senior') || seniorityLower.includes('lead')) return '#ff6b6b';
+    if (seniorityLower.includes('mid') || seniorityLower.includes('intermediate')) return '#ffd166';
+    if (seniorityLower.includes('junior') || seniorityLower.includes('entry')) return '#4ECDC4';
+    return '#94a3b8';
   };
 
   const getBackendStatusMessage = () => {
@@ -696,7 +723,7 @@ function App() {
         bgColor: 'rgba(0, 255, 157, 0.1)'
       };
       case 'unavailable': return { 
-        text: 'Enhanced Analysis', 
+        text: 'Enhanced ATS Mode', 
         color: '#ffd166', 
         icon: <Info size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
@@ -744,16 +771,155 @@ function App() {
   };
 
   const getModelDescription = (modelInfo) => {
-    if (!modelInfo || typeof modelInfo === 'string') return '32K context length';
-    return modelInfo.description || 'DeepSeek 32K context';
+    if (!modelInfo || typeof modelInfo === 'string') return 'Enhanced ATS Scoring';
+    return modelInfo.description || 'Enhanced ATS Scoring';
+  };
+
+  const renderATSBreakdown = (analysis) => {
+    const breakdown = analysis?.ats_score_breakdown || analysis?.score_breakdown;
+    if (!breakdown) return null;
+
+    const categories = [
+      { key: 'skills_match', name: 'Skills Match', max: 30, description: 'Required skills with evidence' },
+      { key: 'experience_relevance', name: 'Experience Relevance', max: 25, description: 'Relevant years and domain expertise' },
+      { key: 'role_alignment', name: 'Role Alignment', max: 20, description: 'Past roles vs target role match' },
+      { key: 'projects_impact', name: 'Projects Impact', max: 15, description: 'Hands-on projects and outcomes' },
+      { key: 'resume_quality', name: 'Resume Quality', max: 10, description: 'Structure, clarity, formatting' }
+    ];
+
+    return (
+      <div className="ats-breakdown-container glass">
+        <div className="ats-breakdown-header">
+          <div className="breakdown-title">
+            <BarChart4 size={24} />
+            <h3>Enhanced ATS Score Breakdown</h3>
+          </div>
+          <button 
+            className="expand-breakdown-btn"
+            onClick={() => setExpandedATSBreakdown(!expandedATSBreakdown)}
+          >
+            {expandedATSBreakdown ? <Minus size={18} /> : <Plus size={18} />}
+            <span>{expandedATSBreakdown ? 'Collapse' : 'Expand'}</span>
+          </button>
+        </div>
+        
+        <div className="ats-breakdown-grid">
+          {categories.map((category) => {
+            const catData = breakdown[category.key];
+            if (!catData) return null;
+            
+            const score = catData.score || 0;
+            const percentage = (score / category.max) * 100;
+            const explanation = catData.explanation || '';
+            
+            return (
+              <div key={category.key} className="ats-category-card">
+                <div className="category-header">
+                  <div className="category-name">
+                    <h4>{category.name}</h4>
+                    <span className="category-weight">Weight: {category.max}/100</span>
+                  </div>
+                  <div className="category-score" style={{ color: getScoreColor(score * (100/category.max)) }}>
+                    {score.toFixed(1)}/{category.max}
+                  </div>
+                </div>
+                
+                <div className="category-progress">
+                  <div 
+                    className="progress-bar-fill"
+                    style={{ 
+                      width: `${percentage}%`,
+                      background: getScoreColor(score * (100/category.max))
+                    }}
+                  ></div>
+                </div>
+                
+                <div className="category-description">
+                  <span className="description-text">{category.description}</span>
+                  <div className="category-percentage" style={{ color: getScoreColor(score * (100/category.max)) }}>
+                    {percentage.toFixed(0)}%
+                  </div>
+                </div>
+                
+                {expandedATSBreakdown && explanation && (
+                  <div className="category-explanation">
+                    <p>{explanation}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        
+        <div className="ats-total-score">
+          <div className="total-score-label">Total ATS Score</div>
+          <div className="total-score-value" style={{ color: getScoreColor(analysis?.ats_score || analysis?.overall_score) }}>
+            {(analysis?.ats_score || analysis?.overall_score || 0).toFixed(1)}/100
+          </div>
+          <div className="total-score-grade" style={{ color: getScoreColor(analysis?.ats_score || analysis?.overall_score) }}>
+            {getScoreGrade(analysis?.ats_score || analysis?.overall_score)}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDomainInfo = (analysis) => {
+    const domain = analysis?.primary_domain;
+    const seniority = analysis?.seniority_level;
+    const expertise = analysis?.domain_expertise;
+    
+    if (!domain && !seniority && !expertise) return null;
+    
+    return (
+      <div className="domain-info-container glass">
+        <div className="domain-info-header">
+          <h3>Domain & Seniority Assessment</h3>
+          <div className="domain-badge" style={{ 
+            background: getDomainColor(domain) + '20',
+            color: getDomainColor(domain),
+            border: `1px solid ${getDomainColor(domain)}40`
+          }}>
+            {getDomainIcon(domain)}
+            <span>{domain || 'General'}</span>
+          </div>
+        </div>
+        
+        <div className="domain-details">
+          {seniority && seniority !== 'To be determined' && (
+            <div className="domain-detail">
+              <div className="detail-label">
+                <User size={14} />
+                <span>Seniority Level</span>
+              </div>
+              <div className="detail-value" style={{ color: getSeniorityColor(seniority) }}>
+                {seniority}
+              </div>
+            </div>
+          )}
+          
+          {expertise && expertise !== 'To be determined' && (
+            <div className="domain-detail">
+              <div className="detail-label">
+                <Award size={14} />
+                <span>Domain Expertise</span>
+              </div>
+              <div className="detail-value">
+                {expertise}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   // Render functions for different views
   const renderMainView = () => (
     <div className="upload-section">
       <div className="section-header">
-        <h2>Start Your Analysis</h2>
-        <p>Upload resume(s) and job description to get detailed insights</p>
+        <h2>Start Enhanced ATS Analysis</h2>
+        <p>Upload resume(s) and job description for realistic ATS scoring</p>
         <div className="service-status">
           <span className="status-badge backend">
             {backendStatusInfo.icon} {backendStatusInfo.text}
@@ -761,8 +927,8 @@ function App() {
           <span className="status-badge ai">
             {aiStatusInfo.icon} {aiStatusInfo.text}
           </span>
-          <span className="status-badge always-active">
-            <ZapIcon size={14} /> Always Active
+          <span className="status-badge ats-enhanced">
+            <BarChart4 size={14} /> Enhanced ATS
           </span>
           {modelInfo && (
             <span className="status-badge model">
@@ -968,19 +1134,19 @@ function App() {
               <div className="stat-icon">
                 <Brain size={14} />
               </div>
-              <span>DeepSeek AI analysis</span>
+              <span>Enhanced ATS Scoring</span>
+            </div>
+            <div className="stat">
+              <div className="stat-icon">
+                <BarChart4 size={14} />
+              </div>
+              <span>Weighted Evaluation</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
                 <Cpu size={14} />
               </div>
-              <span>{getModelDisplayName(modelInfo)}</span>
-            </div>
-            <div className="stat">
-              <div className="stat-icon">
-                <Activity size={14} />
-              </div>
-              <span>Batch Processing</span>
+              <span>Domain Detection</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
@@ -1000,14 +1166,14 @@ function App() {
             </div>
             <div>
               <h2>Job Description</h2>
-              <p className="card-subtitle">Paste the complete job description</p>
+              <p className="card-subtitle">Paste the complete job description for accurate ATS scoring</p>
             </div>
           </div>
           
           <div className="textarea-wrapper">
             <textarea
               className="job-description-input"
-              placeholder={`• Paste job description here\n• Include required skills\n• Mention qualifications\n• List responsibilities\n• Add any specific requirements`}
+              placeholder={`• Paste job description here\n• Include required skills\n• Mention qualifications\n• List responsibilities\n• Add any specific requirements\n\n💡 Tip: Include domain-specific requirements for better scoring`}
               value={jobDescription}
               onChange={(e) => setJobDescription(e.target.value)}
               rows={12}
@@ -1046,7 +1212,7 @@ function App() {
           <div className="loading-container">
             <div className="loading-header">
               <Loader className="spinner" />
-              <h3>{batchMode ? 'Batch Analysis' : 'Analysis in Progress'}</h3>
+              <h3>{batchMode ? 'Enhanced ATS Batch Analysis' : 'Enhanced ATS Analysis in Progress'}</h3>
             </div>
             
             <div className="progress-container">
@@ -1057,8 +1223,8 @@ function App() {
               <span className="loading-message">{loadingMessage}</span>
               <span className="loading-subtext">
                 {batchMode 
-                  ? `Processing ${resumeFiles.length} resume(s) with ${getModelDisplayName(modelInfo)}...` 
-                  : `Using ${getModelDisplayName(modelInfo)}...`}
+                  ? `Processing ${resumeFiles.length} resume(s) with enhanced ATS scoring...` 
+                  : `Using enhanced weighted ATS evaluation...`}
               </span>
             </div>
             
@@ -1083,8 +1249,8 @@ function App() {
             </div>
             
             <div className="loading-note info">
-              <Info size={14} />
-              <span>DeepSeek AI offers 32K context length for comprehensive resume analysis</span>
+              <BarChart4 size={14} />
+              <span>Enhanced ATS scoring evaluates 5 weighted dimensions for realistic results</span>
             </div>
           </div>
         </div>
@@ -1111,13 +1277,13 @@ function App() {
         ) : (
           <>
             <div className="button-content">
-              <Brain size={20} />
+              <BarChart4 size={20} />
               <div className="button-text">
-                <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
+                <span>{batchMode ? 'Enhanced ATS Batch Analysis' : 'Enhanced ATS Analysis'}</span>
                 <span className="button-subtext">
                   {batchMode 
-                    ? `${resumeFiles.length} resume(s) • ${getModelDisplayName(modelInfo)} • Batch` 
-                    : `${getModelDisplayName(modelInfo)} • Single`}
+                    ? `${resumeFiles.length} resume(s) • Weighted ATS Scoring • Batch` 
+                    : `Weighted ATS Scoring • Domain Detection`}
                 </span>
               </div>
             </div>
@@ -1131,39 +1297,39 @@ function App() {
         {batchMode ? (
           <>
             <div className="tip">
-              <Brain size={16} />
-              <span>DeepSeek AI with 32K context length for comprehensive analysis</span>
+              <BarChart4 size={16} />
+              <span>Enhanced ATS scoring across 5 weighted dimensions</span>
             </div>
             <div className="tip">
-              <Activity size={16} />
-              <span>Process up to 10 resumes in a single batch</span>
+              <Cpu size={16} />
+              <span>Domain detection for VLSI and CS/Software roles</span>
             </div>
             <div className="tip">
               <TrendingUp size={16} />
-              <span>Candidates will be ranked by ATS score from highest to lowest</span>
+              <span>Candidates ranked by enhanced ATS score (0-100)</span>
             </div>
             <div className="tip">
               <Download size={16} />
-              <span>Download comprehensive Excel report with all candidate data</span>
+              <span>Download detailed Excel report with ATS breakdown</span>
             </div>
           </>
         ) : (
           <>
             <div className="tip">
-              <Brain size={16} />
-              <span>DeepSeek AI offers high-quality resume analysis</span>
-            </div>
-            <div className="tip">
-              <Thermometer size={16} />
-              <span>DeepSeek API automatically warms up when idle</span>
-            </div>
-            <div className="tip">
-              <Activity size={16} />
-              <span>Backend stays awake with automatic pings every 3 minutes</span>
+              <BarChart4 size={16} />
+              <span>Skills Match (30), Experience (25), Role Alignment (20), Projects (15), Resume Quality (10)</span>
             </div>
             <div className="tip">
               <Cpu size={16} />
-              <span>Using: {getModelDisplayName(modelInfo)}</span>
+              <span>Domain-specific evaluation for VLSI and CS/Software</span>
+            </div>
+            <div className="tip">
+              <User size={16} />
+              <span>Seniority assessment and domain expertise level</span>
+            </div>
+            <div className="tip">
+              <Brain size={16} />
+              <span>Strict and realistic scoring like real ATS systems</span>
             </div>
           </>
         )}
@@ -1174,6 +1340,10 @@ function App() {
   const renderSingleAnalysisView = () => {
     if (!analysis) return null;
 
+    const atsScore = analysis.ats_score || analysis.overall_score;
+    const domain = analysis.primary_domain || 'General';
+    const seniority = analysis.seniority_level;
+
     return (
       <div className="results-section">
         {/* Navigation Header */}
@@ -1183,13 +1353,13 @@ function App() {
             <span>New Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>🧠 Resume Analysis Results</h2>
-            <p>{analysis.candidate_name}</p>
+            <h2>🎯 Enhanced ATS Resume Analysis</h2>
+            <p>{analysis.candidate_name} • {domain} Domain</p>
           </div>
           <div className="navigation-actions">
             <button className="download-report-btn" onClick={handleDownload}>
               <DownloadCloud size={18} />
-              <span>Download Report</span>
+              <span>Download Enhanced Report</span>
             </button>
           </div>
         </div>
@@ -1197,8 +1367,8 @@ function App() {
         {/* Candidate Header */}
         <div className="analysis-header">
           <div className="candidate-info">
-            <div className="candidate-avatar">
-              <User size={24} />
+            <div className="candidate-avatar" style={{ background: getDomainColor(domain) + '20', color: getDomainColor(domain) }}>
+              {getDomainIcon(domain)}
             </div>
             <div>
               <h2 className="candidate-name">{analysis.candidate_name}</h2>
@@ -1212,10 +1382,16 @@ function App() {
                     day: 'numeric' 
                   })}
                 </span>
-                <span className="file-info">
-                  <Cpu size={14} />
-                  Model: {analysis.ai_model || 'DeepSeek AI'}
+                <span className="domain-info" style={{ color: getDomainColor(domain) }}>
+                  {getDomainIcon(domain)}
+                  {domain}
                 </span>
+                {seniority && seniority !== 'To be determined' && (
+                  <span className="seniority-info" style={{ color: getSeniorityColor(seniority) }}>
+                    <User size={14} />
+                    {seniority}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -1223,27 +1399,27 @@ function App() {
           <div className="score-display">
             <div className="score-circle-wrapper">
               <div className="score-circle-glow" style={{ 
-                background: `radial-gradient(circle, ${getScoreColor(analysis.overall_score)}22 0%, transparent 70%)` 
+                background: `radial-gradient(circle, ${getScoreColor(atsScore)}22 0%, transparent 70%)` 
               }}></div>
               <div 
                 className="score-circle" 
                 style={{ 
-                  borderColor: getScoreColor(analysis.overall_score),
-                  background: `conic-gradient(${getScoreColor(analysis.overall_score)} ${analysis.overall_score * 3.6}deg, #2d3749 0deg)` 
+                  borderColor: getScoreColor(atsScore),
+                  background: `conic-gradient(${getScoreColor(atsScore)} ${atsScore * 3.6}deg, #2d3749 0deg)` 
                 }}
               >
                 <div className="score-inner">
-                  <div className="score-value" style={{ color: getScoreColor(analysis.overall_score) }}>
-                    {analysis.overall_score}
+                  <div className="score-value" style={{ color: getScoreColor(atsScore) }}>
+                    {atsScore}
                   </div>
-                  <div className="score-label">ATS Score</div>
+                  <div className="score-label">Enhanced ATS Score</div>
                 </div>
               </div>
             </div>
             <div className="score-info">
-              <h3 className="score-grade">{getScoreGrade(analysis.overall_score)}</h3>
+              <h3 className="score-grade">{getScoreGrade(atsScore)}</h3>
               <p className="score-description">
-                Based on skill matching, experience relevance, and qualifications
+                Based on weighted evaluation across 5 dimensions
               </p>
               <div className="score-meta">
                 <span className="meta-item">
@@ -1251,45 +1427,64 @@ function App() {
                   Response Time: {analysis.response_time || 'N/A'}
                 </span>
                 <span className="meta-item">
-                  <CheckCircle size={12} />
-                  {analysis.skills_matched?.length || 0} skills matched
+                  <Cpu size={12} />
+                  Model: {analysis.ai_model || 'DeepSeek AI'}
                 </span>
                 <span className="meta-item">
-                  <XCircle size={12} />
-                  {analysis.skills_missing?.length || 0} skills missing
+                  <BarChart4 size={12} />
+                  Weighted ATS Scoring
                 </span>
               </div>
             </div>
         </div>
         </div>
 
+        {/* ATS Breakdown */}
+        {renderATSBreakdown(analysis)}
+
+        {/* Domain Info */}
+        {renderDomainInfo(analysis)}
+
         {/* Recommendation Card */}
         <div className="recommendation-card glass" style={{
-          background: `linear-gradient(135deg, ${getScoreColor(analysis.overall_score)}15, ${getScoreColor(analysis.overall_score)}08)`,
-          borderLeft: `4px solid ${getScoreColor(analysis.overall_score)}`
+          background: `linear-gradient(135deg, ${getScoreColor(atsScore)}15, ${getScoreColor(atsScore)}08)`,
+          borderLeft: `4px solid ${getScoreColor(atsScore)}`
         }}>
           <div className="recommendation-header">
-            <AwardIcon size={28} style={{ color: getScoreColor(analysis.overall_score) }} />
+            <AwardIcon size={28} style={{ color: getScoreColor(atsScore) }} />
             <div>
-              <h3>Analysis Recommendation</h3>
+              <h3>ATS Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {analysis.ai_model || 'DeepSeek AI'} • Consistent ATS Scoring
+                {analysis.ai_model || 'DeepSeek AI'} • Enhanced Weighted Evaluation
               </p>
             </div>
           </div>
           <div className="recommendation-content">
             <p className="recommendation-text">{analysis.recommendation}</p>
             <div className="confidence-badge">
-              <Brain size={16} />
-              <span>DeepSeek AI Analysis</span>
+              <BarChart4 size={16} />
+              <span>Enhanced ATS Analysis</span>
             </div>
           </div>
         </div>
 
+        {/* Overall Feedback */}
+        {analysis.overall_feedback && (
+          <div className="feedback-card glass">
+            <div className="feedback-header">
+              <MessageSquare size={24} />
+              <h3>Overall ATS Feedback</h3>
+            </div>
+            <div className="feedback-content">
+              <p>{analysis.overall_feedback}</p>
+            </div>
+          </div>
+        )}
+
         {/* Skills Analysis */}
         <div className="section-title">
           <h2>Skills Analysis</h2>
-          <p>Detailed breakdown of matched and missing skills</p>
+          <p>Detailed breakdown of matched and missing skills with context</p>
         </div>
         
         <div className="skills-grid">
@@ -1300,7 +1495,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Matched Skills</h3>
-                <p className="skills-subtitle">Found in resume</p>
+                <p className="skills-subtitle">Found in resume with evidence</p>
               </div>
               <div className="skills-count success">
                 <span>{analysis.skills_matched?.length || 0}</span>
@@ -1330,7 +1525,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Missing Skills</h3>
-                <p className="skills-subtitle">Suggested to learn</p>
+                <p className="skills-subtitle">Required skills not found or lacking evidence</p>
               </div>
               <div className="skills-count warning">
                 <span>{analysis.skills_missing?.length || 0}</span>
@@ -1347,7 +1542,7 @@ function App() {
                   </li>
                 ))}
                 {(!analysis.skills_missing || analysis.skills_missing.length === 0) && (
-                  <li className="no-items success-text">All required skills are present!</li>
+                  <li className="no-items success-text">All required skills are present with evidence!</li>
                 )}
               </ul>
             </div>
@@ -1357,7 +1552,7 @@ function App() {
         {/* Summary Section */}
         <div className="section-title">
           <h2>Profile Summary</h2>
-          <p>Insights extracted from resume</p>
+          <p>Detailed insights extracted from resume</p>
         </div>
         
         <div className="summary-grid">
@@ -1372,6 +1567,11 @@ function App() {
               <p className="detailed-summary">{analysis.experience_summary || "No experience summary available."}</p>
               <div className="summary-footer">
                 <span className="summary-tag">Professional Experience</span>
+                {analysis.domain_expertise && analysis.domain_expertise !== 'To be determined' && (
+                  <span className="summary-tag" style={{ background: getDomainColor(domain) + '20', color: getDomainColor(domain) }}>
+                    {analysis.domain_expertise} Expertise
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -1392,10 +1592,10 @@ function App() {
           </div>
         </div>
 
-        {/* Insights Section - Clean Version without bullet points */}
+        {/* Insights Section */}
         <div className="section-title">
-          <h2>Insights & Recommendations</h2>
-          <p>Personalized suggestions to improve your match</p>
+          <h2>Strengths & Improvement Areas</h2>
+          <p>Specific insights from ATS evaluation</p>
         </div>
         
         <div className="insights-grid">
@@ -1406,7 +1606,7 @@ function App() {
               </div>
               <div>
                 <h3>Key Strengths</h3>
-                <p className="insight-subtitle">Areas where candidate excels</p>
+                <p className="insight-subtitle">Areas contributing to ATS score</p>
               </div>
             </div>
             <div className="insight-content">
@@ -1431,7 +1631,7 @@ function App() {
               </div>
               <div>
                 <h3>Areas for Improvement</h3>
-                <p className="insight-subtitle">Opportunities to grow</p>
+                <p className="insight-subtitle">Opportunities to increase ATS score</p>
               </div>
             </div>
             <div className="insight-content">
@@ -1455,11 +1655,15 @@ function App() {
           <div className="ai-details-header">
             <Brain size={24} />
             <div>
-              <h3>AI Analysis Details</h3>
+              <h3>Enhanced ATS Analysis Details</h3>
               <p className="ai-details-subtitle">Technical information about this analysis</p>
             </div>
           </div>
           <div className="ai-details-content">
+            <div className="ai-detail-item">
+              <span className="detail-label">ATS Method:</span>
+              <span className="detail-value">Weighted Evaluation (5 dimensions)</span>
+            </div>
             <div className="ai-detail-item">
               <span className="detail-label">AI Provider:</span>
               <span className="detail-value">{analysis.ai_provider || 'DeepSeek'}</span>
@@ -1477,7 +1681,7 @@ function App() {
               <span className="detail-value">{analysis.analysis_id || 'N/A'}</span>
             </div>
             <div className="ai-detail-item">
-              <span className="detail-label">AI Status:</span>
+              <span className="detail-label">ATS Status:</span>
               <span className="detail-value" style={{ 
                 color: analysis.ai_status === 'Warmed up' ? '#00ff9d' : '#ffd166' 
               }}>
@@ -1490,17 +1694,17 @@ function App() {
         {/* Action Section */}
         <div className="action-section glass">
           <div className="action-content">
-            <h3>Analysis Complete</h3>
-            <p>Download the detailed Excel report or start a new analysis</p>
+            <h3>Enhanced ATS Analysis Complete</h3>
+            <p>Download detailed Excel report with ATS breakdown or start a new analysis</p>
           </div>
           <div className="action-buttons">
             <button className="download-button" onClick={handleDownload}>
               <DownloadCloud size={20} />
-              <span>Download Excel Report</span>
+              <span>Download Enhanced ATS Report</span>
             </button>
             <button className="reset-button" onClick={navigateToMain}>
               <RefreshCw size={20} />
-              <span>New Analysis</span>
+              <span>New Enhanced ATS Analysis</span>
             </button>
           </div>
         </div>
@@ -1517,13 +1721,13 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>🧠 Batch Analysis Results</h2>
-          <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
+          <h2>🎯 Enhanced ATS Batch Analysis Results</h2>
+          <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed with weighted ATS scoring</p>
         </div>
         <div className="navigation-actions">
           <button className="download-report-btn" onClick={handleBatchDownload}>
             <DownloadCloud size={18} />
-            <span>Download Full Report</span>
+            <span>Download Full Enhanced Report</span>
           </button>
         </div>
       </div>
@@ -1564,21 +1768,21 @@ function App() {
         
         <div className="stat-card">
           <div className="stat-icon primary">
-            <Cpu size={24} />
+            <BarChart4 size={24} />
           </div>
           <div className="stat-content">
-            <div className="stat-value">{getModelDisplayName(batchAnalysis?.model_used)}</div>
-            <div className="stat-label">AI Model</div>
+            <div className="stat-value">Enhanced ATS</div>
+            <div className="stat-label">Scoring Method</div>
           </div>
         </div>
         
         <div className="stat-card">
           <div className="stat-icon warning">
-            <Brain size={24} />
+            <Cpu size={24} />
           </div>
           <div className="stat-content">
-            <div className="stat-value">DeepSeek</div>
-            <div className="stat-label">AI Provider</div>
+            <div className="stat-value">{batchAnalysis?.model_used || 'DeepSeek'}</div>
+            <div className="stat-label">AI Model</div>
           </div>
         </div>
       </div>
@@ -1586,113 +1790,137 @@ function App() {
       {/* Candidates Ranking */}
       <div className="section-title">
         <h2>Candidate Rankings</h2>
-        <p>Sorted by ATS Score (Highest to Lowest) • DeepSeek AI Processing</p>
+        <p>Sorted by Enhanced ATS Score (0-100) • Weighted Evaluation • Domain Detection</p>
       </div>
       
       <div className="batch-results-grid">
-        {batchAnalysis?.analyses?.map((candidate, index) => (
-          <div key={index} className="batch-candidate-card glass">
-            <div className="batch-card-header">
-              <div className="candidate-rank">
-                <div className="rank-badge">#{candidate.rank}</div>
-                <div className="candidate-main-info">
-                  <h3 className="candidate-name">{candidate.candidate_name}</h3>
-                  <div className="candidate-meta">
-                    <span className="file-info">{candidate.filename}</span>
-                    <span className="file-size">{candidate.file_size}</span>
+        {batchAnalysis?.analyses?.map((candidate, index) => {
+          const atsScore = candidate.ats_score || candidate.overall_score;
+          const domain = candidate.primary_domain || 'General';
+          const seniority = candidate.seniority_level;
+          
+          return (
+            <div key={index} className="batch-candidate-card glass">
+              <div className="batch-card-header">
+                <div className="candidate-rank">
+                  <div className="rank-badge">#{candidate.rank}</div>
+                  <div className="candidate-main-info">
+                    <h3 className="candidate-name">{candidate.candidate_name}</h3>
+                    <div className="candidate-meta">
+                      <span className="file-info">{candidate.filename}</span>
+                      <span className="file-size">{candidate.file_size}</span>
+                      <span className="domain-tag" style={{ 
+                        background: getDomainColor(domain) + '20',
+                        color: getDomainColor(domain)
+                      }}>
+                        {getDomainIcon(domain)}
+                        {domain}
+                      </span>
+                      {seniority && seniority !== 'To be determined' && (
+                        <span className="seniority-tag" style={{ 
+                          background: getSeniorityColor(seniority) + '20',
+                          color: getSeniorityColor(seniority)
+                        }}>
+                          {seniority}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="candidate-score-display">
-                <div className="score-large" style={{ color: getScoreColor(candidate.overall_score) }}>
-                  {candidate.overall_score}
+                <div className="candidate-score-display">
+                  <div className="score-large" style={{ color: getScoreColor(atsScore) }}>
+                    {atsScore}
+                  </div>
+                  <div className="score-label">ATS Score</div>
+                  <div className="score-grade" style={{ color: getScoreColor(atsScore) }}>
+                    {getScoreGrade(atsScore).split(' ')[0]}
+                  </div>
                 </div>
-                <div className="score-label">ATS Score</div>
-              </div>
-            </div>
-            
-            <div className="batch-card-content">
-              <div className="recommendation-badge" style={{ 
-                background: getScoreColor(candidate.overall_score) + '20',
-                color: getScoreColor(candidate.overall_score),
-                border: `1px solid ${getScoreColor(candidate.overall_score)}40`
-              }}>
-                {candidate.recommendation}
               </div>
               
-              <div className="skills-preview">
-                <div className="skills-section">
-                  <div className="skills-header">
-                    <CheckCircle size={14} />
-                    <span>Matched Skills ({candidate.skills_matched?.length || 0})</span>
+              <div className="batch-card-content">
+                <div className="recommendation-badge" style={{ 
+                  background: getScoreColor(atsScore) + '20',
+                  color: getScoreColor(atsScore),
+                  border: `1px solid ${getScoreColor(atsScore)}40`
+                }}>
+                  {candidate.recommendation}
+                </div>
+                
+                <div className="skills-preview">
+                  <div className="skills-section">
+                    <div className="skills-header">
+                      <CheckCircle size={14} />
+                      <span>Matched Skills ({candidate.skills_matched?.length || 0})</span>
+                    </div>
+                    <div className="skills-list">
+                      {candidate.skills_matched?.slice(0, 2).map((skill, idx) => (
+                        <span key={idx} className="skill-tag success">{skill}</span>
+                      ))}
+                      {candidate.skills_matched?.length > 2 && (
+                        <span className="more-skills">+{candidate.skills_matched.length - 2} more</span>
+                      )}
+                    </div>
                   </div>
-                  <div className="skills-list">
-                    {candidate.skills_matched?.slice(0, 2).map((skill, idx) => (
-                      <span key={idx} className="skill-tag success">{skill}</span>
-                    ))}
-                    {candidate.skills_matched?.length > 2 && (
-                      <span className="more-skills">+{candidate.skills_matched.length - 2} more</span>
-                    )}
+                  
+                  <div className="skills-section">
+                    <div className="skills-header">
+                      <XCircle size={14} />
+                      <span>Missing Skills ({candidate.skills_missing?.length || 0})</span>
+                    </div>
+                    <div className="skills-list">
+                      {candidate.skills_missing?.slice(0, 2).map((skill, idx) => (
+                        <span key={idx} className="skill-tag error">{skill}</span>
+                      ))}
+                      {candidate.skills_missing?.length > 2 && (
+                        <span className="more-skills">+{candidate.skills_missing.length - 2} more</span>
+                      )}
+                    </div>
                   </div>
                 </div>
                 
-                <div className="skills-section">
-                  <div className="skills-header">
-                    <XCircle size={14} />
-                    <span>Missing Skills ({candidate.skills_missing?.length || 0})</span>
-                  </div>
-                  <div className="skills-list">
-                    {candidate.skills_missing?.slice(0, 2).map((skill, idx) => (
-                      <span key={idx} className="skill-tag error">{skill}</span>
-                    ))}
-                    {candidate.skills_missing?.length > 2 && (
-                      <span className="more-skills">+{candidate.skills_missing.length - 2} more</span>
-                    )}
-                  </div>
+                <div className="experience-preview">
+                  <p>{candidate.experience_summary?.substring(0, 120)}...</p>
                 </div>
               </div>
               
-              <div className="experience-preview">
-                <p>{candidate.experience_summary?.substring(0, 120)}...</p>
+              <div className="batch-card-footer">
+                <button 
+                  className="view-details-btn"
+                  onClick={() => navigateToCandidateDetail(index)}
+                >
+                  View Full ATS Details
+                  <ChevronRight size={16} />
+                </button>
+                {candidate.analysis_id && (
+                  <button 
+                    className="download-individual-btn"
+                    onClick={() => handleIndividualDownload(candidate.analysis_id)}
+                    title="Download enhanced ATS report"
+                  >
+                    <FileDown size={16} />
+                  </button>
+                )}
               </div>
             </div>
-            
-            <div className="batch-card-footer">
-              <button 
-                className="view-details-btn"
-                onClick={() => navigateToCandidateDetail(index)}
-              >
-                View Full Details
-                <ChevronRight size={16} />
-              </button>
-              {candidate.analysis_id && (
-                <button 
-                  className="download-individual-btn"
-                  onClick={() => handleIndividualDownload(candidate.analysis_id)}
-                  title="Download individual report"
-                >
-                  <FileDown size={16} />
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Action Buttons */}
       <div className="action-section glass">
         <div className="action-content">
-          <h3>Batch Analysis Complete</h3>
-          <p>Download comprehensive Excel report with all candidate details</p>
+          <h3>Enhanced ATS Batch Analysis Complete</h3>
+          <p>Download comprehensive Excel report with detailed ATS breakdown for all candidates</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
             <DownloadCloud size={20} />
-            <span>Download Full Batch Report</span>
+            <span>Download Full Enhanced ATS Report</span>
           </button>
           <button className="reset-button" onClick={navigateToMain}>
             <RefreshCw size={20} />
-            <span>New Batch Analysis</span>
+            <span>New Enhanced ATS Batch Analysis</span>
           </button>
         </div>
       </div>
@@ -1715,6 +1943,10 @@ function App() {
       );
     }
 
+    const atsScore = candidate.ats_score || candidate.overall_score;
+    const domain = candidate.primary_domain || 'General';
+    const seniority = candidate.seniority_level;
+
     return (
       <div className="results-section">
         {/* Navigation Header */}
@@ -1724,8 +1956,8 @@ function App() {
             <span>Back to Rankings</span>
           </button>
           <div className="navigation-title">
-            <h2>Candidate Details</h2>
-            <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
+            <h2>Enhanced ATS Candidate Details</h2>
+            <p>Rank #{candidate.rank} • {candidate.candidate_name} • {domain}</p>
           </div>
           <div className="navigation-actions">
             {candidate.analysis_id && (
@@ -1734,7 +1966,7 @@ function App() {
                 onClick={() => handleIndividualDownload(candidate.analysis_id)}
               >
                 <FileDown size={18} />
-                <span>Download Individual Report</span>
+                <span>Download Enhanced ATS Report</span>
               </button>
             )}
             <button 
@@ -1750,20 +1982,30 @@ function App() {
         {/* Candidate Header */}
         <div className="analysis-header">
           <div className="candidate-info">
-            <div className="candidate-avatar">
-              <User size={24} />
+            <div className="candidate-avatar" style={{ background: getDomainColor(domain) + '20', color: getDomainColor(domain) }}>
+              {getDomainIcon(domain)}
             </div>
             <div>
               <h2 className="candidate-name">{candidate.candidate_name}</h2>
               <div className="candidate-meta">
                 <span className="analysis-date">
                   <Clock size={14} />
-                  Rank: #{candidate.rank}
+                  Rank: #{candidate.rank} in batch
                 </span>
                 <span className="file-info">
                   <FileText size={14} />
                   {candidate.filename} • {candidate.file_size}
                 </span>
+                <span className="domain-info" style={{ color: getDomainColor(domain) }}>
+                  {getDomainIcon(domain)}
+                  {domain}
+                </span>
+                {seniority && seniority !== 'To be determined' && (
+                  <span className="seniority-info" style={{ color: getSeniorityColor(seniority) }}>
+                    <User size={14} />
+                    {seniority}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -1771,65 +2013,88 @@ function App() {
           <div className="score-display">
             <div className="score-circle-wrapper">
               <div className="score-circle-glow" style={{ 
-                background: `radial-gradient(circle, ${getScoreColor(candidate.overall_score)}22 0%, transparent 70%)` 
+                background: `radial-gradient(circle, ${getScoreColor(atsScore)}22 0%, transparent 70%)` 
               }}></div>
               <div 
                 className="score-circle" 
                 style={{ 
-                  borderColor: getScoreColor(candidate.overall_score),
-                  background: `conic-gradient(${getScoreColor(candidate.overall_score)} ${candidate.overall_score * 3.6}deg, #2d3749 0deg)` 
+                  borderColor: getScoreColor(atsScore),
+                  background: `conic-gradient(${getScoreColor(atsScore)} ${atsScore * 3.6}deg, #2d3749 0deg)` 
                 }}
               >
                 <div className="score-inner">
-                  <div className="score-value" style={{ color: getScoreColor(candidate.overall_score) }}>
-                    {candidate.overall_score}
+                  <div className="score-value" style={{ color: getScoreColor(atsScore) }}>
+                    {atsScore}
                   </div>
-                  <div className="score-label">ATS Score</div>
+                  <div className="score-label">Enhanced ATS Score</div>
                 </div>
               </div>
             </div>
             <div className="score-info">
-              <h3 className="score-grade">{getScoreGrade(candidate.overall_score)}</h3>
+              <h3 className="score-grade">{getScoreGrade(atsScore)}</h3>
               <p className="score-description">
-                Based on skill matching, experience relevance, and qualifications
+                Weighted evaluation across 5 ATS dimensions
               </p>
               <div className="score-meta">
                 <span className="meta-item">
                   <Cpu size={12} />
                   Model: {candidate.ai_model || 'DeepSeek AI'}
                 </span>
+                <span className="meta-item">
+                  <BarChart4 size={12} />
+                  Enhanced ATS Scoring
+                </span>
               </div>
             </div>
           </div>
         </div>
 
+        {/* ATS Breakdown */}
+        {renderATSBreakdown(candidate)}
+
+        {/* Domain Info */}
+        {renderDomainInfo(candidate)}
+
         {/* Recommendation Card */}
         <div className="recommendation-card glass" style={{
-          background: `linear-gradient(135deg, ${getScoreColor(candidate.overall_score)}15, ${getScoreColor(candidate.overall_score)}08)`,
-          borderLeft: `4px solid ${getScoreColor(candidate.overall_score)}`
+          background: `linear-gradient(135deg, ${getScoreColor(atsScore)}15, ${getScoreColor(atsScore)}08)`,
+          borderLeft: `4px solid ${getScoreColor(atsScore)}`
         }}>
           <div className="recommendation-header">
-            <AwardIcon size={28} style={{ color: getScoreColor(candidate.overall_score) }} />
+            <AwardIcon size={28} style={{ color: getScoreColor(atsScore) }} />
             <div>
-              <h3>Analysis Recommendation</h3>
+              <h3>Enhanced ATS Recommendation</h3>
               <p className="recommendation-subtitle">
-                {candidate.ai_model || 'DeepSeek AI'} • Batch Processing
+                {candidate.ai_model || 'DeepSeek AI'} • Batch Processing • {domain} Domain
               </p>
             </div>
           </div>
           <div className="recommendation-content">
             <p className="recommendation-text">{candidate.recommendation}</p>
             <div className="confidence-badge">
-              <Brain size={16} />
-              <span>DeepSeek AI Analysis</span>
+              <BarChart4 size={16} />
+              <span>Enhanced ATS Analysis</span>
             </div>
           </div>
         </div>
 
+        {/* Overall Feedback */}
+        {candidate.overall_feedback && (
+          <div className="feedback-card glass">
+            <div className="feedback-header">
+              <MessageSquare size={24} />
+              <h3>Overall ATS Feedback</h3>
+            </div>
+            <div className="feedback-content">
+              <p>{candidate.overall_feedback}</p>
+            </div>
+          </div>
+        )}
+
         {/* Skills Analysis */}
         <div className="section-title">
           <h2>Skills Analysis</h2>
-          <p>Detailed breakdown of matched and missing skills</p>
+          <p>Detailed breakdown of matched and missing skills with context</p>
         </div>
         
         <div className="skills-grid">
@@ -1840,7 +2105,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Matched Skills</h3>
-                <p className="skills-subtitle">Found in resume</p>
+                <p className="skills-subtitle">Found in resume with evidence</p>
               </div>
               <div className="skills-count success">
                 <span>{candidate.skills_matched?.length || 0}</span>
@@ -1870,7 +2135,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Missing Skills</h3>
-                <p className="skills-subtitle">Suggested to learn</p>
+                <p className="skills-subtitle">Required skills not found or lacking evidence</p>
               </div>
             </div>
             <div className="skills-content">
@@ -1884,7 +2149,7 @@ function App() {
                   </li>
                 ))}
                 {(!candidate.skills_missing || candidate.skills_missing.length === 0) && (
-                  <li className="no-items success-text">All required skills are present!</li>
+                  <li className="no-items success-text">All required skills are present with evidence!</li>
                 )}
               </ul>
             </div>
@@ -1894,7 +2159,7 @@ function App() {
         {/* Summary Section */}
         <div className="section-title">
           <h2>Profile Summary</h2>
-          <p>Insights extracted from resume</p>
+          <p>Detailed insights extracted from resume</p>
         </div>
         
         <div className="summary-grid">
@@ -1909,6 +2174,11 @@ function App() {
               <p className="detailed-summary">{candidate.experience_summary || "No experience summary available."}</p>
               <div className="summary-footer">
                 <span className="summary-tag">Professional Experience</span>
+                {candidate.domain_expertise && candidate.domain_expertise !== 'To be determined' && (
+                  <span className="summary-tag" style={{ background: getDomainColor(domain) + '20', color: getDomainColor(domain) }}>
+                    {candidate.domain_expertise} Expertise
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -1929,10 +2199,10 @@ function App() {
           </div>
         </div>
 
-        {/* Insights Section - Clean Version without bullet points */}
+        {/* Insights Section */}
         <div className="section-title">
-          <h2>Insights & Recommendations</h2>
-          <p>Personalized suggestions to improve your match</p>
+          <h2>Strengths & Improvement Areas</h2>
+          <p>Specific insights from ATS evaluation</p>
         </div>
         
         <div className="insights-grid">
@@ -1943,7 +2213,7 @@ function App() {
               </div>
               <div>
                 <h3>Key Strengths</h3>
-                <p className="insight-subtitle">Areas where candidate excels</p>
+                <p className="insight-subtitle">Areas contributing to ATS score</p>
               </div>
             </div>
             <div className="insight-content">
@@ -1968,7 +2238,7 @@ function App() {
               </div>
               <div>
                 <h3>Areas for Improvement</h3>
-                <p className="insight-subtitle">Opportunities to grow</p>
+                <p className="insight-subtitle">Opportunities to increase ATS score</p>
               </div>
             </div>
             <div className="insight-content">
@@ -1990,8 +2260,8 @@ function App() {
         {/* Action Section */}
         <div className="action-section glass">
           <div className="action-content">
-            <h3>Candidate Analysis Complete</h3>
-            <p>Download individual report or full batch report</p>
+            <h3>Enhanced ATS Candidate Analysis Complete</h3>
+            <p>Download enhanced ATS report or full batch report</p>
           </div>
           <div className="action-buttons">
             {candidate.analysis_id && (
@@ -2000,16 +2270,16 @@ function App() {
                 onClick={() => handleIndividualDownload(candidate.analysis_id)}
               >
                 <FileDown size={20} />
-                <span>Download Individual Report</span>
+                <span>Download Enhanced ATS Report</span>
               </button>
             )}
             <button className="download-button secondary" onClick={handleBatchDownload}>
               <DownloadCloud size={20} />
-              <span>Download Full Batch Report</span>
+              <span>Download Full Enhanced ATS Batch Report</span>
             </button>
             <button className="reset-button" onClick={navigateBack}>
               <ArrowLeft size={20} />
-              <span>Back to Rankings</span>
+              <span>Back to Enhanced ATS Rankings</span>
             </button>
           </div>
         </div>
@@ -2045,15 +2315,15 @@ function App() {
             {/* Logo and Title */}
             <div className="logo">
               <div className="logo-glow">
-                <Brain className="logo-icon" />
+                <BarChart4 className="logo-icon" />
               </div>
               <div className="logo-text">
-                <h1>AI Resume Analyzer</h1>
+                <h1>Enhanced ATS Resume Analyzer</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
                   <span className="deepseek-badge">🧠 DeepSeek</span>
                   <span className="divider">•</span>
-                  <span className="tagline">32K Context • Up to 10 Resumes • Always Active</span>
+                  <span className="tagline">Weighted ATS Scoring • Domain Detection • Up to 10 Resumes</span>
                 </div>
               </div>
             </div>
@@ -2114,6 +2384,12 @@ function App() {
               {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
             </div>
             
+            {/* ATS Indicator */}
+            <div className="feature ats-indicator">
+              <BarChart4 size={16} />
+              <span>Enhanced ATS</span>
+            </div>
+            
             {/* Model Info */}
             {modelInfo && (
               <div className="feature model-info">
@@ -2126,9 +2402,9 @@ function App() {
             {currentView !== 'main' && (
               <div className="feature nav-indicator">
                 <Grid size={16} />
-                <span>{currentView === 'single-results' ? 'Single Analysis' : 
-                       currentView === 'batch-results' ? 'Batch Results' : 
-                       'Candidate Details'}</span>
+                <span>{currentView === 'single-results' ? 'Single ATS Analysis' : 
+                       currentView === 'batch-results' ? 'Batch ATS Results' : 
+                       'Candidate ATS Details'}</span>
               </div>
             )}
             
@@ -2152,10 +2428,10 @@ function App() {
             <button 
               className="feature quota-toggle"
               onClick={() => setShowQuotaPanel(!showQuotaPanel)}
-              title="Show service status"
+              title="Show enhanced ATS status"
             >
               <BarChart size={16} />
-              <span>Service Status</span>
+              <span>ATS Status</span>
             </button>
           </div>
         </div>
@@ -2175,8 +2451,8 @@ function App() {
           <div className="quota-status-panel glass">
             <div className="quota-panel-header">
               <div className="quota-title">
-                <Activity size={20} />
-                <h3>DeepSeek Service Status</h3>
+                <BarChart4 size={20} />
+                <h3>Enhanced ATS Service Status</h3>
               </div>
               <button 
                 className="close-quota"
@@ -2200,31 +2476,43 @@ function App() {
                 <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
                   {aiStatus === 'available' ? '🧠 Ready' : 
                    aiStatus === 'warming' ? '🔥 Warming' : 
-                   '⚠️ Enhanced Mode'}
+                   '⚠️ Enhanced ATS Mode'}
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">AI Model</div>
+                <div className="summary-label">ATS Scoring Method</div>
+                <div className="summary-value success">
+                  🎯 Weighted Evaluation
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">ATS Dimensions</div>
                 <div className="summary-value">
-                  {getModelDisplayName(modelInfo)}
+                  📊 5 Weighted Categories
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Domain Support</div>
+                <div className="summary-value info">
+                  🌐 VLSI, CS/Software, General
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Seniority Assessment</div>
+                <div className="summary-value">
+                  👥 Junior, Mid, Senior, Lead
                 </div>
               </div>
               <div className="summary-item">
                 <div className="summary-label">Batch Capacity</div>
                 <div className="summary-value success">
-                  📊 Up to 10 resumes
+                  📈 Up to 10 resumes
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Processing Method</div>
-                <div className="summary-value info">
-                  ⚡ Staggered Sequential
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Context Length</div>
+                <div className="summary-label">AI Model</div>
                 <div className="summary-value">
-                  🧠 32K tokens
+                  🤖 {getModelDisplayName(modelInfo)}
                 </div>
               </div>
             </div>
@@ -2235,7 +2523,7 @@ function App() {
                 onClick={checkBackendHealth}
               >
                 <RefreshCw size={16} />
-                Refresh Status
+                Refresh ATS Status
               </button>
               <button 
                 className="action-button warmup"
@@ -2247,7 +2535,7 @@ function App() {
                 ) : (
                   <Thermometer size={16} />
                 )}
-                Force Warm-up
+                Force ATS Warm-up
               </button>
             </div>
           </div>
@@ -2265,6 +2553,10 @@ function App() {
                 <div className="indicator-dot"></div>
                 <span>DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
               </div>
+              <div className="status-indicator active">
+                <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
+                <span>ATS: Enhanced Weighted Scoring</span>
+              </div>
               {modelInfo && (
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
@@ -2272,10 +2564,10 @@ function App() {
                 </div>
               )}
               <div className="status-indicator active">
-                <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
-                <span>Mode: {currentView === 'single-results' ? 'Single Analysis' : 
-                              currentView === 'batch-results' ? 'Batch Analysis' : 
-                              currentView === 'candidate-detail' ? 'Candidate Details' : 
+                <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                <span>Mode: {currentView === 'single-results' ? 'Single ATS Analysis' : 
+                              currentView === 'batch-results' ? 'Batch ATS Analysis' : 
+                              currentView === 'candidate-detail' ? 'Candidate ATS Details' : 
                               batchMode ? 'Batch' : 'Single'}</span>
               </div>
               {batchMode && (
@@ -2289,21 +2581,21 @@ function App() {
             {backendStatus !== 'ready' && (
               <div className="wakeup-message">
                 <AlertCircle size={16} />
-                <span>Backend is waking up. Analysis may be slower for the first request.</span>
+                <span>Backend is waking up. Enhanced ATS analysis may be slower for the first request.</span>
               </div>
             )}
             
             {aiStatus === 'warming' && (
               <div className="wakeup-message">
                 <Thermometer size={16} />
-                <span>DeepSeek API is warming up. This ensures high-quality responses.</span>
+                <span>DeepSeek API is warming up. This ensures high-quality enhanced ATS responses.</span>
               </div>
             )}
             
             {batchMode && (
               <div className="multi-key-message">
-                <Brain size={16} />
-                <span>Batch mode: Processing up to 10 resumes with DeepSeek AI</span>
+                <BarChart4 size={16} />
+                <span>Batch mode: Processing up to 10 resumes with enhanced weighted ATS scoring</span>
               </div>
             )}
           </div>
@@ -2318,32 +2610,32 @@ function App() {
         <div className="footer-content">
           <div className="footer-brand">
             <div className="footer-logo">
-              <Brain size={20} />
-              <span>AI Resume Analyzer</span>
+              <BarChart4 size={20} />
+              <span>Enhanced ATS Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              DeepSeek AI with 32K context length • Up to 10 resumes per batch • Individual reports available
+              Weighted ATS Scoring (5 dimensions) • Domain Detection • Seniority Assessment • Up to 10 resumes per batch
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
-              <h4>Features</h4>
-              <a href="#">DeepSeek AI</a>
-              <a href="#">32K Context</a>
-              <a href="#">Batch Processing</a>
-              <a href="#">Excel Reports</a>
+              <h4>ATS Features</h4>
+              <a href="#">Weighted Scoring</a>
+              <a href="#">Domain Detection</a>
+              <a href="#">Seniority Assessment</a>
+              <a href="#">Detailed Breakdown</a>
             </div>
             <div className="footer-section">
               <h4>Service</h4>
-              <a href="#">Auto Warm-up</a>
-              <a href="#">Keep-alive</a>
-              <a href="#">Health Checks</a>
-              <a href="#">Status Monitor</a>
+              <a href="#">Enhanced ATS</a>
+              <a href="#">Domain Support</a>
+              <a href="#">Excel Reports</a>
+              <a href="#">Batch Processing</a>
             </div>
             <div className="footer-section">
               <h4>Navigation</h4>
-              <a href="#" onClick={navigateToMain}>New Analysis</a>
+              <a href="#" onClick={navigateToMain}>New ATS Analysis</a>
               {currentView !== 'main' && (
                 <a href="#" onClick={navigateBack}>Go Back</a>
               )}
@@ -2354,15 +2646,15 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + DeepSeek AI. 32K Context Mode.</p>
+          <p>© 2024 Enhanced ATS Resume Analyzer. Built with React + Flask + DeepSeek AI. Weighted ATS Evaluation.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
               Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
             </span>
             <span className="stat">
-              <Brain size={12} />
-              DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : 'Warming'}
+              <BarChart4 size={12} />
+              ATS: Enhanced Weighted
             </span>
             <span className="stat">
               <Cpu size={12} />
