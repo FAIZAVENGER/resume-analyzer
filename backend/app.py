@@ -30,39 +30,35 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Configure multiple Groq API keys
-GROQ_API_KEYS = [
-    os.getenv('GROQ_API_KEY_1'),
-    os.getenv('GROQ_API_KEY_2'),
-    os.getenv('GROQ_API_KEY_3'),
-]
+# Configure DeepSeek API
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
+DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
 
-# Filter out None values and create key pool
-ACTIVE_API_KEYS = [key for key in GROQ_API_KEYS if key]
-
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
-
-# Track API key usage and limits
-KEY_USAGE = {key: {'count': 0, 'last_used': None, 'available': True, 'errors': 0, 'requests_today': 0, 'concurrent': 0, 'cooling_until': None} for key in ACTIVE_API_KEYS}
-KEY_LIMIT = 4  # Reduced to 4 resumes per key to avoid rate limits
-KEY_COOLDOWN = 120  # Increased cooldown to 2 minutes
-
-# Available Groq models
-GROQ_MODELS = {
-    'llama-3.1-8b-instant': {
-        'name': 'Llama 3.1 8B Instant',
-        'context_length': 8192,
-        'provider': 'Groq',
-        'description': 'Fast 8B model for quick responses',
+# Available DeepSeek models
+DEEPSEEK_MODELS = {
+    'deepseek-chat': {
+        'name': 'DeepSeek Chat',
+        'context_length': 32768,
+        'provider': 'DeepSeek',
+        'description': 'General purpose chat model with 32K context',
         'status': 'production',
-        'free_tier': True,
-        'max_batch_size': 4
+        'free_tier': False,
+        'max_tokens': 8192
+    },
+    'deepseek-coder': {
+        'name': 'DeepSeek Coder',
+        'context_length': 16384,
+        'provider': 'DeepSeek',
+        'description': 'Specialized for coding tasks',
+        'status': 'production',
+        'free_tier': False,
+        'max_tokens': 8192
     }
 }
 
 # Default working model
-DEFAULT_MODEL = 'llama-3.1-8b-instant'
+DEFAULT_MODEL = 'deepseek-chat'
 
 # Track API status
 warmup_complete = False
@@ -82,8 +78,8 @@ score_cache = {}
 cache_lock = threading.Lock()
 
 # Batch processing configuration
-MAX_CONCURRENT_PER_KEY = 1  # Reduced to 1 concurrent request per key to avoid rate limits
-MAX_BATCH_SIZE = 12  # Maximum number of resumes per batch (4 per key * 3 keys)
+MAX_CONCURRENT_REQUESTS = 3  # Max concurrent requests to DeepSeek API
+MAX_BATCH_SIZE = 10  # Maximum number of resumes per batch
 MAX_INDIVIDUAL_REPORTS = 10  # Limit individual Excel reports
 
 # Rate limiting protection
@@ -97,108 +93,6 @@ def update_activity():
     """Update last activity timestamp"""
     global last_activity_time
     last_activity_time = datetime.now()
-
-def get_key_for_resume(index, total_resumes):
-    """Get the best API key for a specific resume with intelligent distribution"""
-    with threading.Lock():
-        if not ACTIVE_API_KEYS:
-            return None
-        
-        current_time = datetime.now()
-        available_keys = []
-        
-        # Check all keys for availability
-        for key_idx, key in enumerate(ACTIVE_API_KEYS):
-            key_info = KEY_USAGE[key]
-            
-            # Skip keys that are cooling down
-            if key_info.get('cooling_until') and current_time < key_info['cooling_until']:
-                continue
-            
-            # Skip keys with too many errors
-            if key_info.get('errors', 0) >= 2:
-                continue
-            
-            # Check if key is under its limit
-            if key_info['count'] < KEY_LIMIT:
-                # Calculate score based on multiple factors
-                score = 0
-                
-                # Lower usage = higher score
-                score += (KEY_LIMIT - key_info['count']) * 10
-                
-                # Lower errors = higher score
-                score += (2 - key_info.get('errors', 0)) * 5
-                
-                # Lower concurrent = higher score
-                score += (MAX_CONCURRENT_PER_KEY - key_info.get('concurrent', 0)) * 3
-                
-                available_keys.append((key, score, key_idx))
-        
-        if available_keys:
-            # Sort by score (highest first)
-            available_keys.sort(key=lambda x: x[1], reverse=True)
-            selected_key, score, key_idx = available_keys[0]
-        else:
-            # If no keys are available, use round-robin
-            key_idx = index % len(ACTIVE_API_KEYS)
-            selected_key = ACTIVE_API_KEYS[key_idx]
-            
-            # Reset the key if it's over limit
-            KEY_USAGE[selected_key]['count'] = 0
-            KEY_USAGE[selected_key]['concurrent'] = 0
-        
-        # Update usage
-        KEY_USAGE[selected_key]['count'] += 1
-        KEY_USAGE[selected_key]['last_used'] = current_time
-        KEY_USAGE[selected_key]['requests_today'] += 1
-        KEY_USAGE[selected_key]['concurrent'] += 1
-        
-        print(f"🔑 Assigning API key {key_idx + 1} to resume {index + 1}/{total_resumes} (Usage: {KEY_USAGE[selected_key]['count']}/{KEY_LIMIT}, Errors: {KEY_USAGE[selected_key]['errors']})")
-        return selected_key, key_idx + 1
-
-def mark_key_complete(key):
-    """Mark key as having completed a request"""
-    with threading.Lock():
-        if key in KEY_USAGE:
-            KEY_USAGE[key]['concurrent'] = max(0, KEY_USAGE[key]['concurrent'] - 1)
-
-def mark_key_as_error(key, error_type='rate_limit'):
-    """Mark a key as having an error with appropriate cooling"""
-    with threading.Lock():
-        if key in KEY_USAGE:
-            KEY_USAGE[key]['errors'] += 1
-            
-            # Increase cooling time based on error type and count
-            if error_type == 'rate_limit':
-                cooling_time = KEY_COOLDOWN * (KEY_USAGE[key]['errors'] ** 1.5)
-            elif error_type == 'timeout':
-                cooling_time = KEY_COOLDOWN * (KEY_USAGE[key]['errors'] ** 1.2)
-            else:
-                cooling_time = KEY_COOLDOWN * KEY_USAGE[key]['errors']
-            
-            KEY_USAGE[key]['cooling_until'] = datetime.now() + timedelta(seconds=cooling_time)
-            KEY_USAGE[key]['concurrent'] = 0  # Reset concurrent count
-            
-            key_idx = ACTIVE_API_KEYS.index(key) + 1 if key in ACTIVE_API_KEYS else 0
-            print(f"⚠️ Key {key_idx} marked with error ({error_type}), cooling for {cooling_time:.0f}s")
-
-def reset_key_usage():
-    """Reset key usage counters periodically"""
-    with threading.Lock():
-        current_time = datetime.now()
-        for key in ACTIVE_API_KEYS:
-            # Only reset if key is not in cooldown
-            if not KEY_USAGE[key].get('cooling_until') or current_time >= KEY_USAGE[key]['cooling_until']:
-                KEY_USAGE[key]['count'] = 0
-                KEY_USAGE[key]['concurrent'] = 0
-                KEY_USAGE[key]['available'] = True
-                KEY_USAGE[key].pop('cooling_until', None)
-                
-                # Gradually reduce error count
-                if KEY_USAGE[key]['errors'] > 0:
-                    KEY_USAGE[key]['errors'] = max(0, KEY_USAGE[key]['errors'] - 1)
-        print("🔄 Reset key usage counters")
 
 def calculate_resume_hash(resume_text, job_description):
     """Calculate a hash for caching consistent scores"""
@@ -215,18 +109,18 @@ def set_cached_score(resume_hash, score):
     with cache_lock:
         score_cache[resume_hash] = score
 
-def call_groq_api(prompt, max_tokens=600, temperature=0.1, timeout=45, model_override=None, retry_count=0, api_key=None, key_index=None):
-    """Call Groq API with optimized settings for batch processing"""
-    if not api_key:
-        print(f"❌ No API key provided for key {key_index}")
+def call_deepseek_api(prompt, max_tokens=600, temperature=0.1, timeout=45, model_override=None, retry_count=0):
+    """Call DeepSeek API with optimized settings"""
+    if not DEEPSEEK_API_KEY:
+        print(f"❌ No DeepSeek API key configured")
         return {'error': 'no_api_key', 'status': 500}
     
     headers = {
-        'Authorization': f'Bearer {api_key}',
+        'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
         'Content-Type': 'application/json'
     }
     
-    model_to_use = model_override or GROQ_MODEL or DEFAULT_MODEL
+    model_to_use = model_override or DEEPSEEK_MODEL or DEFAULT_MODEL
     
     # Optimized payload for batch processing
     payload = {
@@ -247,7 +141,7 @@ def call_groq_api(prompt, max_tokens=600, temperature=0.1, timeout=45, model_ove
     try:
         start_time = time.time()
         response = requests.post(
-            GROQ_API_URL,
+            DEEPSEEK_API_URL,
             headers=headers,
             json=payload,
             timeout=timeout
@@ -259,152 +153,120 @@ def call_groq_api(prompt, max_tokens=600, temperature=0.1, timeout=45, model_ove
             data = response.json()
             if 'choices' in data and len(data['choices']) > 0:
                 result = data['choices'][0]['message']['content']
-                print(f"✅ Groq API response in {response_time:.2f}s using {model_to_use} (Key {key_index})")
+                print(f"✅ DeepSeek API response in {response_time:.2f}s using {model_to_use}")
                 return result
             else:
-                print(f"❌ Unexpected Groq API response format from Key {key_index}")
+                print(f"❌ Unexpected DeepSeek API response format")
                 return {'error': 'invalid_response', 'status': response.status_code}
         
         # Handle specific error codes
         if response.status_code == 429:
-            print(f"❌ Rate limit exceeded for Key {key_index}")
-            mark_key_as_error(api_key, 'rate_limit')
+            print(f"❌ Rate limit exceeded for DeepSeek API")
             
             if retry_count < MAX_RETRIES:
-                wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(1, 3)
-                print(f"⏳ Rate limited on Key {key_index}, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
+                wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(5, 10)
+                print(f"⏳ Rate limited, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
                 time.sleep(wait_time)
-                return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key, key_index)
+                return call_deepseek_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
             return {'error': 'rate_limit', 'status': 429}
         
         elif response.status_code == 503:
-            print(f"❌ Service unavailable for Key {key_index}")
-            mark_key_as_error(api_key, 'service_unavailable')
+            print(f"❌ Service unavailable for DeepSeek API")
             
             if retry_count < 2:
-                wait_time = 10 + random.uniform(2, 5)
-                print(f"⏳ Service unavailable for Key {key_index}, retrying in {wait_time:.1f}s")
+                wait_time = 15 + random.uniform(5, 10)
+                print(f"⏳ Service unavailable, retrying in {wait_time:.1f}s")
                 time.sleep(wait_time)
-                return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key, key_index)
+                return call_deepseek_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
             return {'error': 'service_unavailable', 'status': 503}
         
         else:
-            print(f"❌ Groq API Error {response.status_code} from Key {key_index}: {response.text[:100]}")
-            mark_key_as_error(api_key, 'api_error')
+            print(f"❌ DeepSeek API Error {response.status_code}: {response.text[:100]}")
             return {'error': f'api_error_{response.status_code}', 'status': response.status_code}
             
     except requests.exceptions.Timeout:
-        print(f"❌ Groq API timeout after {timeout}s for Key {key_index}")
-        mark_key_as_error(api_key, 'timeout')
+        print(f"❌ DeepSeek API timeout after {timeout}s")
         
         if retry_count < 2:
-            wait_time = 8 + random.uniform(2, 4)
-            print(f"⏳ Timeout on Key {key_index}, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/3)")
+            wait_time = 10 + random.uniform(5, 10)
+            print(f"⏳ Timeout, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/3)")
             time.sleep(wait_time)
-            return call_groq_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1, api_key, key_index)
+            return call_deepseek_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
         return {'error': 'timeout', 'status': 408}
     
     except Exception as e:
-        print(f"❌ Groq API Exception on Key {key_index}: {str(e)}")
-        mark_key_as_error(api_key, 'exception')
+        print(f"❌ DeepSeek API Exception: {str(e)}")
         return {'error': str(e), 'status': 500}
 
-def warmup_groq_service():
-    """Warm up Groq service connection for all keys"""
+def warmup_deepseek_service():
+    """Warm up DeepSeek service connection"""
     global warmup_complete
     
-    if not ACTIVE_API_KEYS:
-        print("⚠️ Skipping Groq warm-up: No API keys configured")
+    if not DEEPSEEK_API_KEY:
+        print("⚠️ Skipping DeepSeek warm-up: No API key configured")
         return False
     
     try:
-        model_to_use = GROQ_MODEL or DEFAULT_MODEL
-        print(f"🔥 Warming up Groq connections...")
+        model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
+        print(f"🔥 Warming up DeepSeek connection...")
         print(f"📊 Using model: {model_to_use}")
-        print(f"🔑 Active API keys: {len(ACTIVE_API_KEYS)}")
         
-        successful_warmups = 0
+        start_time = time.time()
         
-        for idx, api_key in enumerate(ACTIVE_API_KEYS, 1):
-            print(f"  Warming up key {idx}...")
-            start_time = time.time()
-            
-            # Reset key status before warmup
-            KEY_USAGE[api_key]['errors'] = 0
-            KEY_USAGE[api_key]['cooling_until'] = None
-            
-            response = call_groq_api(
-                prompt="Hello, are you ready? Respond with just 'ready'.",
-                max_tokens=10,
-                temperature=0.1,
-                timeout=15,
-                api_key=api_key,
-                key_index=idx
-            )
-            
-            if isinstance(response, dict) and 'error' in response:
-                error_type = response.get('error')
-                print(f"  ⚠️ Key {idx} warm-up failed: {error_type}")
-                # Don't mark as error during warmup
-                KEY_USAGE[api_key]['errors'] = max(0, KEY_USAGE[api_key]['errors'] - 1)
-            elif response and 'ready' in response.lower():
-                elapsed = time.time() - start_time
-                print(f"  ✅ Key {idx} warmed up in {elapsed:.2f}s")
-                successful_warmups += 1
-            else:
-                print(f"  ⚠️ Key {idx} warm-up failed: Unexpected response")
+        response = call_deepseek_api(
+            prompt="Hello, are you ready? Respond with just 'ready'.",
+            max_tokens=10,
+            temperature=0.1,
+            timeout=15
+        )
         
-        if successful_warmups > 0:
-            print(f"✅ {successful_warmups}/{len(ACTIVE_API_KEYS)} API keys warmed up successfully")
+        if isinstance(response, dict) and 'error' in response:
+            error_type = response.get('error')
+            print(f"  ⚠️ DeepSeek warm-up failed: {error_type}")
+            return False
+        elif response and 'ready' in response.lower():
+            elapsed = time.time() - start_time
+            print(f"✅ DeepSeek warmed up in {elapsed:.2f}s")
             warmup_complete = True
             return True
         else:
-            print("⚠️ All warm-up attempts failed")
-            threading.Timer(30.0, warmup_groq_service).start()
+            print(f"  ⚠️ DeepSeek warm-up failed: Unexpected response")
             return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        threading.Timer(30.0, warmup_groq_service).start()
+        threading.Timer(30.0, warmup_deepseek_service).start()
         return False
 
 def keep_service_warm():
-    """Periodically send requests to keep Groq service responsive"""
+    """Periodically send requests to keep DeepSeek service responsive"""
     global service_running
     
     while service_running:
         try:
             time.sleep(180)  # Check every 3 minutes
             
-            if ACTIVE_API_KEYS and warmup_complete:
-                print(f"♨️ Keeping Groq warm with {len(ACTIVE_API_KEYS)} keys...")
+            if DEEPSEEK_API_KEY and warmup_complete:
+                print(f"♨️ Keeping DeepSeek warm...")
                 
-                for idx, api_key in enumerate(ACTIVE_API_KEYS, 1):
-                    try:
-                        # Skip keys in cooldown
-                        key_info = KEY_USAGE.get(api_key, {})
-                        if key_info.get('cooling_until') and datetime.now() < key_info['cooling_until']:
-                            continue
-                        
-                        response = call_groq_api(
-                            prompt="Ping - just say 'pong'",
-                            max_tokens=5,
-                            timeout=20,
-                            api_key=api_key,
-                            key_index=idx
-                        )
-                        if response and 'pong' in str(response).lower():
-                            print(f"  ✅ Key {idx} keep-alive successful")
-                        else:
-                            print(f"  ⚠️ Key {idx} keep-alive got unexpected response")
-                    except Exception as e:
-                        print(f"  ⚠️ Key {idx} keep-alive failed: {str(e)}")
+                try:
+                    response = call_deepseek_api(
+                        prompt="Ping - just say 'pong'",
+                        max_tokens=5,
+                        timeout=20
+                    )
+                    if response and 'pong' in str(response).lower():
+                        print(f"  ✅ DeepSeek keep-alive successful")
+                    else:
+                        print(f"  ⚠️ DeepSeek keep-alive got unexpected response")
+                except Exception as e:
+                    print(f"  ⚠️ DeepSeek keep-alive failed: {str(e)}")
                     
         except Exception as e:
             print(f"⚠️ Keep-warm thread error: {str(e)}")
             time.sleep(180)
 
-# Text extraction functions (keep the same as before)
+# Text extraction functions
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file with error handling"""
     try:
@@ -495,11 +357,11 @@ def extract_text_from_txt(file_path):
         print(f"❌ TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
-def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None, api_key=None, key_index=None):
-    """Use Groq API to analyze resume against job description with fallback"""
+def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None):
+    """Use DeepSeek API to analyze resume against job description with fallback"""
     
-    if not api_key:
-        print(f"❌ No API key provided for key {key_index}.")
+    if not DEEPSEEK_API_KEY:
+        print(f"❌ No DeepSeek API key configured.")
         return generate_fallback_analysis(filename, "No API key available")
     
     # Optimize text length to reduce API load
@@ -533,28 +395,26 @@ Provide analysis in this JSON format only:
 }}"""
 
     try:
-        model_to_use = GROQ_MODEL or DEFAULT_MODEL
-        print(f"⚡ Sending to Groq API (Key {key_index}, {model_to_use})...")
+        model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
+        print(f"⚡ Sending to DeepSeek API ({model_to_use})...")
         start_time = time.time()
         
-        response = call_groq_api(
+        response = call_deepseek_api(
             prompt=prompt,
             max_tokens=400,  # Reduced from 500
             temperature=0.1,
-            timeout=30,  # Reduced from 45
-            api_key=api_key,
-            key_index=key_index
+            timeout=30  # Reduced from 45
         )
         
         if isinstance(response, dict) and 'error' in response:
             error_type = response.get('error')
-            print(f"❌ Groq API error for Key {key_index}: {error_type}")
+            print(f"❌ DeepSeek API error: {error_type}")
             
             # Return fallback analysis with partial success
             return generate_fallback_analysis(filename, f"API Error: {error_type}", partial_success=True)
         
         elapsed_time = time.time() - start_time
-        print(f"✅ Groq API response in {elapsed_time:.2f} seconds (Key {key_index})")
+        print(f"✅ DeepSeek API response in {elapsed_time:.2f} seconds")
         
         result_text = response.strip()
         
@@ -571,9 +431,9 @@ Provide analysis in this JSON format only:
         
         try:
             analysis = json.loads(json_str)
-            print(f"✅ Successfully parsed JSON response for Key {key_index}")
+            print(f"✅ Successfully parsed JSON response")
         except json.JSONDecodeError as e:
-            print(f"❌ JSON Parse Error for Key {key_index}: {e}")
+            print(f"❌ JSON Parse Error: {e}")
             print(f"Response was: {result_text[:150]}")
             
             return generate_fallback_analysis(filename, "JSON Parse Error", partial_success=True)
@@ -595,22 +455,21 @@ Provide analysis in this JSON format only:
                 analysis['overall_score'] = 70
         
         # Add metadata
-        analysis['ai_provider'] = "groq"
+        analysis['ai_provider'] = "deepseek"
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['ai_model'] = model_to_use
         analysis['response_time'] = f"{elapsed_time:.2f}s"
-        analysis['api_key_used'] = f"key_{key_index}"
         
         # Add analysis ID if provided
         if analysis_id:
             analysis['analysis_id'] = analysis_id
         
-        print(f"✅ Analysis completed: {analysis['candidate_name']} (Score: {analysis['overall_score']}, Key: {key_index})")
+        print(f"✅ Analysis completed: {analysis['candidate_name']} (Score: {analysis['overall_score']})")
         
         return analysis
         
     except Exception as e:
-        print(f"❌ Groq Analysis Error for Key {key_index}: {str(e)}")
+        print(f"❌ DeepSeek Analysis Error: {str(e)}")
         return generate_fallback_analysis(filename, f"Analysis Error: {str(e)[:100]}")
     
 def validate_analysis(analysis, filename):
@@ -665,32 +524,30 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "candidate_name": candidate_name,
             "skills_matched": ["Partial analysis completed", "Basic skill matching done"],
             "skills_missing": ["Full AI analysis pending", "Review required"],
-            "experience_summary": f"Basic analysis completed. Full Groq AI analysis was interrupted.",
+            "experience_summary": f"Basic analysis completed. Full DeepSeek AI analysis was interrupted.",
             "education_summary": "Educational background requires full AI analysis.",
             "overall_score": 55,
             "recommendation": "Needs Full Analysis",
             "key_strengths": ["File processed successfully", "Ready for detailed analysis"],
             "areas_for_improvement": ["Complete AI analysis pending", "Try single file analysis"],
-            "ai_provider": "groq",
+            "ai_provider": "deepseek",
             "ai_status": "Partial",
-            "ai_model": GROQ_MODEL or DEFAULT_MODEL,
-            "api_key_used": "fallback"
+            "ai_model": DEEPSEEK_MODEL or DEFAULT_MODEL,
         }
     else:
         return {
             "candidate_name": candidate_name,
             "skills_matched": ["AI service is initializing", "Please try again in a moment"],
             "skills_missing": ["Detailed analysis coming soon", "Service warming up"],
-            "experience_summary": f"The Groq AI analysis service is currently warming up.",
+            "experience_summary": f"The DeepSeek AI analysis service is currently warming up.",
             "education_summary": f"Educational background analysis will be available once the service is ready.",
             "overall_score": 50,
             "recommendation": "Service Warming Up - Please Retry",
-            "key_strengths": ["Ultra-fast analysis once model is loaded", "Accurate skill matching"],
+            "key_strengths": ["Fast analysis once model is loaded", "Accurate skill matching"],
             "areas_for_improvement": ["Please wait for model to load", "Try again in 15 seconds"],
-            "ai_provider": "groq",
+            "ai_provider": "deepseek",
             "ai_status": "Warming up",
-            "ai_model": GROQ_MODEL or DEFAULT_MODEL,
-            "api_key_used": "fallback"
+            "ai_model": DEEPSEEK_MODEL or DEFAULT_MODEL,
         }
 
 def process_single_resume(args):
@@ -699,17 +556,6 @@ def process_single_resume(args):
     
     try:
         print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
-        
-        # Get API key for this resume
-        api_key, key_index = get_key_for_resume(index, total)
-        
-        if not api_key:
-            return {
-                'filename': resume_file.filename,
-                'error': 'No available API key',
-                'status': 'failed',
-                'index': index
-            }
         
         # Add delay based on index to avoid overwhelming API
         if index > 0:
@@ -750,9 +596,9 @@ def process_single_resume(args):
                 'index': index
             }
         
-        # Analyze with Groq API
+        # Analyze with DeepSeek API
         analysis_id = f"{batch_id}_resume_{index}"
-        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key, key_index)
+        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id)
         
         # Add file info
         analysis['filename'] = resume_file.filename
@@ -766,7 +612,6 @@ def process_single_resume(args):
         
         # Add metadata
         analysis['analysis_id'] = analysis_id
-        analysis['key_index'] = key_index
         analysis['processing_order'] = index + 1
         
         # Create individual Excel report
@@ -785,16 +630,12 @@ def process_single_resume(args):
         if os.path.exists(file_path):
             os.remove(file_path)
         
-        # Mark key as complete
-        mark_key_complete(api_key)
-        
-        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')} (Key: {key_index})")
+        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
         
         return {
             'analysis': analysis,
             'status': 'success',
-            'index': index,
-            'api_key_used': key_index
+            'index': index
         }
         
     except Exception as e:
@@ -816,7 +657,7 @@ def home():
     inactive_minutes = int(inactive_time.total_seconds() / 60)
     
     warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
-    model_to_use = GROQ_MODEL or DEFAULT_MODEL
+    model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
     
     return '''
     <!DOCTYPE html>
@@ -836,17 +677,16 @@ def home():
     <body>
         <div class="container">
             <h1>🚀 Resume Analyzer API</h1>
-            <p>AI-powered resume analysis using Multi-Key Groq API</p>
+            <p>AI-powered resume analysis using DeepSeek API</p>
             
             <div class="status ''' + ('ready' if warmup_complete else 'warming') + '''">
                 <strong>Status:</strong> ''' + warmup_status + '''
             </div>
             
             <p><strong>Model:</strong> ''' + model_to_use + '''</p>
-            <p><strong>API Keys:</strong> ''' + str(len(ACTIVE_API_KEYS)) + ''' active</p>
+            <p><strong>API Provider:</strong> DeepSeek</p>
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
-            <p><strong>Key Limit:</strong> ''' + str(KEY_LIMIT) + ''' resumes per key</p>
-            <p><strong>Processing:</strong> Staggered sequential with delays</p>
+            <p><strong>Processing:</strong> Sequential with delays</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
             
             <h2>📡 Endpoints</h2>
@@ -932,23 +772,20 @@ def analyze_resume():
         print(f"✅ Extracted {len(resume_text)} characters in {extraction_time:.2f}s")
         
         # Check API configuration
-        if not ACTIVE_API_KEYS:
-            print("❌ No Groq API keys configured")
-            return jsonify({'error': 'Groq API not configured'}), 500
+        if not DEEPSEEK_API_KEY:
+            print("❌ No DeepSeek API key configured")
+            return jsonify({'error': 'DeepSeek API not configured'}), 500
         
-        # Analyze with Groq API
-        model_to_use = GROQ_MODEL or DEFAULT_MODEL
-        print(f"⚡ Starting Groq API analysis ({model_to_use})...")
+        # Analyze with DeepSeek API
+        model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
+        print(f"⚡ Starting DeepSeek API analysis ({model_to_use})...")
         ai_start = time.time()
         
-        # Get API key
-        api_key, key_index = get_key_for_resume(0, 1)
-        
         analysis_id = f"single_{timestamp}"
-        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key, key_index)
+        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id)
         ai_time = time.time() - ai_start
         
-        print(f"✅ Groq API analysis completed in {ai_time:.2f}s")
+        print(f"✅ DeepSeek API analysis completed in {ai_time:.2f}s")
         
         # Create Excel report
         print("📊 Creating Excel report...")
@@ -962,17 +799,13 @@ def analyze_resume():
         if os.path.exists(file_path):
             os.remove(file_path)
         
-        # Mark key as complete
-        mark_key_complete(api_key)
-        
         # Return analysis
         analysis['excel_filename'] = os.path.basename(excel_path)
         analysis['ai_model'] = model_to_use
-        analysis['ai_provider'] = "groq"
+        analysis['ai_provider'] = "deepseek"
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['response_time'] = f"{ai_time:.2f}s"
         analysis['analysis_id'] = analysis_id
-        analysis['api_key_used'] = f"key_{key_index}"
         
         total_time = time.time() - start_time
         print(f"✅ Request completed in {total_time:.2f} seconds")
@@ -1018,9 +851,9 @@ def analyze_resume_batch():
             return jsonify({'error': f'Maximum {MAX_BATCH_SIZE} resumes allowed per batch'}), 400
         
         # Check API configuration
-        if not ACTIVE_API_KEYS:
-            print("❌ No Groq API keys configured")
-            return jsonify({'error': 'Groq API not configured'}), 500
+        if not DEEPSEEK_API_KEY:
+            print("❌ No DeepSeek API key configured")
+            return jsonify({'error': 'DeepSeek API not configured'}), 500
         
         # Prepare batch analysis
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
@@ -1040,18 +873,7 @@ def analyze_resume_batch():
                 })
                 continue
             
-            # Get API key for this resume
-            api_key, key_index = get_key_for_resume(index, len(resume_files))
-            
-            if not api_key:
-                errors.append({
-                    'filename': resume_file.filename,
-                    'error': 'No available API key',
-                    'index': index
-                })
-                continue
-            
-            print(f"🔑 Processing resume {index + 1}/{len(resume_files)} with Key {key_index}")
+            print(f"🔑 Processing resume {index + 1}/{len(resume_files)}")
             
             # Process the resume
             args = (resume_file, job_description, index, len(resume_files), batch_id)
@@ -1092,33 +914,6 @@ def analyze_resume_batch():
             except Exception as e:
                 print(f"❌ Failed to create Excel report: {str(e)}")
         
-        # Calculate key distribution
-        key_distribution = {}
-        for analysis in all_analyses:
-            key_used = analysis.get('api_key_used', 'fallback')
-            if key_used not in key_distribution:
-                key_distribution[key_used] = []
-            key_distribution[key_used].append(analysis.get('candidate_name', 'Unknown'))
-        
-        # Prepare key distribution description
-        key_distribution_desc = []
-        successful_by_key = {}
-        for analysis in all_analyses:
-            key_used = analysis.get('api_key_used', 'unknown')
-            if key_used != 'fallback':
-                successful_by_key[key_used] = successful_by_key.get(key_used, 0) + 1
-        
-        for key_idx in range(1, len(ACTIVE_API_KEYS) + 1):
-            key_name = f"key_{key_idx}"
-            count = successful_by_key.get(key_name, 0)
-            if count > 0:
-                key_distribution_desc.append(f"Key {key_idx}: {count} resume(s)")
-        
-        # Check for fallback analyses
-        fallback_count = sum(1 for a in all_analyses if a.get('api_key_used') == 'fallback')
-        if fallback_count > 0:
-            key_distribution_desc.append(f"Fallback: {fallback_count} resume(s)")
-        
         # Prepare response
         batch_summary = {
             'success': True,
@@ -1129,19 +924,14 @@ def analyze_resume_batch():
             'batch_excel_filename': os.path.basename(batch_excel_path) if batch_excel_path else None,
             'batch_id': batch_id,
             'analyses': all_analyses,
-            'model_used': GROQ_MODEL or DEFAULT_MODEL,
-            'ai_provider': "groq",
+            'model_used': DEEPSEEK_MODEL or DEFAULT_MODEL,
+            'ai_provider': "deepseek",
             'ai_status': "Warmed up" if warmup_complete else "Warming up",
             'processing_time': f"{time.time() - start_time:.2f}s",
             'job_description_preview': job_description[:200] + ("..." if len(job_description) > 200 else ""),
             'batch_size': len(resume_files),
-            'api_keys_used': len(ACTIVE_API_KEYS),
-            'key_distribution': ", ".join(key_distribution_desc) if key_distribution_desc else "All fallback",
-            'key_limit_per_key': KEY_LIMIT,
             'max_batch_size': MAX_BATCH_SIZE,
             'processing_method': 'staggered_sequential',
-            'key_details': key_distribution,
-            'fallback_analyses': fallback_count,
             'success_rate': f"{(len(all_analyses) / len(resume_files)) * 100:.1f}%" if resume_files else "0%"
         }
         
@@ -1186,8 +976,8 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
             ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             ("Overall Score", f"{analysis_data.get('overall_score', 0)}/100"),
             ("Recommendation", analysis_data.get('recommendation', 'N/A')),
-            ("AI Model", analysis_data.get('ai_model', 'Groq AI')),
-            ("API Key Used", analysis_data.get('api_key_used', 'N/A').replace('key_', 'Key ')),
+            ("AI Model", analysis_data.get('ai_model', 'DeepSeek AI')),
+            ("AI Provider", analysis_data.get('ai_provider', 'DeepSeek')),
             ("AI Status", analysis_data.get('ai_status', 'N/A')),
         ]
         
@@ -1309,7 +1099,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         ws_summary['A4'] = "Total Resumes"
         ws_summary['B4'] = len(analyses)
         ws_summary['A5'] = "AI Model"
-        ws_summary['B5'] = GROQ_MODEL or DEFAULT_MODEL
+        ws_summary['B5'] = DEEPSEEK_MODEL or DEFAULT_MODEL
         ws_summary['A6'] = "Processing Method"
         ws_summary['B6'] = "Staggered Sequential"
         ws_summary['A7'] = "Success Rate"
@@ -1318,7 +1108,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         
         # Candidates Ranking Table
         row = 9
-        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "API Key", "AI Status", "Skills Matched", "Skills Missing"]
+        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "AI Status", "Skills Matched", "Skills Missing"]
         for col, header in enumerate(headers, start=1):
             cell = ws_summary.cell(row=row, column=col)
             cell.value = header
@@ -1332,19 +1122,16 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
             ws_summary.cell(row=row, column=3, value=analysis.get('overall_score', 0))
             ws_summary.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
             
-            api_key = analysis.get('api_key_used', 'N/A')
-            ws_summary.cell(row=row, column=5, value=f"Key {api_key.replace('key_', '')}" if api_key != 'N/A' and api_key != 'fallback' else 'Fallback')
-            
             ai_status = analysis.get('ai_status', 'N/A')
-            ws_summary.cell(row=row, column=6, value=ai_status)
+            ws_summary.cell(row=row, column=5, value=ai_status)
             
             # Skills matched (first 2)
             strengths = analysis.get('skills_matched', [])
-            ws_summary.cell(row=row, column=7, value=", ".join(strengths[:2]) if strengths else "N/A")
+            ws_summary.cell(row=row, column=6, value=", ".join(strengths[:2]) if strengths else "N/A")
             
             # Missing skills (first 2)
             missing = analysis.get('skills_missing', [])
-            ws_summary.cell(row=row, column=8, value=", ".join(missing[:2]) if missing else "All matched")
+            ws_summary.cell(row=row, column=7, value=", ".join(missing[:2]) if missing else "All matched")
             
             row += 1
         
@@ -1377,8 +1164,6 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         ws['A3'] = f"Total Candidates: {len(analyses)}"
         wb.save(filepath)
         return filepath
-
-# ... [Keep the remaining routes and functions the same as before] ...
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_report(filename):
@@ -1445,26 +1230,25 @@ def download_individual_report(analysis_id):
 
 @app.route('/warmup', methods=['GET'])
 def force_warmup():
-    """Force warm-up Groq API"""
+    """Force warm-up DeepSeek API"""
     update_activity()
     
     try:
-        if not ACTIVE_API_KEYS:
+        if not DEEPSEEK_API_KEY:
             return jsonify({
                 'status': 'error',
-                'message': 'Groq API not configured',
+                'message': 'DeepSeek API not configured',
                 'warmup_complete': False
             })
         
-        result = warmup_groq_service()
+        result = warmup_deepseek_service()
         
         return jsonify({
             'status': 'success' if result else 'error',
-            'message': f'Groq API warmed up successfully with {len(ACTIVE_API_KEYS)} keys' if result else 'Warm-up failed',
+            'message': f'DeepSeek API warmed up successfully' if result else 'Warm-up failed',
             'warmup_complete': warmup_complete,
-            'ai_provider': 'groq',
-            'model': GROQ_MODEL or DEFAULT_MODEL,
-            'api_keys': len(ACTIVE_API_KEYS),
+            'ai_provider': 'deepseek',
+            'model': DEEPSEEK_MODEL or DEFAULT_MODEL,
             'timestamp': datetime.now().isoformat()
         })
         
@@ -1475,123 +1259,67 @@ def force_warmup():
             'warmup_complete': False
         })
 
-@app.route('/keys-status', methods=['GET'])
-def keys_status():
-    """Check status of all API keys"""
-    update_activity()
-    
-    try:
-        keys_info = []
-        current_time = datetime.now()
-        
-        for i, key in enumerate(ACTIVE_API_KEYS, 1):
-            key_info = KEY_USAGE.get(key, {})
-            
-            # Determine key status
-            if key_info.get('cooling_until') and current_time < key_info['cooling_until']:
-                status = 'cooling'
-                time_left = (key_info['cooling_until'] - current_time).seconds
-            elif key_info.get('errors', 0) >= 2:
-                status = 'error'
-                time_left = 0
-            else:
-                status = 'active'
-                time_left = 0
-            
-            keys_info.append({
-                'key_number': i,
-                'usage': key_info.get('count', 0),
-                'limit': KEY_LIMIT,
-                'available': key_info.get('available', True),
-                'errors': key_info.get('errors', 0),
-                'requests_today': key_info.get('requests_today', 0),
-                'concurrent': key_info.get('concurrent', 0),
-                'status': status,
-                'cooling_seconds_left': time_left
-            })
-        
-        return jsonify({
-            'total_keys': len(ACTIVE_API_KEYS),
-            'keys': keys_info,
-            'key_limit_per_key': KEY_LIMIT,
-            'max_batch_size': MAX_BATCH_SIZE,
-            'max_concurrent_per_key': MAX_CONCURRENT_PER_KEY,
-            'staggered_processing': True,
-            'cooling_time_seconds': KEY_COOLDOWN
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/quick-check', methods=['GET'])
 def quick_check():
-    """Quick endpoint to check if Groq API is responsive"""
+    """Quick endpoint to check if DeepSeek API is responsive"""
     update_activity()
     
     try:
-        if not ACTIVE_API_KEYS:
+        if not DEEPSEEK_API_KEY:
             return jsonify({
                 'available': False, 
-                'reason': 'No Groq API keys configured',
+                'reason': 'No DeepSeek API key configured',
                 'warmup_complete': warmup_complete
             })
         
         if not warmup_complete:
             return jsonify({
                 'available': False,
-                'reason': 'Groq API is warming up',
+                'reason': 'DeepSeek API is warming up',
                 'warmup_complete': False,
-                'ai_provider': 'groq',
-                'model': GROQ_MODEL or DEFAULT_MODEL,
-                'api_keys': len(ACTIVE_API_KEYS)
+                'ai_provider': 'deepseek',
+                'model': DEEPSEEK_MODEL or DEFAULT_MODEL
             })
         
-        # Check each key
-        available_keys = 0
-        key_statuses = []
-        
-        for idx, api_key in enumerate(ACTIVE_API_KEYS, 1):
-            try:
-                # Check if key is in cooldown
-                key_info = KEY_USAGE.get(api_key, {})
-                if key_info.get('cooling_until') and datetime.now() < key_info['cooling_until']:
-                    key_statuses.append(f"Key {idx}: Cooling")
-                    continue
+        try:
+            start_time = time.time()
+            
+            response = call_deepseek_api(
+                prompt="Say 'ready'",
+                max_tokens=10,
+                timeout=15
+            )
+            
+            response_time = time.time() - start_time
+            
+            if isinstance(response, dict) and 'error' in response:
+                return jsonify({
+                    'available': False,
+                    'reason': response.get('error'),
+                    'warmup_complete': warmup_complete
+                })
+            elif response and 'ready' in str(response).lower():
+                return jsonify({
+                    'available': True,
+                    'response_time': f"{response_time:.2f}s",
+                    'ai_provider': 'deepseek',
+                    'model': DEEPSEEK_MODEL or DEFAULT_MODEL,
+                    'warmup_complete': warmup_complete,
+                    'max_batch_size': MAX_BATCH_SIZE
+                })
+            else:
+                return jsonify({
+                    'available': False,
+                    'reason': 'Unexpected response',
+                    'warmup_complete': warmup_complete
+                })
                 
-                start_time = time.time()
-                
-                response = call_groq_api(
-                    prompt="Say 'ready'",
-                    max_tokens=10,
-                    timeout=15,
-                    api_key=api_key,
-                    key_index=idx
-                )
-                
-                response_time = time.time() - start_time
-                
-                if isinstance(response, dict) and 'error' in response:
-                    key_statuses.append(f"Key {idx}: Error")
-                elif response and 'ready' in str(response).lower():
-                    key_statuses.append(f"Key {idx}: Ready ({response_time:.2f}s)")
-                    available_keys += 1
-                else:
-                    key_statuses.append(f"Key {idx}: No response")
-                    
-            except Exception as e:
-                key_statuses.append(f"Key {idx}: Exception")
-        
-        return jsonify({
-            'available': available_keys > 0,
-            'available_keys': available_keys,
-            'total_keys': len(ACTIVE_API_KEYS),
-            'key_statuses': key_statuses,
-            'ai_provider': 'groq',
-            'model': GROQ_MODEL or DEFAULT_MODEL,
-            'warmup_complete': warmup_complete,
-            'max_batch_size': MAX_BATCH_SIZE,
-            'processing_method': 'staggered_sequential'
-        })
+        except Exception as e:
+            return jsonify({
+                'available': False,
+                'reason': str(e)[:100],
+                'warmup_complete': warmup_complete
+            })
             
     except Exception as e:
         error_msg = str(e)
@@ -1599,9 +1327,8 @@ def quick_check():
             'available': False,
             'reason': error_msg[:100],
             'status': 'error',
-            'ai_provider': 'groq',
-            'model': GROQ_MODEL or DEFAULT_MODEL,
-            'api_keys': len(ACTIVE_API_KEYS),
+            'ai_provider': 'deepseek',
+            'model': DEEPSEEK_MODEL or DEFAULT_MODEL,
             'warmup_complete': warmup_complete
         })
 
@@ -1610,20 +1337,17 @@ def ping():
     """Simple ping to keep service awake"""
     update_activity()
     
-    model_to_use = GROQ_MODEL or DEFAULT_MODEL
+    model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
     return jsonify({
         'status': 'pong',
         'timestamp': datetime.now().isoformat(),
         'service': 'resume-analyzer',
-        'ai_provider': 'groq',
+        'ai_provider': 'deepseek',
         'ai_warmup': warmup_complete,
         'model': model_to_use,
-        'api_keys': len(ACTIVE_API_KEYS),
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
         'keep_alive_active': True,
-        'max_batch_size': MAX_BATCH_SIZE,
-        'key_limit': KEY_LIMIT,
-        'processing_method': 'staggered_sequential'
+        'max_batch_size': MAX_BATCH_SIZE
     })
 
 @app.route('/health', methods=['GET'])
@@ -1634,45 +1358,25 @@ def health_check():
     inactive_time = datetime.now() - last_activity_time
     inactive_minutes = int(inactive_time.total_seconds() / 60)
     
-    model_to_use = GROQ_MODEL or DEFAULT_MODEL
-    
-    # Check key status
-    active_keys = 0
-    cooling_keys = 0
-    error_keys = 0
-    
-    for key in ACTIVE_API_KEYS:
-        key_info = KEY_USAGE.get(key, {})
-        if key_info.get('cooling_until') and datetime.now() < key_info['cooling_until']:
-            cooling_keys += 1
-        elif key_info.get('errors', 0) >= 2:
-            error_keys += 1
-        else:
-            active_keys += 1
+    model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
     
     return jsonify({
         'status': 'Service is running', 
         'timestamp': datetime.now().isoformat(),
-        'ai_provider': 'groq',
-        'ai_provider_configured': bool(ACTIVE_API_KEYS),
-        'api_keys_count': len(ACTIVE_API_KEYS),
-        'active_keys': active_keys,
-        'cooling_keys': cooling_keys,
-        'error_keys': error_keys,
+        'ai_provider': 'deepseek',
+        'ai_provider_configured': bool(DEEPSEEK_API_KEY),
         'model': model_to_use,
         'ai_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'reports_folder_exists': os.path.exists(REPORTS_FOLDER),
         'inactive_minutes': inactive_minutes,
-        'version': '14.0.0',
-        'optimizations': ['staggered_processing', 'intelligent_key_selection', 'reduced_token_usage', 'better_fallback'],
+        'version': '15.0.0',
+        'optimizations': ['staggered_processing', 'single_api_key', 'reduced_token_usage', 'better_fallback'],
         'configuration': {
             'max_batch_size': MAX_BATCH_SIZE,
-            'key_limit': KEY_LIMIT,
-            'max_concurrent_per_key': MAX_CONCURRENT_PER_KEY,
+            'max_concurrent_requests': MAX_CONCURRENT_REQUESTS,
             'max_retries': MAX_RETRIES,
-            'max_individual_reports': MAX_INDIVIDUAL_REPORTS,
-            'cooling_time_seconds': KEY_COOLDOWN
+            'max_individual_reports': MAX_INDIVIDUAL_REPORTS
         },
         'processing_method': 'staggered_sequential_with_delays'
     })
@@ -1702,46 +1406,34 @@ if __name__ == '__main__':
     print("="*50)
     port = int(os.environ.get('PORT', 5002))
     print(f"📍 Server: http://localhost:{port}")
-    print(f"⚡ AI Provider: GROQ")
-    model_to_use = GROQ_MODEL or DEFAULT_MODEL
+    print(f"⚡ AI Provider: DeepSeek")
+    model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
     print(f"🤖 Model: {model_to_use}")
-    print(f"🔑 Active API Keys: {len(ACTIVE_API_KEYS)}")
+    print(f"🔑 API Key: {'Configured' if DEEPSEEK_API_KEY else 'Not configured'}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
     print(f"✅ Staggered Sequential Processing: Enabled")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
-    print(f"✅ Key Limit: {KEY_LIMIT} resumes per key")
-    print(f"✅ Max Concurrent per Key: {MAX_CONCURRENT_PER_KEY}")
-    print(f"✅ Cooling Time: {KEY_COOLDOWN}s")
+    print(f"✅ Max Concurrent Requests: {MAX_CONCURRENT_REQUESTS}")
     print(f"✅ Optimized Token Usage: Enabled")
     print(f"✅ Better Fallback Analysis: Enabled")
     print("="*50 + "\n")
     
-    if not ACTIVE_API_KEYS:
-        print("⚠️  WARNING: No Groq API keys found!")
-        print("Please set GROQ_API_KEY_1, GROQ_API_KEY_2, GROQ_API_KEY_3 in Render environment variables")
+    if not DEEPSEEK_API_KEY:
+        print("⚠️  WARNING: No DeepSeek API key found!")
+        print("Please set DEEPSEEK_API_KEY in Render environment variables")
     
     # Enable garbage collection
     gc.enable()
     
     # Start warm-up in background
-    if ACTIVE_API_KEYS:
-        warmup_thread = threading.Thread(target=warmup_groq_service, daemon=True)
+    if DEEPSEEK_API_KEY:
+        warmup_thread = threading.Thread(target=warmup_deepseek_service, daemon=True)
         warmup_thread.start()
         
         # Start keep-warm thread
         keep_warm_thread = threading.Thread(target=keep_service_warm, daemon=True)
         keep_warm_thread.start()
-        
-        # Start periodic key reset
-        def periodic_key_reset():
-            while service_running:
-                time.sleep(180)  # Every 3 minutes
-                reset_key_usage()
-                print("🔄 Periodic key usage reset")
-        
-        reset_thread = threading.Thread(target=periodic_key_reset, daemon=True)
-        reset_thread.start()
         
         print("✅ Background threads started")
     
