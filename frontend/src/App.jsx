@@ -1292,9 +1292,9 @@ function App() {
           </div>
         </div>
 
-        {/* Skills Analysis - Now showing 10 skills each */}
+        {/* Skills Analysis - Now showing 5-8 skills each */}
         <div className="section-title">
-          <h2>Skills Analysis (10 skills each)</h2>
+          <h2>Skills Analysis (5-8 skills each)</h2>
           <p>Detailed breakdown of matched and missing skills</p>
         </div>
         
@@ -1306,7 +1306,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Matched Skills</h3>
-                <p className="skills-subtitle">Found in resume (10 skills)</p>
+                <p className="skills-subtitle">Found in resume ({analysis.skills_matched?.length || 0} skills)</p>
               </div>
               <div className="skills-count success">
                 <span>{analysis.skills_matched?.length || 0}</span>
@@ -1314,7 +1314,7 @@ function App() {
             </div>
             <div className="skills-content">
               <ul className="skills-list">
-                {analysis.skills_matched?.slice(0, 10).map((skill, index) => (
+                {analysis.skills_matched?.slice(0, 8).map((skill, index) => (
                   <li key={index} className="skill-item success">
                     <div className="skill-item-content">
                       <CheckCircle size={16} />
@@ -1336,7 +1336,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Missing Skills</h3>
-                <p className="skills-subtitle">Suggested to learn (10 skills)</p>
+                <p className="skills-subtitle">Suggested to learn ({analysis.skills_missing?.length || 0} skills)</p>
               </div>
               <div className="skills-count warning">
                 <span>{analysis.skills_missing?.length || 0}</span>
@@ -1344,7 +1344,7 @@ function App() {
             </div>
             <div className="skills-content">
               <ul className="skills-list">
-                {analysis.skills_missing?.slice(0, 10).map((skill, index) => (
+                {analysis.skills_missing?.slice(0, 8).map((skill, index) => (
                   <li key={index} className="skill-item warning">
                     <div className="skill-item-content">
                       <XCircle size={16} />
@@ -1360,7 +1360,7 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section with Detailed 4-5 sentences */}
+        {/* Summary Section with Detailed 5-7 sentences */}
         <div className="section-title">
           <h2>Detailed Profile Summary</h2>
           <p>Comprehensive insights extracted from resume</p>
@@ -1372,10 +1372,12 @@ function App() {
               <div className="summary-icon">
                 <Briefcase size={24} />
               </div>
-              <h3>Experience Summary (4-5 sentences)</h3>
+              <h3>Experience Summary (5-7 sentences)</h3>
             </div>
             <div className="summary-content">
-              <p className="detailed-summary">{analysis.experience_summary || "No experience summary available."}</p>
+              <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
+                {analysis.experience_summary || "No experience summary available."}
+              </p>
               <div className="summary-footer">
                 <span className="summary-tag">Professional Experience</span>
                 <span className="summary-tag">{analysis.years_experience || 'N/A'} experience</span>
@@ -1388,10 +1390,12 @@ function App() {
               <div className="summary-icon">
                 <BookOpen size={24} />
               </div>
-              <h3>Education Summary (4-5 sentences)</h3>
+              <h3>Education Summary (5-7 sentences)</h3>
             </div>
             <div className="summary-content">
-              <p className="detailed-summary">{analysis.education_summary || "No education summary available."}</p>
+              <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
+                {analysis.education_summary || "No education summary available."}
+              </p>
               <div className="summary-footer">
                 <span className="summary-tag">Academic Background</span>
                 <span className="summary-tag">Detailed Analysis</span>
@@ -1435,9 +1439,9 @@ function App() {
           </div>
         </div>
 
-        {/* Insights Section */}
+        {/* Insights Section - Now showing 6 items each */}
         <div className="section-title">
-          <h2>Insights & Recommendations</h2>
+          <h2>Insights & Recommendations (6 items each)</h2>
           <p>Personalized suggestions to improve your match</p>
         </div>
         
@@ -1454,10 +1458,10 @@ function App() {
             </div>
             <div className="insight-content">
               <div className="strengths-list">
-                {analysis.key_strengths?.map((strength, index) => (
+                {analysis.key_strengths?.slice(0, 6).map((strength, index) => (
                   <div key={index} className="strength-item">
                     <CheckCircle size={16} className="strength-icon" />
-                    <span className="strength-text">{strength}</span>
+                    <span className="strength-text" style={{ fontSize: '0.95rem' }}>{strength}</span>
                   </div>
                 ))}
                 {(!analysis.key_strengths || analysis.key_strengths.length === 0) && (
@@ -1479,10 +1483,10 @@ function App() {
             </div>
             <div className="insight-content">
               <div className="improvements-list">
-                {analysis.areas_for_improvement?.map((area, index) => (
+                {analysis.areas_for_improvement?.slice(0, 6).map((area, index) => (
                   <div key={index} className="improvement-item">
                     <AlertCircle size={16} className="improvement-icon" />
-                    <span className="improvement-text">{area}</span>
+                    <span className="improvement-text" style={{ fontSize: '0.95rem' }}>{area}</span>
                   </div>
                 ))}
                 {(!analysis.areas_for_improvement || analysis.areas_for_improvement.length === 0) && (
@@ -1716,7 +1720,7 @@ function App() {
 
       {/* Candidates Ranking */}
       <div className="section-title">
-        <h2>Candidate Rankings (10 skills analysis each)</h2>
+        <h2>Candidate Rankings (5-8 skills analysis each)</h2>
         <p>Sorted by ATS Score (Highest to Lowest) • Groq Parallel Processing</p>
       </div>
       
@@ -1764,11 +1768,11 @@ function App() {
                     <span>Matched Skills ({candidate.skills_matched?.length || 0})</span>
                   </div>
                   <div className="skills-list">
-                    {candidate.skills_matched?.slice(0, 5).map((skill, idx) => (
+                    {candidate.skills_matched?.slice(0, 4).map((skill, idx) => (
                       <span key={idx} className="skill-tag success">{skill}</span>
                     ))}
-                    {candidate.skills_matched?.length > 5 && (
-                      <span className="more-skills">+{candidate.skills_matched.length - 5} more</span>
+                    {candidate.skills_matched?.length > 4 && (
+                      <span className="more-skills">+{candidate.skills_matched.length - 4} more</span>
                     )}
                   </div>
                 </div>
@@ -1779,11 +1783,11 @@ function App() {
                     <span>Missing Skills ({candidate.skills_missing?.length || 0})</span>
                   </div>
                   <div className="skills-list">
-                    {candidate.skills_missing?.slice(0, 5).map((skill, idx) => (
+                    {candidate.skills_missing?.slice(0, 4).map((skill, idx) => (
                       <span key={idx} className="skill-tag error">{skill}</span>
                     ))}
-                    {candidate.skills_missing?.length > 5 && (
-                      <span className="more-skills">+{candidate.skills_missing.length - 5} more</span>
+                    {candidate.skills_missing?.length > 4 && (
+                      <span className="more-skills">+{candidate.skills_missing.length - 4} more</span>
                     )}
                   </div>
                 </div>
@@ -1810,7 +1814,7 @@ function App() {
                 className="view-details-btn"
                 onClick={() => navigateToCandidateDetail(index)}
               >
-                View Full Details (10 skills each)
+                View Full Details (5-8 skills each)
                 <ChevronRight size={16} />
               </button>
               {candidate.analysis_id && (
@@ -1831,7 +1835,7 @@ function App() {
       <div className="action-section glass">
         <div className="action-content">
           <h3>Batch Analysis Complete</h3>
-          <p>Download comprehensive Excel report with detailed candidate analysis (10 skills each)</p>
+          <p>Download comprehensive Excel report with detailed candidate analysis (5-8 skills each)</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
@@ -1872,7 +1876,7 @@ function App() {
             <span>Back to Rankings</span>
           </button>
           <div className="navigation-title">
-            <h2>Candidate Details (10 skills analysis)</h2>
+            <h2>Candidate Details (5-8 skills analysis)</h2>
             <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
           </div>
           <div className="navigation-actions">
@@ -1984,9 +1988,9 @@ function App() {
           </div>
         </div>
 
-        {/* Skills Analysis - 10 skills each */}
+        {/* Skills Analysis - 5-8 skills each */}
         <div className="section-title">
-          <h2>Skills Analysis (10 skills each)</h2>
+          <h2>Skills Analysis (5-8 skills each)</h2>
           <p>Detailed breakdown of matched and missing skills</p>
         </div>
         
@@ -1998,7 +2002,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Matched Skills</h3>
-                <p className="skills-subtitle">Found in resume (10 skills)</p>
+                <p className="skills-subtitle">Found in resume ({candidate.skills_matched?.length || 0} skills)</p>
               </div>
               <div className="skills-count success">
                 <span>{candidate.skills_matched?.length || 0}</span>
@@ -2006,7 +2010,7 @@ function App() {
             </div>
             <div className="skills-content">
               <ul className="skills-list">
-                {candidate.skills_matched?.slice(0, 10).map((skill, index) => (
+                {candidate.skills_matched?.slice(0, 8).map((skill, index) => (
                   <li key={index} className="skill-item success">
                     <div className="skill-item-content">
                       <CheckCircle size={16} />
@@ -2028,7 +2032,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Missing Skills</h3>
-                <p className="skills-subtitle">Suggested to learn (10 skills)</p>
+                <p className="skills-subtitle">Suggested to learn ({candidate.skills_missing?.length || 0} skills)</p>
               </div>
               <div className="skills-count warning">
                 <span>{candidate.skills_missing?.length || 0}</span>
@@ -2036,7 +2040,7 @@ function App() {
             </div>
             <div className="skills-content">
               <ul className="skills-list">
-                {candidate.skills_missing?.slice(0, 10).map((skill, index) => (
+                {candidate.skills_missing?.slice(0, 8).map((skill, index) => (
                   <li key={index} className="skill-item warning">
                     <div className="skill-item-content">
                       <XCircle size={16} />
@@ -2052,7 +2056,7 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section with Detailed 4-5 sentences */}
+        {/* Summary Section with Detailed 5-7 sentences */}
         <div className="section-title">
           <h2>Detailed Profile Summary</h2>
           <p>Comprehensive insights extracted from resume</p>
@@ -2064,10 +2068,12 @@ function App() {
               <div className="summary-icon">
                 <Briefcase size={24} />
               </div>
-              <h3>Experience Summary (4-5 sentences)</h3>
+              <h3>Experience Summary (5-7 sentences)</h3>
             </div>
             <div className="summary-content">
-              <p className="detailed-summary">{candidate.experience_summary || "No experience summary available."}</p>
+              <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
+                {candidate.experience_summary || "No experience summary available."}
+              </p>
               <div className="summary-footer">
                 <span className="summary-tag">Professional Experience</span>
                 <span className="summary-tag">{candidate.years_experience || 'N/A'} experience</span>
@@ -2080,10 +2086,12 @@ function App() {
               <div className="summary-icon">
                 <BookOpen size={24} />
               </div>
-              <h3>Education Summary (4-5 sentences)</h3>
+              <h3>Education Summary (5-7 sentences)</h3>
             </div>
             <div className="summary-content">
-              <p className="detailed-summary">{candidate.education_summary || "No education summary available."}</p>
+              <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
+                {candidate.education_summary || "No education summary available."}
+              </p>
               <div className="summary-footer">
                 <span className="summary-tag">Academic Background</span>
                 <span className="summary-tag">Detailed Analysis</span>
@@ -2129,7 +2137,7 @@ function App() {
 
         {/* Insights Section */}
         <div className="section-title">
-          <h2>Insights & Recommendations</h2>
+          <h2>Insights & Recommendations (6 items each)</h2>
           <p>Personalized suggestions to improve your match</p>
         </div>
         
@@ -2146,10 +2154,10 @@ function App() {
             </div>
             <div className="insight-content">
               <div className="strengths-list">
-                {candidate.key_strengths?.map((strength, index) => (
+                {candidate.key_strengths?.slice(0, 6).map((strength, index) => (
                   <div key={index} className="strength-item">
                     <CheckCircle size={16} className="strength-icon" />
-                    <span className="strength-text">{strength}</span>
+                    <span className="strength-text" style={{ fontSize: '0.95rem' }}>{strength}</span>
                   </div>
                 ))}
                 {(!candidate.key_strengths || candidate.key_strengths.length === 0) && (
@@ -2171,10 +2179,10 @@ function App() {
             </div>
             <div className="insight-content">
               <div className="improvements-list">
-                {candidate.areas_for_improvement?.map((area, index) => (
+                {candidate.areas_for_improvement?.slice(0, 6).map((area, index) => (
                   <div key={index} className="improvement-item">
                     <AlertCircle size={16} className="improvement-icon" />
-                    <span className="improvement-text">{area}</span>
+                    <span className="improvement-text" style={{ fontSize: '0.95rem' }}>{area}</span>
                   </div>
                 ))}
                 {(!candidate.areas_for_improvement || candidate.areas_for_improvement.length === 0) && (
@@ -2251,7 +2259,7 @@ function App() {
                   <span className="powered-by">Powered by</span>
                   <span className="groq-badge">⚡ Groq</span>
                   <span className="divider">•</span>
-                  <span className="tagline">10 Skills Analysis • Detailed Reports • Always Active</span>
+                  <span className="tagline">5-8 Skills Analysis • Detailed Reports • Always Active</span>
                 </div>
               </div>
             </div>
@@ -2428,7 +2436,7 @@ function App() {
               <div className="summary-item">
                 <div className="summary-label">Skills Analysis</div>
                 <div className="summary-value info">
-                  ⚡ 10 skills each
+                  ⚡ 5-8 skills each
                 </div>
               </div>
               <div className="summary-item">
@@ -2511,7 +2519,7 @@ function App() {
               )}
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
-                <span>Skills: 10 each</span>
+                <span>Skills: 5-8 each</span>
               </div>
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
@@ -2564,7 +2572,7 @@ function App() {
               <span>AI Resume Analyzer (Groq)</span>
             </div>
             <p className="footer-tagline">
-              Groq AI with 128K context • 3-key parallel processing • 10 skills analysis each • Detailed Excel reports
+              Groq AI with 128K context • 3-key parallel processing • 5-8 skills analysis each • Detailed Excel reports
             </p>
           </div>
           
@@ -2573,7 +2581,7 @@ function App() {
               <h4>Features</h4>
               <a href="#">Groq AI</a>
               <a href="#">128K Context</a>
-              <a href="#">10 Skills Analysis</a>
+              <a href="#">5-8 Skills Analysis</a>
               <a href="#">Detailed Reports</a>
             </div>
             <div className="footer-section">
@@ -2596,7 +2604,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. 10 Skills Analysis Mode.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. 5-8 Skills Analysis Mode.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
@@ -2622,7 +2630,7 @@ function App() {
             )}
             <span className="stat">
               <Target size={12} />
-              Skills: 10 each
+              Skills: 5-8 each
             </span>
           </div>
         </div>
