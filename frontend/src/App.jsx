@@ -19,8 +19,6 @@ import {
   FileX, Calendar, Mail, Phone, MapPin, Link,
   ThumbsUp, AlertOctagon, Lightbulb, GitBranch,
   Code, Database, Server, Terminal, Palette,
-  Music, Camera, Video, Headphones, Mic,
-  MessageSquare, Heart, Share2, Bookmark,
   Eye, EyeOff, Search, Settings, Bell,
   HelpCircle, Shield as ShieldIcon, Key,
   LogOut, UserPlus, UserCheck, UserX,
@@ -30,38 +28,13 @@ import {
   Maximize2, Minimize2, Plus, Minus,
   Edit, Trash2, Copy, Scissors, Type,
   Bold, Italic, Underline, List,
-  Hash, Quote, Divide, Percent,
-  DollarSign, Euro, Pound, Yen,
-  Bitcoin, CreditCard, ShoppingCart,
-  Package, Truck, Box, Warehouse,
-  Building, Home as HomeIcon, Navigation,
-  Compass, Map, Globe as GlobeIcon,
-  Sunrise, Sunset, Moon, CloudSun,
-  Umbrella, Wind, ThermometerSun,
-  Droplets, Waves, Tree, Flower,
-  Leaf, Bug, Fish, Bird, Cat,
-  Dog, Rabbit, Cow, Pig, Egg,
-  Apple, Carrot, Coffee as CoffeeIcon,
-  Wine, Beer, Cake, Cookie, IceCream,
-  Pizza, Hamburger, FrenchFries, Drumstick,
-  EggFried, Soup, Milk, GlassWater,
-  Citrus, Pepper, Salt, Sugar,
-  Wheat, Croissant, Sandwich, Donut,
-  Candy, Citrus as Lemon, Cherry,
-  Strawberry, Grape, Watermelon, Peach,
-  Pear, Banana, Avocado, Broccoli,
-  Corn, Eggplant, Mushroom, Onion,
-  Potato, Tomato, Pumpkin, Radish,
-  HotPepper, Garlic, Basil, Sprout,
-  Bone, Skull, Ghost, Smile, Frown,
-  Meh, Laugh, Angry, surprised,
-  File, Eye as EyeIcon, EyeOff as EyeOffIcon,
-  FileCheck, FileSearch, FileArchive,
-  Paperclip, FileUp, FileMinus, FilePlus,
-  FileQuestion, FileWarning, FileDiff,
-  FileInput, FileOutput, FileSymlink,
-  FileImage, FileVideo, FileAudio,
-  FileCode, FileJson, FileSpreadsheet as FileSpreadsheetIcon
+  FileImage, File, FilePdf, FileText as FileTextIcon,
+  Maximize, Minimize, X as CloseIcon,
+  ChevronDown, ChevronUp, ExternalLink as ExternalLinkIcon,
+  FileCode, FileArchive, FileVideo, FileAudio,
+  FileCheck, FileWarning, FileQuestion, FileMinus,
+  FilePlus, FileSlash, FileSearch, FileDigit,
+  FileJson, FileXml, FileType, FileOutput
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -99,11 +72,11 @@ function App() {
   const [currentView, setCurrentView] = useState('main');
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(null);
   
-  // Resume preview state
+  // Resume Preview State
   const [showResumePreview, setShowResumePreview] = useState(false);
-  const [resumePreviewData, setResumePreviewData] = useState(null);
-  const [isViewingResume, setIsViewingResume] = useState(false);
+  const [resumePreviewContent, setResumePreviewContent] = useState(null);
   const [resumePreviewLoading, setResumePreviewLoading] = useState(false);
+  const [activePreviewType, setActivePreviewType] = useState('text'); // 'text' or 'pdf'
   
   const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
   
@@ -135,6 +108,8 @@ function App() {
     setResumeFile(null);
     setResumeFiles([]);
     setJobDescription('');
+    setShowResumePreview(false);
+    setResumePreviewContent(null);
     window.scrollTo(0, 0);
   };
 
@@ -144,6 +119,8 @@ function App() {
     } else if (currentView === 'batch-results' || currentView === 'single-results') {
       setCurrentView('main');
     }
+    setShowResumePreview(false);
+    setResumePreviewContent(null);
     window.scrollTo(0, 0);
   };
 
@@ -335,6 +312,62 @@ function App() {
     }, 30000);
     
     keepAliveInterval.current = statusCheckInterval;
+  };
+
+  // Resume Preview Functions
+  const fetchResumePreview = async (analysisId, candidateName) => {
+    try {
+      setResumePreviewLoading(true);
+      setShowResumePreview(true);
+      
+      const response = await axios.get(`${API_BASE_URL}/resume-preview/${analysisId}`, {
+        timeout: 30000
+      });
+      
+      if (response.data.preview_type === 'text') {
+        setResumePreviewContent({
+          type: 'text',
+          filename: response.data.filename,
+          content: response.data.content,
+          fileType: response.data.file_type,
+          candidateName: candidateName
+        });
+        setActivePreviewType('text');
+      } else if (response.data.preview_type === 'pdf') {
+        // For PDF files, we get the file directly
+        setResumePreviewContent({
+          type: 'pdf',
+          filename: response.data.filename,
+          url: `${API_BASE_URL}/resume-preview/${analysisId}`,
+          candidateName: candidateName
+        });
+        setActivePreviewType('pdf');
+      } else {
+        // Handle other file types
+        setResumePreviewContent({
+          type: 'unknown',
+          filename: response.data.filename,
+          candidateName: candidateName
+        });
+      }
+      
+      setResumePreviewLoading(false);
+      
+    } catch (error) {
+      console.log('Error fetching resume preview:', error);
+      setResumePreviewContent({
+        type: 'error',
+        message: 'Failed to load resume preview. The file may have expired or is not available.',
+        candidateName: candidateName
+      });
+      setResumePreviewLoading(false);
+    }
+  };
+
+  const closeResumePreview = () => {
+    setShowResumePreview(false);
+    setResumePreviewContent(null);
+    setActivePreviewType('text');
   };
 
   const handleDrag = (e) => {
@@ -645,54 +678,6 @@ function App() {
     }
   };
 
-  // Resume viewing functions
-  const viewCandidateResume = async (analysisId, candidateName) => {
-    try {
-      setIsViewingResume(true);
-      setResumePreviewLoading(true);
-      
-      // Open resume in new tab
-      window.open(`${API_BASE_URL}/view-resume/${analysisId}`, '_blank');
-      
-      // Also get preview info
-      const previewResponse = await axios.get(`${API_BASE_URL}/resume-preview/${analysisId}`, {
-        timeout: 10000
-      });
-      
-      if (previewResponse.data) {
-        setResumePreviewData({
-          ...previewResponse.data,
-          candidateName: candidateName
-        });
-        setShowResumePreview(true);
-      }
-      
-    } catch (error) {
-      console.log('Error viewing resume:', error);
-      // If preview fails, still try to open the file directly
-      window.open(`${API_BASE_URL}/download-resume/${analysisId}`, '_blank');
-    } finally {
-      setResumePreviewLoading(false);
-      setIsViewingResume(false);
-    }
-  };
-
-  const downloadCandidateResume = (analysisId, candidateName) => {
-    window.open(`${API_BASE_URL}/download-resume/${analysisId}`, '_blank');
-  };
-
-  const getResumePreviewInfo = async (analysisId) => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/resume-preview/${analysisId}`, {
-        timeout: 8000
-      });
-      return response.data;
-    } catch (error) {
-      console.log('Error getting resume preview:', error);
-      return null;
-    }
-  };
-
   const getScoreColor = (score) => {
     if (score >= 80) return '#00ff9d';
     if (score >= 60) return '#ffd166';
@@ -808,6 +793,119 @@ function App() {
     return modelInfo.name || 'Groq AI';
   };
 
+  // Get file icon based on file extension
+  const getFileIcon = (filename) => {
+    if (!filename) return <File size={20} />;
+    
+    const ext = filename.split('.').pop().toLowerCase();
+    switch(ext) {
+      case 'pdf':
+        return <FilePdf size={20} />;
+      case 'doc':
+      case 'docx':
+        return <FileTextIcon size={20} />;
+      case 'txt':
+        return <FileCode size={20} />;
+      default:
+        return <File size={20} />;
+    }
+  };
+
+  // Render Resume Preview Modal
+  const renderResumePreviewModal = () => {
+    if (!showResumePreview) return null;
+    
+    return (
+      <div className="resume-preview-modal-overlay">
+        <div className="resume-preview-modal glass">
+          <div className="resume-preview-header">
+            <div className="preview-title">
+              <FileText size={20} />
+              <div>
+                <h3>Resume Preview</h3>
+                <p className="preview-subtitle">
+                  {resumePreviewContent?.candidateName || 'Candidate'}
+                  {resumePreviewContent?.filename && ` • ${resumePreviewContent.filename}`}
+                </p>
+              </div>
+            </div>
+            <button onClick={closeResumePreview} className="close-preview-btn">
+              <CloseIcon size={20} />
+            </button>
+          </div>
+          
+          <div className="resume-preview-content">
+            {resumePreviewLoading ? (
+              <div className="preview-loading">
+                <Loader size={32} className="spinner" />
+                <p>Loading resume preview...</p>
+              </div>
+            ) : resumePreviewContent?.type === 'error' ? (
+              <div className="preview-error">
+                <AlertCircle size={48} />
+                <h4>Unable to Load Resume</h4>
+                <p>{resumePreviewContent.message}</p>
+              </div>
+            ) : resumePreviewContent?.type === 'pdf' ? (
+              <div className="pdf-preview-container">
+                <iframe
+                  src={resumePreviewContent.url}
+                  title={`Resume: ${resumePreviewContent.filename}`}
+                  className="pdf-preview-frame"
+                  sandbox="allow-scripts allow-same-origin allow-popups"
+                />
+                <div className="pdf-preview-note">
+                  <Info size={14} />
+                  <span>PDF preview. You can also <a href={resumePreviewContent.url} target="_blank" rel="noopener noreferrer">open in new tab</a>.</span>
+                </div>
+              </div>
+            ) : resumePreviewContent?.type === 'text' ? (
+              <div className="text-preview-container">
+                <div className="text-preview-header">
+                  <div className="file-type-badge">
+                    {getFileIcon(resumePreviewContent.filename)}
+                    <span>{resumePreviewContent.fileType?.toUpperCase() || 'TEXT'} File</span>
+                  </div>
+                  <button 
+                    className="copy-text-btn"
+                    onClick={() => {
+                      navigator.clipboard.writeText(resumePreviewContent.content);
+                    }}
+                  >
+                    <Copy size={16} />
+                    Copy Text
+                  </button>
+                </div>
+                <div className="text-preview-content">
+                  <pre>{resumePreviewContent.content}</pre>
+                </div>
+                <div className="text-preview-stats">
+                  <span>{resumePreviewContent.content?.length || 0} characters</span>
+                  <span>{resumePreviewContent.content?.split(/\s+/).length || 0} words</span>
+                </div>
+              </div>
+            ) : (
+              <div className="unknown-file-type">
+                <FileQuestion size={48} />
+                <h4>Unsupported File Type</h4>
+                <p>This file type cannot be previewed directly.</p>
+                {resumePreviewContent?.filename && (
+                  <p className="filename">{resumePreviewContent.filename}</p>
+                )}
+              </div>
+            )}
+          </div>
+          
+          <div className="resume-preview-footer">
+            <button onClick={closeResumePreview} className="close-btn">
+              Close Preview
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Render functions for different views
   const renderMainView = () => (
     <div className="upload-section">
@@ -832,9 +930,6 @@ function App() {
               <Cpu size={14} /> {getModelDisplayName(modelInfo)}
             </span>
           )}
-          <span className="status-badge resume-storage">
-            <FileCheck size={14} /> Resume Storage
-          </span>
         </div>
         
         {/* Batch Mode Toggle */}
@@ -1050,9 +1145,9 @@ function App() {
             </div>
             <div className="stat">
               <div className="stat-icon">
-                <FileCheck size={14} />
+                <Users size={14} />
               </div>
-              <span>Resume Storage</span>
+              <span>Up to 10 resumes</span>
             </div>
           </div>
         </div>
@@ -1147,13 +1242,11 @@ function App() {
                   <span>Batch Size: {resumeFiles.length}</span>
                 </>
               )}
-              <span>•</span>
-              <span>Resume Storage: Yes</span>
             </div>
             
             <div className="loading-note info">
-              <FileCheck size={14} />
-              <span>Resumes are stored and can be viewed/downloaded later</span>
+              <Info size={14} />
+              <span>Groq AI offers 128K context length for comprehensive resume analysis</span>
             </div>
           </div>
         </div>
@@ -1186,7 +1279,7 @@ function App() {
                 <span className="button-subtext">
                   {batchMode 
                     ? `${resumeFiles.length} resume(s) • ${getAvailableKeysCount()} keys • ~${Math.ceil(resumeFiles.length/3)}s` 
-                    : `${getModelDisplayName(modelInfo)} • Resume Storage`}
+                    : `${getModelDisplayName(modelInfo)} • Single`}
                 </span>
               </div>
             </div>
@@ -1207,12 +1300,12 @@ function App() {
               <span>Process up to 10 resumes in parallel with {getAvailableKeysCount()} API keys</span>
             </div>
             <div className="tip">
-              <FileCheck size={16} />
-              <span>Resumes are stored and can be viewed/downloaded for each candidate</span>
+              <Zap size={16} />
+              <span>~10-15 seconds for 10 resumes (Round-robin parallel processing)</span>
             </div>
             <div className="tip">
-              <Download size={16} />
-              <span>Download comprehensive Excel report with all candidate data</span>
+              <Eye size={16} />
+              <span>View individual resumes directly in the analysis results</span>
             </div>
           </>
         ) : (
@@ -1222,16 +1315,16 @@ function App() {
               <span>Groq AI offers ultra-fast resume analysis</span>
             </div>
             <div className="tip">
-              <FileCheck size={16} />
-              <span>Original resume is stored and can be viewed/downloaded later</span>
+              <Thermometer size={16} />
+              <span>Groq API automatically warms up when idle</span>
             </div>
             <div className="tip">
               <Activity size={16} />
               <span>Backend stays awake with automatic pings every 3 minutes</span>
             </div>
             <div className="tip">
-              <Cpu size={16} />
-              <span>Using: {getModelDisplayName(modelInfo)}</span>
+              <Eye size={16} />
+              <span>View your uploaded resume directly in the analysis results</span>
             </div>
           </>
         )}
@@ -1244,6 +1337,9 @@ function App() {
 
     return (
       <div className="results-section">
+        {/* Resume Preview Modal */}
+        {renderResumePreviewModal()}
+        
         {/* Navigation Header */}
         <div className="navigation-header glass">
           <button onClick={navigateToMain} className="back-button">
@@ -1262,7 +1358,7 @@ function App() {
           </div>
         </div>
 
-        {/* Candidate Header */}
+        {/* Candidate Header with Resume Preview Button */}
         <div className="analysis-header">
           <div className="candidate-info">
             <div className="candidate-avatar">
@@ -1284,6 +1380,15 @@ function App() {
                   <Cpu size={14} />
                   Model: {analysis.ai_model || 'Groq AI'}
                 </span>
+                {analysis.resume_stored && (
+                  <button 
+                    className="view-resume-btn"
+                    onClick={() => fetchResumePreview(analysis.analysis_id, analysis.candidate_name)}
+                  >
+                    <Eye size={14} />
+                    View Resume
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1332,65 +1437,8 @@ function App() {
                 </span>
               </div>
             </div>
-        </div>
-        </div>
-
-        {/* Resume Access Section */}
-        {analysis.resume_stored && (
-          <div className="resume-access-card glass">
-            <div className="resume-access-header">
-              <div className="resume-access-icon">
-                <FileCheck size={28} style={{ color: '#00ff9d' }} />
-              </div>
-              <div>
-                <h3>Original Resume Available</h3>
-                <p className="resume-access-subtitle">
-                  View or download the candidate's original resume file
-                </p>
-              </div>
-            </div>
-            
-            <div className="resume-access-content">
-              <div className="resume-file-info">
-                <div className="file-details">
-                  <FileText size={18} />
-                  <div>
-                    <div className="file-name">{analysis.filename || 'Resume'}</div>
-                    <div className="file-meta">{analysis.file_size || 'N/A'}</div>
-                  </div>
-                </div>
-                
-                <div className="resume-actions">
-                  <button 
-                    className="resume-action-btn view"
-                    onClick={() => viewCandidateResume(analysis.analysis_id, analysis.candidate_name)}
-                    disabled={isViewingResume}
-                  >
-                    {isViewingResume ? (
-                      <Loader size={16} className="spinner" />
-                    ) : (
-                      <EyeIcon size={16} />
-                    )}
-                    <span>{isViewingResume ? 'Opening...' : 'View Resume'}</span>
-                  </button>
-                  
-                  <button 
-                    className="resume-action-btn download"
-                    onClick={() => downloadCandidateResume(analysis.analysis_id, analysis.candidate_name)}
-                  >
-                    <Download size={16} />
-                    <span>Download</span>
-                  </button>
-                </div>
-              </div>
-              
-              <div className="resume-note">
-                <Info size={14} />
-                <span>The original resume file is stored for reference and can be viewed/downloaded anytime</span>
-              </div>
-            </div>
           </div>
-        )}
+        </div>
 
         {/* Recommendation Card */}
         <div className="recommendation-card glass" style={{
@@ -1417,7 +1465,18 @@ function App() {
 
         {/* Skills Analysis - Now showing 5-8 skills each */}
         <div className="section-title">
-          <h2>Skills Analysis (5-8 skills each)</h2>
+          <div className="section-title-header">
+            <h2>Skills Analysis (5-8 skills each)</h2>
+            {analysis.resume_stored && (
+              <button 
+                className="view-resume-btn inline"
+                onClick={() => fetchResumePreview(analysis.analysis_id, analysis.candidate_name)}
+              >
+                <Eye size={16} />
+                View Original Resume
+              </button>
+            )}
+          </div>
           <p>Detailed breakdown of matched and missing skills</p>
         </div>
         
@@ -1501,10 +1560,6 @@ function App() {
               <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
                 {analysis.experience_summary || "No experience summary available."}
               </p>
-              <div className="summary-footer">
-                <span className="summary-tag">Professional Experience</span>
-                <span className="summary-tag">{analysis.years_experience || 'N/A'} experience</span>
-              </div>
             </div>
           </div>
 
@@ -1519,46 +1574,7 @@ function App() {
               <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
                 {analysis.education_summary || "No education summary available."}
               </p>
-              <div className="summary-footer">
-                <span className="summary-tag">Academic Background</span>
-                <span className="summary-tag">Detailed Analysis</span>
-              </div>
             </div>
-          </div>
-        </div>
-
-        {/* Additional Candidate Info */}
-        <div className="candidate-info-grid glass">
-          <div className="info-card">
-            <div className="info-header">
-              <Target size={20} />
-              <h4>Job Title Suggestion</h4>
-            </div>
-            <div className="info-value">{analysis.job_title_suggestion || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <Calendar size={20} />
-              <h4>Years Experience</h4>
-            </div>
-            <div className="info-value">{analysis.years_experience || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <Building size={20} />
-              <h4>Industry Fit</h4>
-            </div>
-            <div className="info-value">{analysis.industry_fit || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <DollarSign size={20} />
-              <h4>Salary Expectation</h4>
-            </div>
-            <div className="info-value">{analysis.salary_expectation || 'N/A'}</div>
           </div>
         </div>
 
@@ -1620,62 +1636,44 @@ function App() {
           </div>
         </div>
 
-        {/* AI Analysis Details */}
-        <div className="ai-details-card glass">
-          <div className="ai-details-header">
-            <Brain size={24} />
-            <div>
-              <h3>AI Analysis Details</h3>
-              <p className="ai-details-subtitle">Technical information about this analysis</p>
+        {/* Resume Preview Section */}
+        {analysis.resume_stored && (
+          <div className="resume-preview-section glass">
+            <div className="resume-preview-section-header">
+              <FileText size={24} />
+              <div>
+                <h3>Original Resume Preview</h3>
+                <p className="resume-preview-subtitle">
+                  View the uploaded resume file directly
+                </p>
+              </div>
+            </div>
+            <div className="resume-preview-section-content">
+              <div className="resume-info">
+                <div className="resume-file-info">
+                  <div className="file-icon">
+                    {getFileIcon(analysis.resume_original_filename || analysis.filename)}
+                  </div>
+                  <div>
+                    <span className="resume-filename">{analysis.resume_original_filename || analysis.filename}</span>
+                    <span className="resume-filesize">{analysis.file_size}</span>
+                  </div>
+                </div>
+                <button 
+                  className="preview-resume-btn primary"
+                  onClick={() => fetchResumePreview(analysis.analysis_id, analysis.candidate_name)}
+                >
+                  <Eye size={18} />
+                  <span>Preview Resume</span>
+                </button>
+              </div>
+              <p className="resume-note">
+                <Info size={14} />
+                <span>Resumes are stored securely for 1 hour after analysis. You can preview the original file here.</span>
+              </p>
             </div>
           </div>
-          <div className="ai-details-content">
-            <div className="ai-detail-item">
-              <span className="detail-label">AI Provider:</span>
-              <span className="detail-value">{analysis.ai_provider || 'Groq'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">AI Model:</span>
-              <span className="detail-value">{analysis.ai_model || 'Groq AI'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">API Key Used:</span>
-              <span className="detail-value">{analysis.key_used || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">Response Time:</span>
-              <span className="detail-value">{analysis.response_time || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">Analysis ID:</span>
-              <span className="detail-value">{analysis.analysis_id || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">AI Status:</span>
-              <span className="detail-value" style={{ 
-                color: analysis.ai_status === 'Warmed up' ? '#00ff9d' : '#ffd166' 
-              }}>
-                {analysis.ai_status || 'N/A'}
-              </span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">Filename:</span>
-              <span className="detail-value">{analysis.filename || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">File Size:</span>
-              <span className="detail-value">{analysis.file_size || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">Resume Stored:</span>
-              <span className="detail-value" style={{ 
-                color: analysis.resume_stored ? '#00ff9d' : '#ff6b6b' 
-              }}>
-                {analysis.resume_stored ? 'Yes (Available)' : 'No'}
-              </span>
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* Action Section */}
         <div className="action-section glass">
@@ -1688,23 +1686,6 @@ function App() {
               <DownloadCloud size={20} />
               <span>Download Detailed Excel Report</span>
             </button>
-            
-            {analysis.resume_stored && (
-              <button 
-                className="resume-action-btn view"
-                onClick={() => viewCandidateResume(analysis.analysis_id, analysis.candidate_name)}
-                disabled={isViewingResume}
-                style={{ margin: '0 0.5rem' }}
-              >
-                {isViewingResume ? (
-                  <Loader size={16} className="spinner" />
-                ) : (
-                  <EyeIcon size={16} />
-                )}
-                <span>{isViewingResume ? 'Opening...' : 'View Original Resume'}</span>
-              </button>
-            )}
-            
             <button className="reset-button" onClick={navigateToMain}>
               <RefreshCw size={20} />
               <span>New Analysis</span>
@@ -1717,6 +1698,9 @@ function App() {
 
   const renderBatchResultsView = () => (
     <div className="results-section">
+      {/* Resume Preview Modal */}
+      {renderResumePreviewModal()}
+      
       {/* Navigation Header */}
       <div className="navigation-header glass">
         <button onClick={navigateToMain} className="back-button">
@@ -1825,7 +1809,7 @@ function App() {
 
         <div className="stat-card">
           <div className="stat-icon success">
-            <FileCheck size={24} />
+            <Eye size={24} />
           </div>
           <div className="stat-content">
             <div className="stat-value">
@@ -1868,23 +1852,6 @@ function App() {
         </div>
       )}
 
-      {/* Resume Storage Info */}
-      <div className="resume-storage-info glass">
-        <div className="resume-storage-header">
-          <FileCheck size={20} />
-          <h3>Resume Storage Status</h3>
-        </div>
-        <div className="resume-storage-content">
-          <p>
-            All resumes are stored securely and can be viewed/downloaded individually.
-            <br />
-            <span className="storage-note">
-              Resumes are retained for 24 hours for reference.
-            </span>
-          </p>
-        </div>
-      </div>
-
       {/* Candidates Ranking */}
       <div className="section-title">
         <h2>Candidate Rankings (5-8 skills analysis each)</h2>
@@ -1908,6 +1875,16 @@ function App() {
                         {candidate.key_used}
                       </span>
                     )}
+                    {candidate.resume_stored && (
+                      <button 
+                        className="view-resume-btn small"
+                        onClick={() => fetchResumePreview(candidate.analysis_id, candidate.candidate_name)}
+                        title="View original resume"
+                      >
+                        <Eye size={12} />
+                        View Resume
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1927,14 +1904,6 @@ function App() {
               }}>
                 {candidate.recommendation}
               </div>
-              
-              {/* Resume Access Badge */}
-              {candidate.resume_stored && (
-                <div className="resume-access-badge">
-                  <FileCheck size={14} />
-                  <span>Resume Available</span>
-                </div>
-              )}
               
               <div className="skills-preview">
                 <div className="skills-section">
@@ -1968,20 +1937,21 @@ function App() {
                 </div>
               </div>
               
-              <div className="additional-info">
-                <div className="info-row">
-                  <span className="info-label">Job Title:</span>
-                  <span className="info-value">{candidate.job_title_suggestion || 'N/A'}</span>
+              {candidate.resume_stored && (
+                <div className="resume-preview-mini">
+                  <div className="resume-mini-header">
+                    <FileText size={14} />
+                    <span>Resume Available</span>
+                  </div>
+                  <button 
+                    className="view-resume-btn mini"
+                    onClick={() => fetchResumePreview(candidate.analysis_id, candidate.candidate_name)}
+                  >
+                    <Eye size={12} />
+                    Preview
+                  </button>
                 </div>
-                <div className="info-row">
-                  <span className="info-label">Experience:</span>
-                  <span className="info-value">{candidate.years_experience || 'N/A'}</span>
-                </div>
-                <div className="info-row">
-                  <span className="info-label">Industry Fit:</span>
-                  <span className="info-value">{candidate.industry_fit || 'N/A'}</span>
-                </div>
-              </div>
+              )}
             </div>
             
             <div className="batch-card-footer">
@@ -1992,37 +1962,39 @@ function App() {
                 View Full Details (5-8 skills each)
                 <ChevronRight size={16} />
               </button>
-              
-              <div className="footer-actions">
-                {candidate.analysis_id && candidate.resume_stored && (
-                  <button 
-                    className="resume-action-btn small"
-                    onClick={() => viewCandidateResume(candidate.analysis_id, candidate.candidate_name)}
-                    disabled={isViewingResume}
-                    title="View original resume"
-                  >
-                    {isViewingResume ? (
-                      <Loader size={14} className="spinner" />
-                    ) : (
-                      <EyeIcon size={14} />
-                    )}
-                  </button>
-                )}
-                
-                {candidate.analysis_id && (
-                  <button 
-                    className="download-individual-btn"
-                    onClick={() => handleIndividualDownload(candidate.analysis_id)}
-                    title="Download individual detailed report"
-                  >
-                    <FileDown size={16} />
-                  </button>
-                )}
-              </div>
+              {candidate.analysis_id && (
+                <button 
+                  className="download-individual-btn"
+                  onClick={() => handleIndividualDownload(candidate.analysis_id)}
+                  title="Download individual detailed report"
+                >
+                  <FileDown size={16} />
+                </button>
+              )}
             </div>
           </div>
         ))}
       </div>
+
+      {/* Resume Storage Info */}
+      {batchAnalysis?.analyses?.some(a => a.resume_stored) && (
+        <div className="resume-storage-info glass">
+          <div className="resume-storage-header">
+            <Eye size={20} />
+            <h3>Resume Preview Available</h3>
+          </div>
+          <div className="resume-storage-content">
+            <p>
+              <Info size={16} />
+              <span>
+                {batchAnalysis.analyses.filter(a => a.resume_stored).length} out of {batchAnalysis.analyses.length} resumes are available for preview.
+                Click "View Resume" on any candidate card to see their original resume file.
+                Resumes are stored for 1 hour after analysis.
+              </span>
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Action Buttons */}
       <div className="action-section glass">
@@ -2062,6 +2034,9 @@ function App() {
 
     return (
       <div className="results-section">
+        {/* Resume Preview Modal */}
+        {renderResumePreviewModal()}
+        
         {/* Navigation Header */}
         <div className="navigation-header glass">
           <button onClick={navigateBack} className="back-button">
@@ -2092,7 +2067,7 @@ function App() {
           </div>
         </div>
 
-        {/* Candidate Header */}
+        {/* Candidate Header with Resume Preview */}
         <div className="analysis-header">
           <div className="candidate-info">
             <div className="candidate-avatar">
@@ -2114,6 +2089,15 @@ function App() {
                     <Key size={14} />
                     {candidate.key_used}
                   </span>
+                )}
+                {candidate.resume_stored && (
+                  <button 
+                    className="view-resume-btn"
+                    onClick={() => fetchResumePreview(candidate.analysis_id, candidate.candidate_name)}
+                  >
+                    <Eye size={14} />
+                    View Resume
+                  </button>
                 )}
               </div>
             </div>
@@ -2158,63 +2142,6 @@ function App() {
           </div>
         </div>
 
-        {/* Resume Access Section */}
-        {candidate.resume_stored && (
-          <div className="resume-access-card glass">
-            <div className="resume-access-header">
-              <div className="resume-access-icon">
-                <FileCheck size={28} style={{ color: '#00ff9d' }} />
-              </div>
-              <div>
-                <h3>Original Resume Available</h3>
-                <p className="resume-access-subtitle">
-                  View or download the candidate's original resume file
-                </p>
-              </div>
-            </div>
-            
-            <div className="resume-access-content">
-              <div className="resume-file-info">
-                <div className="file-details">
-                  <FileText size={18} />
-                  <div>
-                    <div className="file-name">{candidate.filename || 'Resume'}</div>
-                    <div className="file-meta">{candidate.file_size || 'N/A'}</div>
-                  </div>
-                </div>
-                
-                <div className="resume-actions">
-                  <button 
-                    className="resume-action-btn view"
-                    onClick={() => viewCandidateResume(candidate.analysis_id, candidate.candidate_name)}
-                    disabled={isViewingResume}
-                  >
-                    {isViewingResume ? (
-                      <Loader size={16} className="spinner" />
-                    ) : (
-                      <EyeIcon size={16} />
-                    )}
-                    <span>{isViewingResume ? 'Opening...' : 'View Resume'}</span>
-                  </button>
-                  
-                  <button 
-                    className="resume-action-btn download"
-                    onClick={() => downloadCandidateResume(candidate.analysis_id, candidate.candidate_name)}
-                  >
-                    <Download size={16} />
-                    <span>Download</span>
-                  </button>
-                </div>
-              </div>
-              
-              <div className="resume-note">
-                <Info size={14} />
-                <span>The original resume file is stored for reference and can be viewed/downloaded anytime</span>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Recommendation Card */}
         <div className="recommendation-card glass" style={{
           background: `linear-gradient(135deg, ${getScoreColor(candidate.overall_score)}15, ${getScoreColor(candidate.overall_score)}08)`,
@@ -2240,7 +2167,18 @@ function App() {
 
         {/* Skills Analysis - 5-8 skills each */}
         <div className="section-title">
-          <h2>Skills Analysis (5-8 skills each)</h2>
+          <div className="section-title-header">
+            <h2>Skills Analysis (5-8 skills each)</h2>
+            {candidate.resume_stored && (
+              <button 
+                className="view-resume-btn inline"
+                onClick={() => fetchResumePreview(candidate.analysis_id, candidate.candidate_name)}
+              >
+                <Eye size={16} />
+                View Original Resume
+              </button>
+            )}
+          </div>
           <p>Detailed breakdown of matched and missing skills</p>
         </div>
         
@@ -2324,10 +2262,6 @@ function App() {
               <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
                 {candidate.experience_summary || "No experience summary available."}
               </p>
-              <div className="summary-footer">
-                <span className="summary-tag">Professional Experience</span>
-                <span className="summary-tag">{candidate.years_experience || 'N/A'} experience</span>
-              </div>
             </div>
           </div>
 
@@ -2342,48 +2276,48 @@ function App() {
               <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
                 {candidate.education_summary || "No education summary available."}
               </p>
-              <div className="summary-footer">
-                <span className="summary-tag">Academic Background</span>
-                <span className="summary-tag">Detailed Analysis</span>
-              </div>
             </div>
           </div>
         </div>
 
-        {/* Additional Candidate Info */}
-        <div className="candidate-info-grid glass">
-          <div className="info-card">
-            <div className="info-header">
-              <Target size={20} />
-              <h4>Job Title Suggestion</h4>
+        {/* Resume Preview Section */}
+        {candidate.resume_stored && (
+          <div className="resume-preview-section glass">
+            <div className="resume-preview-section-header">
+              <FileText size={24} />
+              <div>
+                <h3>Original Resume Preview</h3>
+                <p className="resume-preview-subtitle">
+                  View the uploaded resume file directly
+                </p>
+              </div>
             </div>
-            <div className="info-value">{candidate.job_title_suggestion || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <Calendar size={20} />
-              <h4>Years Experience</h4>
+            <div className="resume-preview-section-content">
+              <div className="resume-info">
+                <div className="resume-file-info">
+                  <div className="file-icon">
+                    {getFileIcon(candidate.resume_original_filename || candidate.filename)}
+                  </div>
+                  <div>
+                    <span className="resume-filename">{candidate.resume_original_filename || candidate.filename}</span>
+                    <span className="resume-filesize">{candidate.file_size}</span>
+                  </div>
+                </div>
+                <button 
+                  className="preview-resume-btn primary"
+                  onClick={() => fetchResumePreview(candidate.analysis_id, candidate.candidate_name)}
+                >
+                  <Eye size={18} />
+                  <span>Preview Resume</span>
+                </button>
+              </div>
+              <p className="resume-note">
+                <Info size={14} />
+                <span>Resumes are stored securely for 1 hour after analysis. You can preview the original file here.</span>
+              </p>
             </div>
-            <div className="info-value">{candidate.years_experience || 'N/A'}</div>
           </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <Building size={20} />
-              <h4>Industry Fit</h4>
-            </div>
-            <div className="info-value">{candidate.industry_fit || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <DollarSign size={20} />
-              <h4>Salary Expectation</h4>
-            </div>
-            <div className="info-value">{candidate.salary_expectation || 'N/A'}</div>
-          </div>
-        </div>
+        )}
 
         {/* Insights Section */}
         <div className="section-title">
@@ -2459,23 +2393,6 @@ function App() {
                 <span>Download Individual Detailed Report</span>
               </button>
             )}
-            
-            {candidate.resume_stored && (
-              <button 
-                className="resume-action-btn view"
-                onClick={() => viewCandidateResume(candidate.analysis_id, candidate.candidate_name)}
-                disabled={isViewingResume}
-                style={{ margin: '0 0.5rem' }}
-              >
-                {isViewingResume ? (
-                  <Loader size={16} className="spinner" />
-                ) : (
-                  <EyeIcon size={16} />
-                )}
-                <span>{isViewingResume ? 'Opening...' : 'View Original Resume'}</span>
-              </button>
-            )}
-            
             <button className="download-button secondary" onClick={handleBatchDownload}>
               <DownloadCloud size={20} />
               <span>Download Full Batch Report</span>
@@ -2484,82 +2401,6 @@ function App() {
               <ArrowLeft size={20} />
               <span>Back to Rankings</span>
             </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // Resume Preview Modal
-  const renderResumePreviewModal = () => {
-    if (!showResumePreview || !resumePreviewData) return null;
-
-    return (
-      <div className="modal-overlay" onClick={() => setShowResumePreview(false)}>
-        <div className="modal-content glass" onClick={(e) => e.stopPropagation()}>
-          <div className="modal-header">
-            <div className="modal-title">
-              <FileText size={24} />
-              <div>
-                <h3>Resume Preview</h3>
-                <p className="modal-subtitle">{resumePreviewData.candidateName}</p>
-              </div>
-            </div>
-            <button 
-              className="modal-close" 
-              onClick={() => setShowResumePreview(false)}
-            >
-              <X size={20} />
-            </button>
-          </div>
-          
-          <div className="modal-body">
-            <div className="resume-preview-info">
-              <div className="preview-item">
-                <span className="preview-label">Filename:</span>
-                <span className="preview-value">{resumePreviewData.filename}</span>
-              </div>
-              <div className="preview-item">
-                <span className="preview-label">File Type:</span>
-                <span className="preview-value">{resumePreviewData.file_type}</span>
-              </div>
-              <div className="preview-item">
-                <span className="preview-label">File Size:</span>
-                <span className="preview-value">{resumePreviewData.file_size}</span>
-              </div>
-              <div className="preview-item">
-                <span className="preview-label">Analysis ID:</span>
-                <span className="preview-value">{resumePreviewData.analysis_id}</span>
-              </div>
-            </div>
-            
-            <div className="preview-text-section">
-              <h4>Text Preview</h4>
-              <div className="preview-text">
-                {resumePreviewData.preview_text || "Preview not available"}
-                {resumePreviewData.preview_text && resumePreviewData.preview_text.length >= 500 && (
-                  <span className="preview-more">... (truncated)</span>
-                )}
-              </div>
-            </div>
-            
-            <div className="preview-actions">
-              <button 
-                className="preview-action-btn primary"
-                onClick={() => window.open(`${API_BASE_URL}/view-resume/${resumePreviewData.analysis_id}`, '_blank')}
-              >
-                <EyeIcon size={16} />
-                <span>Open Full Resume</span>
-              </button>
-              
-              <button 
-                className="preview-action-btn secondary"
-                onClick={() => window.open(`${API_BASE_URL}/download-resume/${resumePreviewData.analysis_id}`, '_blank')}
-              >
-                <Download size={16} />
-                <span>Download Resume</span>
-              </button>
-            </div>
           </div>
         </div>
       </div>
@@ -2602,7 +2443,7 @@ function App() {
                   <span className="powered-by">Powered by</span>
                   <span className="groq-badge">⚡ Groq</span>
                   <span className="divider">•</span>
-                  <span className="tagline">5-8 Skills Analysis • Resume Storage • Always Active</span>
+                  <span className="tagline">5-8 Skills Analysis • Resume Preview • Always Active</span>
                 </div>
               </div>
             </div>
@@ -2677,12 +2518,6 @@ function App() {
               </div>
             )}
             
-            {/* Resume Storage Status */}
-            <div className="feature resume-storage-status">
-              <FileCheck size={16} />
-              <span>Resume Storage</span>
-            </div>
-            
             {/* Navigation Indicator */}
             {currentView !== 'main' && (
               <div className="feature nav-indicator">
@@ -2690,6 +2525,14 @@ function App() {
                 <span>{currentView === 'single-results' ? 'Single Analysis' : 
                        currentView === 'batch-results' ? 'Batch Results' : 
                        'Candidate Details'}</span>
+              </div>
+            )}
+            
+            {/* Resume Preview Indicator */}
+            {currentView !== 'main' && (
+              <div className="feature resume-preview-indicator">
+                <Eye size={16} />
+                <span>Resume Preview</span>
               </div>
             )}
             
@@ -2777,21 +2620,15 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Batch Capacity</div>
+                <div className="summary-label">Resume Preview</div>
                 <div className="summary-value success">
-                  📊 Up to 10 resumes
+                  👁️ Enabled (1 hour)
                 </div>
               </div>
               <div className="summary-item">
                 <div className="summary-label">Skills Analysis</div>
                 <div className="summary-value info">
                   ⚡ 5-8 skills each
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Resume Storage</div>
-                <div className="summary-value success">
-                  💾 24-hour retention
                 </div>
               </div>
               <div className="summary-item">
@@ -2844,9 +2681,6 @@ function App() {
           </div>
         )}
 
-        {/* Resume Preview Modal */}
-        {renderResumePreviewModal()}
-
         {/* Status Banner */}
         <div className="top-notice-bar glass">
           <div className="notice-content">
@@ -2874,15 +2708,8 @@ function App() {
                 <span>Skills: 5-8 each</span>
               </div>
               <div className="status-indicator active">
-                <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                <span>Resumes: Stored</span>
-              </div>
-              <div className="status-indicator active">
-                <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                <span>Mode: {currentView === 'single-results' ? 'Single Analysis' : 
-                              currentView === 'batch-results' ? 'Batch Analysis' : 
-                              currentView === 'candidate-detail' ? 'Candidate Details' : 
-                              batchMode ? 'Batch' : 'Single'}</span>
+                <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
+                <span>Resume Preview: Available</span>
               </div>
               {batchMode && (
                 <div className="status-indicator active">
@@ -2912,6 +2739,13 @@ function App() {
                 <span>Parallel mode: Processing {resumeFiles.length} resumes with {getAvailableKeysCount()} keys (~{Math.ceil(resumeFiles.length/3)}s)</span>
               </div>
             )}
+            
+            {(currentView === 'single-results' || currentView === 'batch-results' || currentView === 'candidate-detail') && (
+              <div className="resume-preview-notice">
+                <Eye size={16} />
+                <span>Click "View Resume" to preview original resume files directly in the analysis</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -2928,7 +2762,7 @@ function App() {
               <span>AI Resume Analyzer (Groq)</span>
             </div>
             <p className="footer-tagline">
-              Groq AI with 128K context • 3-key parallel processing • 5-8 skills analysis each • Resume Storage • Detailed Excel reports
+              Groq AI with 128K context • 3-key parallel processing • 5-8 skills analysis each • Resume Preview
             </p>
           </div>
           
@@ -2936,15 +2770,15 @@ function App() {
             <div className="footer-section">
               <h4>Features</h4>
               <a href="#">Groq AI</a>
-              <a href="#">128K Context</a>
+              <a href="#">Resume Preview</a>
               <a href="#">5-8 Skills Analysis</a>
-              <a href="#">Resume Storage</a>
+              <a href="#">Detailed Reports</a>
             </div>
             <div className="footer-section">
               <h4>Service</h4>
               <a href="#">3-Key Parallel</a>
-              <a href="#">Resume Viewing</a>
-              <a href="#">Health Checks</a>
+              <a href="#">Auto Warm-up</a>
+              <a href="#">Resume Storage</a>
               <a href="#">Status Monitor</a>
             </div>
             <div className="footer-section">
@@ -2960,7 +2794,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. 5-8 Skills Analysis Mode with Resume Storage.</p>
+          <p>© 2026 AI Resume Analyzer. Built with React + Flask + Groq AI. Resume Preview Mode.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
@@ -2975,8 +2809,12 @@ function App() {
               Keys: {getAvailableKeysCount()}/3
             </span>
             <span className="stat">
-              <FileCheck size={12} />
-              Resume Storage: Yes
+              <Cpu size={12} />
+              Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
+            </span>
+            <span className="stat">
+              <Eye size={12} />
+              Resume Preview: Yes
             </span>
             {batchMode && (
               <span className="stat">
