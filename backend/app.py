@@ -30,35 +30,50 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Configure DeepSeek API
-DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
-DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
-DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+# Configure OpenAI API
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 
-# Available DeepSeek models
-DEEPSEEK_MODELS = {
-    'deepseek-chat': {
-        'name': 'DeepSeek Chat',
-        'context_length': 32768,
-        'provider': 'DeepSeek',
-        'description': 'General purpose chat model with 32K context',
+# Available OpenAI models
+OPENAI_MODELS = {
+    'gpt-4o': {
+        'name': 'GPT-4o',
+        'context_length': 128000,
+        'provider': 'OpenAI',
+        'description': 'Most capable GPT-4 model',
         'status': 'production',
         'free_tier': False,
-        'max_tokens': 8192
+        'max_tokens': 4096,
+        'input_cost': 5.00,  # $ per 1M tokens
+        'output_cost': 15.00  # $ per 1M tokens
     },
-    'deepseek-coder': {
-        'name': 'DeepSeek Coder',
-        'context_length': 16384,
-        'provider': 'DeepSeek',
-        'description': 'Specialized for coding tasks',
+    'gpt-4o-mini': {
+        'name': 'GPT-4o Mini',
+        'context_length': 128000,
+        'provider': 'OpenAI',
+        'description': 'Smaller, faster, cheaper version of GPT-4o',
         'status': 'production',
         'free_tier': False,
-        'max_tokens': 8192
+        'max_tokens': 16384,
+        'input_cost': 0.15,   # $ per 1M tokens
+        'output_cost': 0.60   # $ per 1M tokens
+    },
+    'gpt-3.5-turbo': {
+        'name': 'GPT-3.5 Turbo',
+        'context_length': 16385,
+        'provider': 'OpenAI',
+        'description': 'Fast and cost-effective',
+        'status': 'production',
+        'free_tier': False,
+        'max_tokens': 4096,
+        'input_cost': 0.50,   # $ per 1M tokens
+        'output_cost': 1.50   # $ per 1M tokens
     }
 }
 
-# Default working model
-DEFAULT_MODEL = 'deepseek-chat'
+# Default model (using GPT-4o Mini for cost-effectiveness)
+DEFAULT_MODEL = 'gpt-4o-mini'
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', DEFAULT_MODEL)
 
 # Track API status
 warmup_complete = False
@@ -78,16 +93,16 @@ score_cache = {}
 cache_lock = threading.Lock()
 
 # Batch processing configuration
-MAX_CONCURRENT_REQUESTS = 2  # Reduced from 3 to avoid rate limits
+MAX_CONCURRENT_REQUESTS = 3  # OpenAI allows more concurrent requests
 MAX_BATCH_SIZE = 10  # Maximum number of resumes per batch
 MAX_INDIVIDUAL_REPORTS = 10  # Limit individual Excel reports
 
 # Rate limiting protection
-MAX_RETRIES = 2  # Reduced from 3
-RETRY_DELAY_BASE = 2  # Reduced from 3
+MAX_RETRIES = 3
+RETRY_DELAY_BASE = 2
 
 # Gunicorn timeout protection
-API_TIMEOUT = 25  # Reduced from 45 seconds
+API_TIMEOUT = 30  # Increased for OpenAI
 UPLOAD_TIMEOUT = 90  # Increased for batch uploads
 
 # Memory optimization
@@ -113,20 +128,20 @@ def set_cached_score(resume_hash, score):
     with cache_lock:
         score_cache[resume_hash] = score
 
-def call_deepseek_api(prompt, max_tokens=500, temperature=0.1, timeout=API_TIMEOUT, model_override=None, retry_count=0):
-    """Call DeepSeek API with optimized settings"""
-    if not DEEPSEEK_API_KEY:
-        print(f"❌ No DeepSeek API key configured")
+def call_openai_api(prompt, max_tokens=500, temperature=0.1, timeout=API_TIMEOUT, model_override=None, retry_count=0):
+    """Call OpenAI API with optimized settings"""
+    if not OPENAI_API_KEY:
+        print(f"❌ No OpenAI API key configured")
         return {'error': 'no_api_key', 'status': 500}
     
     headers = {
-        'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
+        'Authorization': f'Bearer {OPENAI_API_KEY}',
         'Content-Type': 'application/json'
     }
     
-    model_to_use = model_override or DEEPSEEK_MODEL or DEFAULT_MODEL
+    model_to_use = model_override or OPENAI_MODEL or DEFAULT_MODEL
     
-    # Optimized payload for faster response
+    # Optimized payload for OpenAI
     payload = {
         'model': model_to_use,
         'messages': [
@@ -145,7 +160,7 @@ def call_deepseek_api(prompt, max_tokens=500, temperature=0.1, timeout=API_TIMEO
     try:
         start_time = time.time()
         response = requests.post(
-            DEEPSEEK_API_URL,
+            OPENAI_API_URL,
             headers=headers,
             json=payload,
             timeout=timeout
@@ -157,124 +172,144 @@ def call_deepseek_api(prompt, max_tokens=500, temperature=0.1, timeout=API_TIMEO
             data = response.json()
             if 'choices' in data and len(data['choices']) > 0:
                 result = data['choices'][0]['message']['content']
-                print(f"✅ DeepSeek API response in {response_time:.2f}s using {model_to_use}")
+                print(f"✅ OpenAI API response in {response_time:.2f}s using {model_to_use}")
+                
+                # Calculate approximate token usage for cost tracking
+                if 'usage' in data:
+                    prompt_tokens = data['usage'].get('prompt_tokens', 0)
+                    completion_tokens = data['usage'].get('completion_tokens', 0)
+                    total_tokens = data['usage'].get('total_tokens', 0)
+                    print(f"📊 Token usage: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total")
+                
                 return result
             else:
-                print(f"❌ Unexpected DeepSeek API response format")
+                print(f"❌ Unexpected OpenAI API response format")
                 return {'error': 'invalid_response', 'status': response.status_code}
         
         # Handle specific error codes
         if response.status_code == 429:
-            print(f"❌ Rate limit exceeded for DeepSeek API")
+            error_data = response.json()
+            error_msg = error_data.get('error', {}).get('message', 'Rate limit exceeded')
+            print(f"❌ Rate limit exceeded for OpenAI API: {error_msg}")
             
             if retry_count < MAX_RETRIES:
                 wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(3, 8)
                 print(f"⏳ Rate limited, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
                 time.sleep(wait_time)
-                return call_deepseek_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
+                return call_openai_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
             return {'error': 'rate_limit', 'status': 429}
         
         elif response.status_code == 503:
-            print(f"❌ Service unavailable for DeepSeek API")
+            print(f"❌ Service unavailable for OpenAI API")
             
             if retry_count < 1:
                 wait_time = 10 + random.uniform(3, 7)
                 print(f"⏳ Service unavailable, retrying in {wait_time:.1f}s")
                 time.sleep(wait_time)
-                return call_deepseek_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
+                return call_openai_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
             return {'error': 'service_unavailable', 'status': 503}
         
+        elif response.status_code == 401:
+            print(f"❌ OpenAI API authentication failed")
+            return {'error': 'authentication_failed', 'status': 401}
+        
+        elif response.status_code == 402:
+            print(f"❌ OpenAI API quota exceeded")
+            return {'error': 'quota_exceeded', 'status': 402}
+        
         else:
-            print(f"❌ DeepSeek API Error {response.status_code}: {response.text[:100]}")
+            error_data = response.json()
+            error_msg = error_data.get('error', {}).get('message', response.text[:100])
+            print(f"❌ OpenAI API Error {response.status_code}: {error_msg}")
             return {'error': f'api_error_{response.status_code}', 'status': response.status_code}
             
     except requests.exceptions.Timeout:
-        print(f"❌ DeepSeek API timeout after {timeout}s")
+        print(f"❌ OpenAI API timeout after {timeout}s")
         
         if retry_count < 1:
             wait_time = 8 + random.uniform(3, 6)
             print(f"⏳ Timeout, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/2)")
             time.sleep(wait_time)
-            return call_deepseek_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
+            return call_openai_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
         return {'error': 'timeout', 'status': 408}
     
     except requests.exceptions.RequestException as e:
-        print(f"❌ DeepSeek API Connection Error: {str(e)}")
+        print(f"❌ OpenAI API Connection Error: {str(e)}")
         return {'error': 'connection_error', 'status': 503}
     
     except Exception as e:
-        print(f"❌ DeepSeek API Exception: {str(e)}")
+        print(f"❌ OpenAI API Exception: {str(e)}")
         return {'error': str(e), 'status': 500}
 
-def warmup_deepseek_service():
-    """Warm up DeepSeek service connection"""
+def warmup_openai_service():
+    """Warm up OpenAI service connection"""
     global warmup_complete
     
-    if not DEEPSEEK_API_KEY:
-        print("⚠️ Skipping DeepSeek warm-up: No API key configured")
+    if not OPENAI_API_KEY:
+        print("⚠️ Skipping OpenAI warm-up: No API key configured")
         return False
     
     try:
-        model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
-        print(f"🔥 Warming up DeepSeek connection...")
+        model_to_use = OPENAI_MODEL or DEFAULT_MODEL
+        print(f"🔥 Warming up OpenAI connection...")
         print(f"📊 Using model: {model_to_use}")
         
         start_time = time.time()
         
-        response = call_deepseek_api(
+        response = call_openai_api(
             prompt="Hello, are you ready? Respond with just 'ready'.",
             max_tokens=10,
             temperature=0.1,
-            timeout=10  # Reduced timeout for warm-up
+            timeout=10
         )
         
         if isinstance(response, dict) and 'error' in response:
             error_type = response.get('error')
-            print(f"  ⚠️ DeepSeek warm-up failed: {error_type}")
+            print(f"  ⚠️ OpenAI warm-up failed: {error_type}")
             return False
         elif response and 'ready' in response.lower():
             elapsed = time.time() - start_time
-            print(f"✅ DeepSeek warmed up in {elapsed:.2f}s")
+            print(f"✅ OpenAI warmed up in {elapsed:.2f}s")
             warmup_complete = True
             return True
         else:
-            print(f"  ⚠️ DeepSeek warm-up failed: Unexpected response")
+            print(f"  ⚠️ OpenAI warm-up failed: Unexpected response")
             return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        threading.Timer(30.0, warmup_deepseek_service).start()
+        threading.Timer(30.0, warmup_openai_service).start()
         return False
 
 def keep_service_warm():
-    """Periodically send requests to keep DeepSeek service responsive"""
+    """Periodically send requests to keep OpenAI service responsive"""
     global service_running
     
     while service_running:
         try:
-            time.sleep(180)  # Check every 3 minutes
+            time.sleep(300)  # Check every 5 minutes (reduced frequency for OpenAI)
             
-            if DEEPSEEK_API_KEY and warmup_complete:
-                print(f"♨️ Keeping DeepSeek warm...")
+            if OPENAI_API_KEY and warmup_complete:
+                print(f"♨️ Keeping OpenAI warm...")
                 
                 try:
-                    response = call_deepseek_api(
+                    response = call_openai_api(
                         prompt="Ping - just say 'pong'",
                         max_tokens=5,
-                        timeout=15  # Reduced timeout
+                        timeout=15
                     )
                     if response and 'pong' in str(response).lower():
-                        print(f"  ✅ DeepSeek keep-alive successful")
+                        print(f"  ✅ OpenAI keep-alive successful")
                     else:
-                        print(f"  ⚠️ DeepSeek keep-alive got unexpected response")
+                        print(f"  ⚠️ OpenAI keep-alive got unexpected response")
                 except Exception as e:
-                    print(f"  ⚠️ DeepSeek keep-alive failed: {str(e)}")
+                    print(f"  ⚠️ OpenAI keep-alive failed: {str(e)}")
                     
         except Exception as e:
             print(f"⚠️ Keep-warm thread error: {str(e)}")
-            time.sleep(180)
+            time.sleep(300)
 
-# Text extraction functions
+# Text extraction functions (unchanged)
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file with error handling"""
     try:
@@ -286,7 +321,7 @@ def extract_text_from_pdf(file_path):
                 reader = PdfReader(file_path)
                 text = ""
                 
-                for page_num, page in enumerate(reader.pages[:3]):  # Reduced to 3 pages max
+                for page_num, page in enumerate(reader.pages[:3]):
                     try:
                         page_text = page.extract_text()
                         if page_text:
@@ -307,14 +342,14 @@ def extract_text_from_pdf(file_path):
                             text = content.decode('utf-8', errors='ignore')
                             if text.strip():
                                 words = text.split()
-                                text = ' '.join(words[:400])  # Reduced length
+                                text = ' '.join(words[:400])
                     except:
                         text = "Error: Could not extract text from PDF file"
         
         if not text.strip():
             return "Error: PDF appears to be empty or text could not be extracted"
         
-        if len(text) > 1500:  # Reduced from 2000
+        if len(text) > 1500:
             text = text[:1500] + "\n[Text truncated for optimal processing...]"
             
         return text
@@ -326,12 +361,12 @@ def extract_text_from_docx(file_path):
     """Extract text from DOCX file"""
     try:
         doc = Document(file_path)
-        text = "\n".join([paragraph.text for paragraph in doc.paragraphs[:30] if paragraph.text.strip()])  # Reduced to 30
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs[:30] if paragraph.text.strip()])
         
         if not text.strip():
             return "Error: Document appears to be empty"
         
-        if len(text) > 1500:  # Reduced from 2000
+        if len(text) > 1500:
             text = text[:1500] + "\n[Text truncated for optimal processing...]"
             
         return text
@@ -352,7 +387,7 @@ def extract_text_from_txt(file_path):
                 if not text.strip():
                     return "Error: Text file appears to be empty"
                 
-                if len(text) > 1500:  # Reduced from 2000
+                if len(text) > 1500:
                     text = text[:1500] + "\n[Text truncated for optimal processing...]"
                     
                 return text
@@ -366,63 +401,65 @@ def extract_text_from_txt(file_path):
         return f"Error reading TXT: {str(e)}"
 
 def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None):
-    """Use DeepSeek API to analyze resume against job description with fallback"""
+    """Use OpenAI API to analyze resume against job description with fallback"""
     
-    if not DEEPSEEK_API_KEY:
-        print(f"❌ No DeepSeek API key configured.")
+    if not OPENAI_API_KEY:
+        print(f"❌ No OpenAI API key configured.")
         return generate_fallback_analysis(filename, "No API key available")
     
     # Optimize text length to reduce API load and timeout
-    resume_text = resume_text[:1200]  # Reduced from 1800
-    job_description = job_description[:600]  # Reduced from 800
+    resume_text = resume_text[:1200]
+    job_description = job_description[:600]
     
     # Check cache for consistent scoring
     resume_hash = calculate_resume_hash(resume_text, job_description)
     cached_score = get_cached_score(resume_hash)
     
-    # Optimized prompt for faster processing and lower token usage
-    prompt = f"""Analyze resume against job description:
+    # Optimized prompt for OpenAI
+    prompt = f"""Analyze this resume against the job description and provide a comprehensive evaluation.
 
-RESUME (truncated):
+RESUME:
 {resume_text}
 
-JOB DESCRIPTION (truncated):
+JOB DESCRIPTION:
 {job_description}
 
 Provide analysis in this JSON format only:
 {{
     "candidate_name": "Extracted name or filename",
-    "skills_matched": ["skill1", "skill2"],
+    "skills_matched": ["skill1", "skill2", "skill3"],
     "skills_missing": ["skill1", "skill2"],
-    "experience_summary": "One sentence summary",
-    "education_summary": "One sentence summary",
+    "experience_summary": "One sentence summary of relevant experience",
+    "education_summary": "One sentence summary of education",
     "overall_score": 75,
     "recommendation": "Recommended/Consider/Needs Improvement",
     "key_strengths": ["strength1", "strength2"],
     "areas_for_improvement": ["area1", "area2"]
-}}"""
+}}
+
+IMPORTANT: Only return valid JSON. Do not include any additional text, explanations, or markdown formatting."""
 
     try:
-        model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
-        print(f"⚡ Sending to DeepSeek API ({model_to_use})...")
+        model_to_use = OPENAI_MODEL or DEFAULT_MODEL
+        print(f"⚡ Sending to OpenAI API ({model_to_use})...")
         start_time = time.time()
         
-        response = call_deepseek_api(
+        response = call_openai_api(
             prompt=prompt,
-            max_tokens=300,  # Reduced from 400
+            max_tokens=400,
             temperature=0.1,
-            timeout=API_TIMEOUT  # Use global timeout
+            timeout=API_TIMEOUT
         )
         
         if isinstance(response, dict) and 'error' in response:
             error_type = response.get('error')
-            print(f"❌ DeepSeek API error: {error_type}")
+            print(f"❌ OpenAI API error: {error_type}")
             
             # Return fallback analysis with partial success
             return generate_fallback_analysis(filename, f"API Error: {error_type}", partial_success=True)
         
         elapsed_time = time.time() - start_time
-        print(f"✅ DeepSeek API response in {elapsed_time:.2f} seconds")
+        print(f"✅ OpenAI API response in {elapsed_time:.2f} seconds")
         
         result_text = response.strip()
         
@@ -444,7 +481,15 @@ Provide analysis in this JSON format only:
             print(f"❌ JSON Parse Error: {e}")
             print(f"Response was: {result_text[:150]}")
             
-            return generate_fallback_analysis(filename, "JSON Parse Error", partial_success=True)
+            # Try to fix common JSON issues
+            try:
+                # Remove any non-JSON text
+                json_str = re.sub(r'^[^{]*', '', json_str)
+                json_str = re.sub(r'[^}]*$', '', json_str)
+                analysis = json.loads(json_str)
+                print(f"✅ Fixed JSON parsing")
+            except:
+                return generate_fallback_analysis(filename, "JSON Parse Error", partial_success=True)
         
         # Validate and fill missing fields
         analysis = validate_analysis(analysis, filename)
@@ -463,8 +508,7 @@ Provide analysis in this JSON format only:
                 analysis['overall_score'] = 70
         
         # Add metadata
-        analysis['ai_provider'] = "deepseek"
-        analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
+        analysis['ai_provider'] = "openai"
         analysis['ai_model'] = model_to_use
         analysis['response_time'] = f"{elapsed_time:.2f}s"
         
@@ -477,7 +521,7 @@ Provide analysis in this JSON format only:
         return analysis
         
     except Exception as e:
-        print(f"❌ DeepSeek Analysis Error: {str(e)}")
+        print(f"❌ OpenAI Analysis Error: {str(e)}")
         return generate_fallback_analysis(filename, f"Analysis Error: {str(e)[:100]}")
     
 def validate_analysis(analysis, filename):
@@ -506,10 +550,10 @@ def validate_analysis(analysis, filename):
             analysis['candidate_name'] = clean_name
     
     # Limit array lengths to reduce response size
-    analysis['skills_matched'] = analysis['skills_matched'][:3]
+    analysis['skills_matched'] = analysis['skills_matched'][:4]
     analysis['skills_missing'] = analysis['skills_missing'][:3]
-    analysis['key_strengths'] = analysis['key_strengths'][:2]
-    analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:2]
+    analysis['key_strengths'] = analysis['key_strengths'][:3]
+    analysis['areas_for_improvement'] = analysis['areas_for_improvement'][:3]
     
     return analysis
 
@@ -519,10 +563,8 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
     
     if filename:
         base_name = os.path.splitext(filename)[0]
-        # Clean up the filename
         clean_name = base_name.replace('-', ' ').replace('_', ' ').replace('resume', '').replace('cv', '').strip()
         if clean_name:
-            # Extract potential name parts
             parts = clean_name.split()
             if len(parts) >= 2 and len(parts) <= 4:
                 candidate_name = ' '.join(part.title() for part in parts)
@@ -532,30 +574,28 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "candidate_name": candidate_name,
             "skills_matched": ["Partial analysis completed", "Basic skill matching done"],
             "skills_missing": ["Full AI analysis pending", "Review required"],
-            "experience_summary": f"Basic analysis completed. Full DeepSeek AI analysis was interrupted.",
+            "experience_summary": f"Basic analysis completed. Full OpenAI analysis was interrupted.",
             "education_summary": "Educational background requires full AI analysis.",
             "overall_score": 55,
             "recommendation": "Needs Full Analysis",
             "key_strengths": ["File processed successfully", "Ready for detailed analysis"],
             "areas_for_improvement": ["Complete AI analysis pending", "Try single file analysis"],
-            "ai_provider": "deepseek",
-            "ai_status": "Partial",
-            "ai_model": DEEPSEEK_MODEL or DEFAULT_MODEL,
+            "ai_provider": "openai",
+            "ai_model": OPENAI_MODEL or DEFAULT_MODEL,
         }
     else:
         return {
             "candidate_name": candidate_name,
             "skills_matched": ["AI service is initializing", "Please try again in a moment"],
             "skills_missing": ["Detailed analysis coming soon", "Service warming up"],
-            "experience_summary": f"The DeepSeek AI analysis service is currently warming up.",
+            "experience_summary": f"The OpenAI analysis service is currently warming up.",
             "education_summary": f"Educational background analysis will be available once the service is ready.",
             "overall_score": 50,
             "recommendation": "Service Warming Up - Please Retry",
             "key_strengths": ["Fast analysis once model is loaded", "Accurate skill matching"],
             "areas_for_improvement": ["Please wait for model to load", "Try again in 15 seconds"],
-            "ai_provider": "deepseek",
-            "ai_status": "Warming up",
-            "ai_model": DEEPSEEK_MODEL or DEFAULT_MODEL,
+            "ai_provider": "openai",
+            "ai_model": OPENAI_MODEL or DEFAULT_MODEL,
         }
 
 def process_single_resume(args):
@@ -567,7 +607,7 @@ def process_single_resume(args):
         
         # Add delay based on index to avoid overwhelming API
         if index > 0:
-            delay = 0.8 + (index % 3) * 0.4  # Increased delays
+            delay = 0.5 + (index % 3) * 0.3
             print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
             time.sleep(delay)
         
@@ -604,7 +644,7 @@ def process_single_resume(args):
                 'index': index
             }
         
-        # Analyze with DeepSeek API
+        # Analyze with OpenAI API
         analysis_id = f"{batch_id}_resume_{index}"
         analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id)
         
@@ -665,7 +705,8 @@ def home():
     inactive_minutes = int(inactive_time.total_seconds() / 60)
     
     warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
-    model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
+    model_to_use = OPENAI_MODEL or DEFAULT_MODEL
+    model_info = OPENAI_MODELS.get(model_to_use, {})
     
     return '''
     <!DOCTYPE html>
@@ -680,19 +721,25 @@ def home():
             .ready { background: #d4edda; color: #155724; }
             .warming { background: #fff3cd; color: #856404; }
             .endpoint { background: #f8f9fa; padding: 10px; margin: 10px 0; border-left: 4px solid #007bff; }
+            .model-info { background: #e8f4fd; padding: 15px; border-radius: 5px; margin: 10px 0; }
         </style>
     </head>
     <body>
         <div class="container">
             <h1>🚀 Resume Analyzer API</h1>
-            <p>AI-powered resume analysis using DeepSeek API</p>
+            <p>AI-powered resume analysis using OpenAI API</p>
             
             <div class="status ''' + ('ready' if warmup_complete else 'warming') + '''">
                 <strong>Status:</strong> ''' + warmup_status + '''
             </div>
             
-            <p><strong>Model:</strong> ''' + model_to_use + '''</p>
-            <p><strong>API Provider:</strong> DeepSeek</p>
+            <div class="model-info">
+                <strong>Model:</strong> ''' + model_to_use + '''<br>
+                <strong>Provider:</strong> OpenAI<br>
+                <strong>Context Length:</strong> ''' + str(model_info.get('context_length', 'N/A')) + ''' tokens<br>
+                <strong>Description:</strong> ''' + str(model_info.get('description', 'N/A')) + '''
+            </div>
+            
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
             <p><strong>Processing:</strong> Sequential with delays</p>
             <p><strong>API Timeout:</strong> ''' + str(API_TIMEOUT) + ''' seconds</p>
@@ -710,6 +757,9 @@ def home():
             </div>
             <div class="endpoint">
                 <strong>GET /ping</strong> - Keep-alive ping
+            </div>
+            <div class="endpoint">
+                <strong>GET /models</strong> - List available models
             </div>
         </div>
     </body>
@@ -781,20 +831,20 @@ def analyze_resume():
         print(f"✅ Extracted {len(resume_text)} characters in {extraction_time:.2f}s")
         
         # Check API configuration
-        if not DEEPSEEK_API_KEY:
-            print("❌ No DeepSeek API key configured")
-            return jsonify({'error': 'DeepSeek API not configured'}), 500
+        if not OPENAI_API_KEY:
+            print("❌ No OpenAI API key configured")
+            return jsonify({'error': 'OpenAI API not configured'}), 500
         
-        # Analyze with DeepSeek API
-        model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
-        print(f"⚡ Starting DeepSeek API analysis ({model_to_use})...")
+        # Analyze with OpenAI API
+        model_to_use = OPENAI_MODEL or DEFAULT_MODEL
+        print(f"⚡ Starting OpenAI API analysis ({model_to_use})...")
         ai_start = time.time()
         
         analysis_id = f"single_{timestamp}"
         analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id)
         ai_time = time.time() - ai_start
         
-        print(f"✅ DeepSeek API analysis completed in {ai_time:.2f}s")
+        print(f"✅ OpenAI API analysis completed in {ai_time:.2f}s")
         
         # Create Excel report
         print("📊 Creating Excel report...")
@@ -811,8 +861,7 @@ def analyze_resume():
         # Return analysis
         analysis['excel_filename'] = os.path.basename(excel_path)
         analysis['ai_model'] = model_to_use
-        analysis['ai_provider'] = "deepseek"
-        analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
+        analysis['ai_provider'] = "openai"
         analysis['response_time'] = f"{ai_time:.2f}s"
         analysis['analysis_id'] = analysis_id
         
@@ -860,9 +909,9 @@ def analyze_resume_batch():
             return jsonify({'error': f'Maximum {MAX_BATCH_SIZE} resumes allowed per batch'}), 400
         
         # Check API configuration
-        if not DEEPSEEK_API_KEY:
-            print("❌ No DeepSeek API key configured")
-            return jsonify({'error': 'DeepSeek API not configured'}), 500
+        if not OPENAI_API_KEY:
+            print("❌ No OpenAI API key configured")
+            return jsonify({'error': 'OpenAI API not configured'}), 500
         
         # Prepare batch analysis
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
@@ -899,7 +948,7 @@ def analyze_resume_batch():
             
             # Add delay between processing to avoid rate limits
             if index < len(resume_files) - 1:
-                delay = 1.5 + random.uniform(0, 0.5)  # Increased base delay
+                delay = 1.0 + random.uniform(0, 0.5)
                 print(f"⏳ Adding {delay:.1f}s delay before next resume...")
                 time.sleep(delay)
         
@@ -933,9 +982,8 @@ def analyze_resume_batch():
             'batch_excel_filename': os.path.basename(batch_excel_path) if batch_excel_path else None,
             'batch_id': batch_id,
             'analyses': all_analyses,
-            'model_used': DEEPSEEK_MODEL or DEFAULT_MODEL,
-            'ai_provider': "deepseek",
-            'ai_status': "Warmed up" if warmup_complete else "Warming up",
+            'model_used': OPENAI_MODEL or DEFAULT_MODEL,
+            'ai_provider': "openai",
             'processing_time': f"{time.time() - start_time:.2f}s",
             'job_description_preview': job_description[:200] + ("..." if len(job_description) > 200 else ""),
             'batch_size': len(resume_files),
@@ -952,6 +1000,18 @@ def analyze_resume_batch():
     except Exception as e:
         print(f"❌ Batch analysis error: {traceback.format_exc()}")
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
+
+@app.route('/models', methods=['GET'])
+def list_models():
+    """List available OpenAI models"""
+    update_activity()
+    
+    return jsonify({
+        'available_models': OPENAI_MODELS,
+        'default_model': DEFAULT_MODEL,
+        'current_model': OPENAI_MODEL or DEFAULT_MODEL,
+        'timestamp': datetime.now().isoformat()
+    })
 
 def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
     """Create a simple Excel report with the analysis"""
@@ -985,9 +1045,8 @@ def create_excel_report(analysis_data, filename="resume_analysis_report.xlsx"):
             ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             ("Overall Score", f"{analysis_data.get('overall_score', 0)}/100"),
             ("Recommendation", analysis_data.get('recommendation', 'N/A')),
-            ("AI Model", analysis_data.get('ai_model', 'DeepSeek AI')),
-            ("AI Provider", analysis_data.get('ai_provider', 'DeepSeek')),
-            ("AI Status", analysis_data.get('ai_status', 'N/A')),
+            ("AI Model", analysis_data.get('ai_model', 'OpenAI')),
+            ("AI Provider", analysis_data.get('ai_provider', 'OpenAI')),
         ]
         
         for label, value in info_fields:
@@ -1108,7 +1167,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         ws_summary['A4'] = "Total Resumes"
         ws_summary['B4'] = len(analyses)
         ws_summary['A5'] = "AI Model"
-        ws_summary['B5'] = DEEPSEEK_MODEL or DEFAULT_MODEL
+        ws_summary['B5'] = OPENAI_MODEL or DEFAULT_MODEL
         ws_summary['A6'] = "Processing Method"
         ws_summary['B6'] = "Staggered Sequential"
         ws_summary['A7'] = "Success Rate"
@@ -1117,7 +1176,7 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
         
         # Candidates Ranking Table
         row = 9
-        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "AI Status", "Skills Matched", "Skills Missing"]
+        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "AI Model", "Skills Matched", "Skills Missing"]
         for col, header in enumerate(headers, start=1):
             cell = ws_summary.cell(row=row, column=col)
             cell.value = header
@@ -1131,8 +1190,8 @@ def create_batch_excel_report(analyses, job_description, filename="batch_resume_
             ws_summary.cell(row=row, column=3, value=analysis.get('overall_score', 0))
             ws_summary.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
             
-            ai_status = analysis.get('ai_status', 'N/A')
-            ws_summary.cell(row=row, column=5, value=ai_status)
+            ai_model = analysis.get('ai_model', 'OpenAI')
+            ws_summary.cell(row=row, column=5, value=ai_model)
             
             # Skills matched (first 2)
             strengths = analysis.get('skills_matched', [])
@@ -1239,25 +1298,25 @@ def download_individual_report(analysis_id):
 
 @app.route('/warmup', methods=['GET'])
 def force_warmup():
-    """Force warm-up DeepSeek API"""
+    """Force warm-up OpenAI API"""
     update_activity()
     
     try:
-        if not DEEPSEEK_API_KEY:
+        if not OPENAI_API_KEY:
             return jsonify({
                 'status': 'error',
-                'message': 'DeepSeek API not configured',
+                'message': 'OpenAI API not configured',
                 'warmup_complete': False
             })
         
-        result = warmup_deepseek_service()
+        result = warmup_openai_service()
         
         return jsonify({
             'status': 'success' if result else 'error',
-            'message': f'DeepSeek API warmed up successfully' if result else 'Warm-up failed',
+            'message': f'OpenAI API warmed up successfully' if result else 'Warm-up failed',
             'warmup_complete': warmup_complete,
-            'ai_provider': 'deepseek',
-            'model': DEEPSEEK_MODEL or DEFAULT_MODEL,
+            'ai_provider': 'openai',
+            'model': OPENAI_MODEL or DEFAULT_MODEL,
             'timestamp': datetime.now().isoformat()
         })
         
@@ -1270,33 +1329,33 @@ def force_warmup():
 
 @app.route('/quick-check', methods=['GET'])
 def quick_check():
-    """Quick endpoint to check if DeepSeek API is responsive"""
+    """Quick endpoint to check if OpenAI API is responsive"""
     update_activity()
     
     try:
-        if not DEEPSEEK_API_KEY:
+        if not OPENAI_API_KEY:
             return jsonify({
                 'available': False, 
-                'reason': 'No DeepSeek API key configured',
+                'reason': 'No OpenAI API key configured',
                 'warmup_complete': warmup_complete
             })
         
         if not warmup_complete:
             return jsonify({
                 'available': False,
-                'reason': 'DeepSeek API is warming up',
+                'reason': 'OpenAI API is warming up',
                 'warmup_complete': False,
-                'ai_provider': 'deepseek',
-                'model': DEEPSEEK_MODEL or DEFAULT_MODEL
+                'ai_provider': 'openai',
+                'model': OPENAI_MODEL or DEFAULT_MODEL
             })
         
         try:
             start_time = time.time()
             
-            response = call_deepseek_api(
+            response = call_openai_api(
                 prompt="Say 'ready'",
                 max_tokens=10,
-                timeout=10  # Reduced timeout
+                timeout=10
             )
             
             response_time = time.time() - start_time
@@ -1311,8 +1370,8 @@ def quick_check():
                 return jsonify({
                     'available': True,
                     'response_time': f"{response_time:.2f}s",
-                    'ai_provider': 'deepseek',
-                    'model': DEEPSEEK_MODEL or DEFAULT_MODEL,
+                    'ai_provider': 'openai',
+                    'model': OPENAI_MODEL or DEFAULT_MODEL,
                     'warmup_complete': warmup_complete,
                     'max_batch_size': MAX_BATCH_SIZE,
                     'api_timeout': API_TIMEOUT
@@ -1337,8 +1396,8 @@ def quick_check():
             'available': False,
             'reason': error_msg[:100],
             'status': 'error',
-            'ai_provider': 'deepseek',
-            'model': DEEPSEEK_MODEL or DEFAULT_MODEL,
+            'ai_provider': 'openai',
+            'model': OPENAI_MODEL or DEFAULT_MODEL,
             'warmup_complete': warmup_complete
         })
 
@@ -1347,12 +1406,12 @@ def ping():
     """Simple ping to keep service awake"""
     update_activity()
     
-    model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
+    model_to_use = OPENAI_MODEL or DEFAULT_MODEL
     return jsonify({
         'status': 'pong',
         'timestamp': datetime.now().isoformat(),
         'service': 'resume-analyzer',
-        'ai_provider': 'deepseek',
+        'ai_provider': 'openai',
         'ai_warmup': warmup_complete,
         'model': model_to_use,
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
@@ -1369,20 +1428,22 @@ def health_check():
     inactive_time = datetime.now() - last_activity_time
     inactive_minutes = int(inactive_time.total_seconds() / 60)
     
-    model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
+    model_to_use = OPENAI_MODEL or DEFAULT_MODEL
+    model_info = OPENAI_MODELS.get(model_to_use, {})
     
     return jsonify({
         'status': 'Service is running', 
         'timestamp': datetime.now().isoformat(),
-        'ai_provider': 'deepseek',
-        'ai_provider_configured': bool(DEEPSEEK_API_KEY),
+        'ai_provider': 'openai',
+        'ai_provider_configured': bool(OPENAI_API_KEY),
         'model': model_to_use,
+        'model_info': model_info,
         'ai_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'reports_folder_exists': os.path.exists(REPORTS_FOLDER),
         'inactive_minutes': inactive_minutes,
-        'version': '16.0.0',
-        'optimizations': ['staggered_processing', 'reduced_timeouts', 'smaller_payloads', 'better_fallback'],
+        'version': '17.0.0',
+        'optimizations': ['staggered_processing', 'openai_integration', 'better_error_handling'],
         'configuration': {
             'max_batch_size': MAX_BATCH_SIZE,
             'max_concurrent_requests': MAX_CONCURRENT_REQUESTS,
@@ -1418,29 +1479,28 @@ if __name__ == '__main__':
     print("="*50)
     port = int(os.environ.get('PORT', 5002))
     print(f"📍 Server: http://localhost:{port}")
-    print(f"⚡ AI Provider: DeepSeek")
-    model_to_use = DEEPSEEK_MODEL or DEFAULT_MODEL
+    print(f"⚡ AI Provider: OpenAI")
+    model_to_use = OPENAI_MODEL or DEFAULT_MODEL
     print(f"🤖 Model: {model_to_use}")
-    print(f"🔑 API Key: {'Configured' if DEEPSEEK_API_KEY else 'Not configured'}")
+    print(f"🔑 API Key: {'Configured' if OPENAI_API_KEY else 'Not configured'}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
     print(f"✅ API Timeout: {API_TIMEOUT} seconds")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Max Concurrent Requests: {MAX_CONCURRENT_REQUESTS}")
-    print(f"✅ Reduced Payloads: Enabled")
-    print(f"✅ Timeout Protection: Enabled")
+    print(f"✅ OpenAI Integration: Enabled")
     print("="*50 + "\n")
     
-    if not DEEPSEEK_API_KEY:
-        print("⚠️  WARNING: No DeepSeek API key found!")
-        print("Please set DEEPSEEK_API_KEY in Render environment variables")
+    if not OPENAI_API_KEY:
+        print("⚠️  WARNING: No OpenAI API key found!")
+        print("Please set OPENAI_API_KEY in Render environment variables")
     
     # Enable garbage collection
     gc.enable()
     
     # Start warm-up in background
-    if DEEPSEEK_API_KEY:
-        warmup_thread = threading.Thread(target=warmup_deepseek_service, daemon=True)
+    if OPENAI_API_KEY:
+        warmup_thread = threading.Thread(target=warmup_openai_service, daemon=True)
         warmup_thread.start()
         
         # Start keep-warm thread
