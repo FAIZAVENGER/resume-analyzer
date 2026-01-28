@@ -89,7 +89,7 @@ function App() {
   });
   
   // View management for navigation
-  const [currentView, setCurrentView] = useState('main'); // 'main', 'single-results', 'batch-results', 'candidate-detail'
+  const [currentView, setCurrentView] = useState('main');
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(null);
   
   const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
@@ -388,7 +388,6 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      // Allow up to 10 files (Groq batch size)
       setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10));
       setError('');
     }
@@ -564,7 +563,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 300000, // 5 minutes for batch processing
+        timeout: 300000,
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -746,11 +745,6 @@ function App() {
     if (!modelInfo) return 'Groq AI';
     if (typeof modelInfo === 'string') return modelInfo;
     return modelInfo.name || 'Groq AI';
-  };
-
-  const getModelDescription = (modelInfo) => {
-    if (!modelInfo || typeof modelInfo === 'string') return '128K context length';
-    return modelInfo.description || 'Groq 128K context';
   };
 
   // Render functions for different views
@@ -1048,7 +1042,6 @@ function App() {
         </div>
       )}
 
-      {/* Loading Progress Bar */}
       {(loading || batchLoading) && (
         <div className="loading-section glass">
           <div className="loading-container">
@@ -1136,7 +1129,6 @@ function App() {
         )}
       </button>
 
-      {/* Tips Section */}
       <div className="tips-section">
         {batchMode ? (
           <>
@@ -1199,7 +1191,7 @@ function App() {
           <div className="navigation-actions">
             <button className="download-report-btn" onClick={handleDownload}>
               <DownloadCloud size={18} />
-              <span>Download Report</span>
+              <span>Download Detailed Report</span>
             </button>
           </div>
         </div>
@@ -1300,9 +1292,9 @@ function App() {
           </div>
         </div>
 
-        {/* Skills Analysis */}
+        {/* Skills Analysis - Now showing 10 skills each */}
         <div className="section-title">
-          <h2>Skills Analysis</h2>
+          <h2>Skills Analysis (10 skills each)</h2>
           <p>Detailed breakdown of matched and missing skills</p>
         </div>
         
@@ -1314,7 +1306,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Matched Skills</h3>
-                <p className="skills-subtitle">Found in resume</p>
+                <p className="skills-subtitle">Found in resume (10 skills)</p>
               </div>
               <div className="skills-count success">
                 <span>{analysis.skills_matched?.length || 0}</span>
@@ -1322,7 +1314,7 @@ function App() {
             </div>
             <div className="skills-content">
               <ul className="skills-list">
-                {analysis.skills_matched?.map((skill, index) => (
+                {analysis.skills_matched?.slice(0, 10).map((skill, index) => (
                   <li key={index} className="skill-item success">
                     <div className="skill-item-content">
                       <CheckCircle size={16} />
@@ -1344,7 +1336,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Missing Skills</h3>
-                <p className="skills-subtitle">Suggested to learn</p>
+                <p className="skills-subtitle">Suggested to learn (10 skills)</p>
               </div>
               <div className="skills-count warning">
                 <span>{analysis.skills_missing?.length || 0}</span>
@@ -1352,7 +1344,7 @@ function App() {
             </div>
             <div className="skills-content">
               <ul className="skills-list">
-                {analysis.skills_missing?.map((skill, index) => (
+                {analysis.skills_missing?.slice(0, 10).map((skill, index) => (
                   <li key={index} className="skill-item warning">
                     <div className="skill-item-content">
                       <XCircle size={16} />
@@ -1368,10 +1360,10 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section */}
+        {/* Summary Section with Detailed 4-5 sentences */}
         <div className="section-title">
-          <h2>Profile Summary</h2>
-          <p>Insights extracted from resume</p>
+          <h2>Detailed Profile Summary</h2>
+          <p>Comprehensive insights extracted from resume</p>
         </div>
         
         <div className="summary-grid">
@@ -1380,12 +1372,13 @@ function App() {
               <div className="summary-icon">
                 <Briefcase size={24} />
               </div>
-              <h3>Experience Summary</h3>
+              <h3>Experience Summary (4-5 sentences)</h3>
             </div>
             <div className="summary-content">
               <p className="detailed-summary">{analysis.experience_summary || "No experience summary available."}</p>
               <div className="summary-footer">
                 <span className="summary-tag">Professional Experience</span>
+                <span className="summary-tag">{analysis.years_experience || 'N/A'} experience</span>
               </div>
             </div>
           </div>
@@ -1395,18 +1388,54 @@ function App() {
               <div className="summary-icon">
                 <BookOpen size={24} />
               </div>
-              <h3>Education Summary</h3>
+              <h3>Education Summary (4-5 sentences)</h3>
             </div>
             <div className="summary-content">
               <p className="detailed-summary">{analysis.education_summary || "No education summary available."}</p>
               <div className="summary-footer">
                 <span className="summary-tag">Academic Background</span>
+                <span className="summary-tag">Detailed Analysis</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Insights Section - Clean Version without bullet points */}
+        {/* Additional Candidate Info */}
+        <div className="candidate-info-grid glass">
+          <div className="info-card">
+            <div className="info-header">
+              <Target size={20} />
+              <h4>Job Title Suggestion</h4>
+            </div>
+            <div className="info-value">{analysis.job_title_suggestion || 'N/A'}</div>
+          </div>
+          
+          <div className="info-card">
+            <div className="info-header">
+              <Calendar size={20} />
+              <h4>Years Experience</h4>
+            </div>
+            <div className="info-value">{analysis.years_experience || 'N/A'}</div>
+          </div>
+          
+          <div className="info-card">
+            <div className="info-header">
+              <Building size={20} />
+              <h4>Industry Fit</h4>
+            </div>
+            <div className="info-value">{analysis.industry_fit || 'N/A'}</div>
+          </div>
+          
+          <div className="info-card">
+            <div className="info-header">
+              <DollarSign size={20} />
+              <h4>Salary Expectation</h4>
+            </div>
+            <div className="info-value">{analysis.salary_expectation || 'N/A'}</div>
+          </div>
+        </div>
+
+        {/* Insights Section */}
         <div className="section-title">
           <h2>Insights & Recommendations</h2>
           <p>Personalized suggestions to improve your match</p>
@@ -1457,7 +1486,7 @@ function App() {
                   </div>
                 ))}
                 {(!analysis.areas_for_improvement || analysis.areas_for_improvement.length === 0) && (
-                  <div className="no-items success-text">No significant areas for improvement identified</div>
+                  <div className="no-items success-text">No areas for improvement identified</div>
                 )}
               </div>
             </div>
@@ -1502,6 +1531,14 @@ function App() {
                 {analysis.ai_status || 'N/A'}
               </span>
             </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">Filename:</span>
+              <span className="detail-value">{analysis.filename || 'N/A'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">File Size:</span>
+              <span className="detail-value">{analysis.file_size || 'N/A'}</span>
+            </div>
           </div>
         </div>
 
@@ -1514,7 +1551,7 @@ function App() {
           <div className="action-buttons">
             <button className="download-button" onClick={handleDownload}>
               <DownloadCloud size={20} />
-              <span>Download Excel Report</span>
+              <span>Download Detailed Excel Report</span>
             </button>
             <button className="reset-button" onClick={navigateToMain}>
               <RefreshCw size={20} />
@@ -1541,7 +1578,7 @@ function App() {
         <div className="navigation-actions">
           <button className="download-report-btn" onClick={handleBatchDownload}>
             <DownloadCloud size={18} />
-            <span>Download Full Report</span>
+            <span>Download Full Detailed Report</span>
           </button>
         </div>
       </div>
@@ -1601,7 +1638,7 @@ function App() {
               <div className="stat-value">{batchAnalysis?.failed_files || 0}</div>
               <div className="stat-label">Failed</div>
             </div>
-          </div>
+        </div>
         )}
         
         <div className="stat-card">
@@ -1679,7 +1716,7 @@ function App() {
 
       {/* Candidates Ranking */}
       <div className="section-title">
-        <h2>Candidate Rankings</h2>
+        <h2>Candidate Rankings (10 skills analysis each)</h2>
         <p>Sorted by ATS Score (Highest to Lowest) • Groq Parallel Processing</p>
       </div>
       
@@ -1727,11 +1764,11 @@ function App() {
                     <span>Matched Skills ({candidate.skills_matched?.length || 0})</span>
                   </div>
                   <div className="skills-list">
-                    {candidate.skills_matched?.slice(0, 2).map((skill, idx) => (
+                    {candidate.skills_matched?.slice(0, 5).map((skill, idx) => (
                       <span key={idx} className="skill-tag success">{skill}</span>
                     ))}
-                    {candidate.skills_matched?.length > 2 && (
-                      <span className="more-skills">+{candidate.skills_matched.length - 2} more</span>
+                    {candidate.skills_matched?.length > 5 && (
+                      <span className="more-skills">+{candidate.skills_matched.length - 5} more</span>
                     )}
                   </div>
                 </div>
@@ -1742,18 +1779,29 @@ function App() {
                     <span>Missing Skills ({candidate.skills_missing?.length || 0})</span>
                   </div>
                   <div className="skills-list">
-                    {candidate.skills_missing?.slice(0, 2).map((skill, idx) => (
+                    {candidate.skills_missing?.slice(0, 5).map((skill, idx) => (
                       <span key={idx} className="skill-tag error">{skill}</span>
                     ))}
-                    {candidate.skills_missing?.length > 2 && (
-                      <span className="more-skills">+{candidate.skills_missing.length - 2} more</span>
+                    {candidate.skills_missing?.length > 5 && (
+                      <span className="more-skills">+{candidate.skills_missing.length - 5} more</span>
                     )}
                   </div>
                 </div>
               </div>
               
-              <div className="experience-preview">
-                <p>{candidate.experience_summary?.substring(0, 120)}...</p>
+              <div className="additional-info">
+                <div className="info-row">
+                  <span className="info-label">Job Title:</span>
+                  <span className="info-value">{candidate.job_title_suggestion || 'N/A'}</span>
+                </div>
+                <div className="info-row">
+                  <span className="info-label">Experience:</span>
+                  <span className="info-value">{candidate.years_experience || 'N/A'}</span>
+                </div>
+                <div className="info-row">
+                  <span className="info-label">Industry Fit:</span>
+                  <span className="info-value">{candidate.industry_fit || 'N/A'}</span>
+                </div>
               </div>
             </div>
             
@@ -1762,14 +1810,14 @@ function App() {
                 className="view-details-btn"
                 onClick={() => navigateToCandidateDetail(index)}
               >
-                View Full Details
+                View Full Details (10 skills each)
                 <ChevronRight size={16} />
               </button>
               {candidate.analysis_id && (
                 <button 
                   className="download-individual-btn"
                   onClick={() => handleIndividualDownload(candidate.analysis_id)}
-                  title="Download individual report"
+                  title="Download individual detailed report"
                 >
                   <FileDown size={16} />
                 </button>
@@ -1783,12 +1831,12 @@ function App() {
       <div className="action-section glass">
         <div className="action-content">
           <h3>Batch Analysis Complete</h3>
-          <p>Download comprehensive Excel report with all candidate details</p>
+          <p>Download comprehensive Excel report with detailed candidate analysis (10 skills each)</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
             <DownloadCloud size={20} />
-            <span>Download Full Batch Report</span>
+            <span>Download Full Detailed Batch Report</span>
           </button>
           <button className="reset-button" onClick={navigateToMain}>
             <RefreshCw size={20} />
@@ -1824,7 +1872,7 @@ function App() {
             <span>Back to Rankings</span>
           </button>
           <div className="navigation-title">
-            <h2>Candidate Details</h2>
+            <h2>Candidate Details (10 skills analysis)</h2>
             <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
           </div>
           <div className="navigation-actions">
@@ -1834,7 +1882,7 @@ function App() {
                 onClick={() => handleIndividualDownload(candidate.analysis_id)}
               >
                 <FileDown size={18} />
-                <span>Download Individual Report</span>
+                <span>Download Individual Detailed Report</span>
               </button>
             )}
             <button 
@@ -1936,9 +1984,9 @@ function App() {
           </div>
         </div>
 
-        {/* Skills Analysis */}
+        {/* Skills Analysis - 10 skills each */}
         <div className="section-title">
-          <h2>Skills Analysis</h2>
+          <h2>Skills Analysis (10 skills each)</h2>
           <p>Detailed breakdown of matched and missing skills</p>
         </div>
         
@@ -1950,7 +1998,7 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Matched Skills</h3>
-                <p className="skills-subtitle">Found in resume</p>
+                <p className="skills-subtitle">Found in resume (10 skills)</p>
               </div>
               <div className="skills-count success">
                 <span>{candidate.skills_matched?.length || 0}</span>
@@ -1958,7 +2006,7 @@ function App() {
             </div>
             <div className="skills-content">
               <ul className="skills-list">
-                {candidate.skills_matched?.map((skill, index) => (
+                {candidate.skills_matched?.slice(0, 10).map((skill, index) => (
                   <li key={index} className="skill-item success">
                     <div className="skill-item-content">
                       <CheckCircle size={16} />
@@ -1980,12 +2028,15 @@ function App() {
               </div>
               <div className="skills-header-content">
                 <h3>Missing Skills</h3>
-                <p className="skills-subtitle">Suggested to learn</p>
+                <p className="skills-subtitle">Suggested to learn (10 skills)</p>
+              </div>
+              <div className="skills-count warning">
+                <span>{candidate.skills_missing?.length || 0}</span>
               </div>
             </div>
             <div className="skills-content">
               <ul className="skills-list">
-                {candidate.skills_missing?.map((skill, index) => (
+                {candidate.skills_missing?.slice(0, 10).map((skill, index) => (
                   <li key={index} className="skill-item warning">
                     <div className="skill-item-content">
                       <XCircle size={16} />
@@ -2001,10 +2052,10 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section */}
+        {/* Summary Section with Detailed 4-5 sentences */}
         <div className="section-title">
-          <h2>Profile Summary</h2>
-          <p>Insights extracted from resume</p>
+          <h2>Detailed Profile Summary</h2>
+          <p>Comprehensive insights extracted from resume</p>
         </div>
         
         <div className="summary-grid">
@@ -2013,12 +2064,13 @@ function App() {
               <div className="summary-icon">
                 <Briefcase size={24} />
               </div>
-              <h3>Experience Summary</h3>
+              <h3>Experience Summary (4-5 sentences)</h3>
             </div>
             <div className="summary-content">
               <p className="detailed-summary">{candidate.experience_summary || "No experience summary available."}</p>
               <div className="summary-footer">
                 <span className="summary-tag">Professional Experience</span>
+                <span className="summary-tag">{candidate.years_experience || 'N/A'} experience</span>
               </div>
             </div>
           </div>
@@ -2028,18 +2080,54 @@ function App() {
               <div className="summary-icon">
                 <BookOpen size={24} />
               </div>
-              <h3>Education Summary</h3>
+              <h3>Education Summary (4-5 sentences)</h3>
             </div>
             <div className="summary-content">
               <p className="detailed-summary">{candidate.education_summary || "No education summary available."}</p>
               <div className="summary-footer">
                 <span className="summary-tag">Academic Background</span>
+                <span className="summary-tag">Detailed Analysis</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Insights Section - Clean Version without bullet points */}
+        {/* Additional Candidate Info */}
+        <div className="candidate-info-grid glass">
+          <div className="info-card">
+            <div className="info-header">
+              <Target size={20} />
+              <h4>Job Title Suggestion</h4>
+            </div>
+            <div className="info-value">{candidate.job_title_suggestion || 'N/A'}</div>
+          </div>
+          
+          <div className="info-card">
+            <div className="info-header">
+              <Calendar size={20} />
+              <h4>Years Experience</h4>
+            </div>
+            <div className="info-value">{candidate.years_experience || 'N/A'}</div>
+          </div>
+          
+          <div className="info-card">
+            <div className="info-header">
+              <Building size={20} />
+              <h4>Industry Fit</h4>
+            </div>
+            <div className="info-value">{candidate.industry_fit || 'N/A'}</div>
+          </div>
+          
+          <div className="info-card">
+            <div className="info-header">
+              <DollarSign size={20} />
+              <h4>Salary Expectation</h4>
+            </div>
+            <div className="info-value">{candidate.salary_expectation || 'N/A'}</div>
+          </div>
+        </div>
+
+        {/* Insights Section */}
         <div className="section-title">
           <h2>Insights & Recommendations</h2>
           <p>Personalized suggestions to improve your match</p>
@@ -2101,7 +2189,7 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Candidate Analysis Complete</h3>
-            <p>Download individual report or full batch report</p>
+            <p>Download individual detailed report or full batch report</p>
           </div>
           <div className="action-buttons">
             {candidate.analysis_id && (
@@ -2110,7 +2198,7 @@ function App() {
                 onClick={() => handleIndividualDownload(candidate.analysis_id)}
               >
                 <FileDown size={20} />
-                <span>Download Individual Report</span>
+                <span>Download Individual Detailed Report</span>
               </button>
             )}
             <button className="download-button secondary" onClick={handleBatchDownload}>
@@ -2163,7 +2251,7 @@ function App() {
                   <span className="powered-by">Powered by</span>
                   <span className="groq-badge">⚡ Groq</span>
                   <span className="divider">•</span>
-                  <span className="tagline">3-Key Parallel • Up to 10 Resumes • Always Active</span>
+                  <span className="tagline">10 Skills Analysis • Detailed Reports • Always Active</span>
                 </div>
               </div>
             </div>
@@ -2338,9 +2426,9 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Processing Method</div>
+                <div className="summary-label">Skills Analysis</div>
                 <div className="summary-value info">
-                  ⚡ Round-robin Parallel
+                  ⚡ 10 skills each
                 </div>
               </div>
               <div className="summary-item">
@@ -2423,6 +2511,10 @@ function App() {
               )}
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
+                <span>Skills: 10 each</span>
+              </div>
+              <div className="status-indicator active">
+                <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
                 <span>Mode: {currentView === 'single-results' ? 'Single Analysis' : 
                               currentView === 'batch-results' ? 'Batch Analysis' : 
                               currentView === 'candidate-detail' ? 'Candidate Details' : 
@@ -2472,7 +2564,7 @@ function App() {
               <span>AI Resume Analyzer (Groq)</span>
             </div>
             <p className="footer-tagline">
-              Groq AI with 128K context • 3-key parallel processing • Up to 10 resumes per batch • Individual reports available
+              Groq AI with 128K context • 3-key parallel processing • 10 skills analysis each • Detailed Excel reports
             </p>
           </div>
           
@@ -2481,8 +2573,8 @@ function App() {
               <h4>Features</h4>
               <a href="#">Groq AI</a>
               <a href="#">128K Context</a>
-              <a href="#">Parallel Processing</a>
-              <a href="#">Excel Reports</a>
+              <a href="#">10 Skills Analysis</a>
+              <a href="#">Detailed Reports</a>
             </div>
             <div className="footer-section">
               <h4>Service</h4>
@@ -2504,7 +2596,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. 3-Key Parallel Mode.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. 10 Skills Analysis Mode.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
@@ -2528,6 +2620,10 @@ function App() {
                 Batch: {resumeFiles.length} resumes
               </span>
             )}
+            <span className="stat">
+              <Target size={12} />
+              Skills: 10 each
+            </span>
           </div>
         </div>
       </footer>
