@@ -54,95 +54,7 @@ import {
   Potato, Tomato, Pumpkin, Radish,
   HotPepper, Garlic, Basil, Sprout,
   Bone, Skull, Ghost, Smile, Frown,
-  Meh, Laugh, Angry, Surprised,
-  // New icons
-  Cpu as CpuIcon, Database as DatabaseIcon,
-  Server as ServerIcon, Terminal as TerminalIcon,
-  BrainCircuit, Microchip, HardDrive, Layers,
-  Network, ShieldCheck as ShieldCheckIcon,
-  Lock as LockIcon, Key as KeyIcon,
-  Users as UsersIcon, PieChart, BarChart as BarChartIcon,
-  LineChart, Activity as ActivityIcon,
-  TrendingUp as TrendingUpIcon, ZapOff,
-  Cloud as CloudIcon, Database as DatabaseIcon2,
-  Bot, Sparkles as SparklesIcon, Target as TargetIcon,
-  Settings as SettingsIcon, Bell as BellIcon,
-  HelpCircle as HelpCircleIcon, Wifi as WifiIcon,
-  Shield as ShieldOffIcon, Download as DownloadIcon,
-  Upload as UploadIcon, File as FileIcon,
-  Folder as FolderIcon, Home as HomeIcon2,
-  Mail as MailIcon, Phone as PhoneIcon,
-  MapPin as MapPinIcon, Link as LinkIcon,
-  ExternalLink as ExternalLinkIcon,
-  ChevronDown, ChevronUp, Menu, X as XIcon,
-  Plus as PlusIcon, Minus as MinusIcon,
-  Edit as EditIcon, Trash2 as TrashIcon,
-  Copy as CopyIcon, Scissors as ScissorsIcon,
-  Type as TypeIcon, Bold as BoldIcon,
-  Italic as ItalicIcon, Underline as UnderlineIcon,
-  List as ListIcon, Hash as HashIcon,
-  Quote as QuoteIcon, Divide as DivideIcon,
-  Percent as PercentIcon, DollarSign as DollarIcon,
-  Euro as EuroIcon, Pound as PoundIcon,
-  Yen as YenIcon, Bitcoin as BitcoinIcon,
-  CreditCard as CreditCardIcon, ShoppingCart as CartIcon,
-  Package as PackageIcon, Truck as TruckIcon,
-  Box as BoxIcon, Warehouse as WarehouseIcon,
-  Building as BuildingIcon, Navigation as NavigationIcon,
-  Compass as CompassIcon, Map as MapIcon,
-  Globe as GlobeIcon2, Sunrise as SunriseIcon,
-  Sunset as SunsetIcon, Moon as MoonIcon,
-  CloudSun as CloudSunIcon, Umbrella as UmbrellaIcon,
-  Wind as WindIcon, ThermometerSun as ThermometerIcon,
-  Droplets as DropletsIcon, Waves as WavesIcon,
-  Tree as TreeIcon, Flower as FlowerIcon,
-  Leaf as LeafIcon, Bug as BugIcon,
-  Fish as FishIcon, Bird as BirdIcon,
-  Cat as CatIcon, Dog as DogIcon,
-  Rabbit as RabbitIcon, Cow as CowIcon,
-  Pig as PigIcon, Egg as EggIcon,
-  Apple as AppleIcon, Carrot as CarrotIcon,
-  Coffee as CoffeeIcon2, Wine as WineIcon,
-  Beer as BeerIcon, Cake as CakeIcon,
-  Cookie as CookieIcon, IceCream as IceCreamIcon,
-  Pizza as PizzaIcon, Hamburger as HamburgerIcon,
-  FrenchFries as FriesIcon, Drumstick as DrumstickIcon,
-  EggFried as FriedEggIcon, Soup as SoupIcon,
-  Milk as MilkIcon, GlassWater as WaterIcon,
-  Citrus as CitrusIcon, Pepper as PepperIcon,
-  Salt as SaltIcon, Sugar as SugarIcon,
-  Wheat as WheatIcon, Croissant as CroissantIcon,
-  Sandwich as SandwichIcon, Donut as DonutIcon,
-  Candy as CandyIcon, Lemon as LemonIcon,
-  Cherry as CherryIcon, Strawberry as StrawberryIcon,
-  Grape as GrapeIcon, Watermelon as WatermelonIcon,
-  Peach as PeachIcon, Pear as PearIcon,
-  Banana as BananaIcon, Avocado as AvocadoIcon,
-  Broccoli as BroccoliIcon, Corn as CornIcon,
-  Eggplant as EggplantIcon, Mushroom as MushroomIcon,
-  Onion as OnionIcon, Potato as PotatoIcon,
-  Tomato as TomatoIcon, Pumpkin as PumpkinIcon,
-  Radish as RadishIcon, HotPepper as PepperHotIcon,
-  Garlic as GarlicIcon, Basil as BasilIcon,
-  Sprout as SproutIcon, Bone as BoneIcon,
-  Skull as SkullIcon, Ghost as GhostIcon,
-  Smile as SmileIcon, Frown as FrownIcon,
-  Meh as MehIcon, Laugh as LaughIcon,
-  Angry as AngryIcon, Heart as HeartIcon2,
-  Star as StarIcon2, Flag as FlagIcon,
-  Music as MusicIcon, Camera as CameraIcon,
-  Video as VideoIcon, Headphones as HeadphonesIcon,
-  Mic as MicIcon, MessageSquare as MessageIcon,
-  Bookmark as BookmarkIcon, Eye as EyeIcon,
-  EyeOff as EyeOffIcon, Search as SearchIcon,
-  Bell as BellIcon2, Settings as SettingsIcon2,
-  Key as KeyIcon2, LogOut as LogOutIcon,
-  UserPlus as UserPlusIcon, UserCheck as UserCheckIcon,
-  UserX as UserXIcon, ThumbsUp as ThumbsUpIcon,
-  AlertOctagon as AlertOctagonIcon, Lightbulb as LightbulbIcon,
-  GitBranch as GitBranchIcon, Palette as PaletteIcon,
-  Code as CodeIcon, Database as DatabaseIcon3,
-  Server as ServerIcon2, Terminal as TerminalIcon2
+  Meh, Laugh, Angry, surprised
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -162,27 +74,29 @@ function App() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [aiStatus, setAiStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState('checking');
+  const [deepseekWarmup, setDeepseekWarmup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
-  const [showServicePanel, setShowServicePanel] = useState(false);
+  const [quotaInfo, setQuotaInfo] = useState(null);
+  const [showQuotaPanel, setShowQuotaPanel] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
   const [modelInfo, setModelInfo] = useState(null);
   const [serviceStatus, setServiceStatus] = useState({
-    aiEngine: 'Self-Hosted AI',
-    nlpModel: 'SpaCy + Custom',
-    batchCapacity: 20
+    enhancedFallback: true,
+    validKeys: 0,
+    totalKeys: 0
   });
   
   // View management for navigation
   const [currentView, setCurrentView] = useState('main'); // 'main', 'single-results', 'batch-results', 'candidate-detail'
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(null);
   
-  const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com'; // Update this to your backend URL
+  const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
   
   const keepAliveInterval = useRef(null);
   const backendWakeInterval = useRef(null);
-  const statusCheckInterval = useRef(null);
+  const warmupCheckInterval = useRef(null);
 
   // Navigation functions
   const navigateToSingleResults = () => {
@@ -231,8 +145,8 @@ function App() {
       if (backendWakeInterval.current) {
         clearInterval(backendWakeInterval.current);
       }
-      if (statusCheckInterval.current) {
-        clearInterval(statusCheckInterval.current);
+      if (warmupCheckInterval.current) {
+        clearInterval(warmupCheckInterval.current);
       }
     };
   }, []);
@@ -251,38 +165,23 @@ function App() {
       
       if (healthResponse?.data) {
         setServiceStatus({
-          aiEngine: healthResponse.data.ai_engine || 'Self-Hosted AI',
-          nlpModel: healthResponse.data.nlp_model || 'SpaCy + Custom',
-          batchCapacity: healthResponse.data.max_batch_size || 20,
-          database: healthResponse.data.database || 'connected',
-          version: healthResponse.data.version || '2.0.0'
+          enhancedFallback: healthResponse.data.client_initialized || false,
+          validKeys: healthResponse.data.client_initialized ? 1 : 0,
+          totalKeys: healthResponse.data.api_key_configured ? 1 : 0
         });
         
+        setDeepseekWarmup(healthResponse.data.ai_warmup_complete || false);
+        setModelInfo(healthResponse.data.model_info || { name: healthResponse.data.model });
         setBackendStatus('ready');
-        setAiStatus('available');
-        
-        if (healthResponse.data.ai_engine) {
-          setModelInfo({
-            name: healthResponse.data.ai_engine,
-            description: 'Self-Hosted AI Engine'
-          });
-        }
-      } else {
-        // If health check fails, still set defaults
-        setBackendStatus('ready');
-        setAiStatus('available');
-        setModelInfo({
-          name: 'ResumeAnalyzer AI',
-          description: 'Self-Hosted NLP Engine'
-        });
       }
+      
+      await forceDeepseekWarmup();
       
       setupPeriodicChecks();
       
     } catch (err) {
       console.log('Service initialization error:', err.message);
       setBackendStatus('sleeping');
-      setAiStatus('checking');
       
       setTimeout(() => initializeService(), 5000);
     } finally {
@@ -292,55 +191,91 @@ function App() {
 
   const wakeUpBackend = async () => {
     try {
-      console.log('🔔 Connecting to backend...');
-      setLoadingMessage('Connecting to backend...');
+      console.log('🔔 Waking up backend...');
+      setLoadingMessage('Waking up backend...');
       
-      const healthResponse = await axios.get(`${API_BASE_URL}/health`, {
+      const pingPromises = [
+        axios.get(`${API_BASE_URL}/ping`, { timeout: 8000 }),
+        axios.get(`${API_BASE_URL}/health`, { timeout: 10000 })
+      ];
+      
+      await Promise.allSettled(pingPromises);
+      
+      console.log('✅ Backend is responding');
+      setBackendStatus('ready');
+      setLoadingMessage('');
+      
+    } catch (error) {
+      console.log('⚠️ Backend is waking up...');
+      setBackendStatus('waking');
+      
+      setTimeout(() => {
+        axios.get(`${API_BASE_URL}/ping`, { timeout: 15000 })
+          .then(() => {
+            setBackendStatus('ready');
+            console.log('✅ Backend fully awake');
+          })
+          .catch(() => {
+            setBackendStatus('sleeping');
+            console.log('❌ Backend still sleeping');
+          });
+      }, 3000);
+    }
+  };
+
+  const forceDeepseekWarmup = async () => {
+    try {
+      setAiStatus('warming');
+      setLoadingMessage('Warming up DeepSeek API...');
+      
+      const response = await axios.get(`${API_BASE_URL}/warmup`, {
+        timeout: 15000
+      });
+      
+      if (response.data.warmup_complete) {
+        setAiStatus('available');
+        setDeepseekWarmup(true);
+        console.log('✅ DeepSeek API warmed up successfully');
+      } else {
+        setAiStatus('warming');
+        console.log('⚠️ DeepSeek API still warming up');
+        
+        setTimeout(() => checkDeepseekStatus(), 5000);
+      }
+      
+      setLoadingMessage('');
+      
+    } catch (error) {
+      console.log('⚠️ DeepSeek API warm-up failed:', error.message);
+      setAiStatus('unavailable');
+      
+      setTimeout(() => checkDeepseekStatus(), 3000);
+    }
+  };
+
+  const checkDeepseekStatus = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/quick-check`, {
         timeout: 10000
       });
       
-      if (healthResponse.data.status === 'healthy') {
-        console.log('✅ Backend is healthy and responding');
-        setBackendStatus('ready');
+      if (response.data.available) {
         setAiStatus('available');
-        setLoadingMessage('');
-        
-        // Update service status with backend info
-        setServiceStatus(prev => ({
-          ...prev,
-          aiEngine: healthResponse.data.ai_engine || 'Self-Hosted AI',
-          nlpModel: healthResponse.data.nlp_model || 'SpaCy + Custom',
-          batchCapacity: healthResponse.data.max_batch_size || 20,
-          version: healthResponse.data.version || '2.0.0'
-        }));
-        
-        return true;
+        setDeepseekWarmup(true);
+        if (response.data.model) {
+          setModelInfo(response.data.model_info || { name: response.data.model });
+        }
+      } else if (response.data.warmup_complete) {
+        setAiStatus('available');
+        setDeepseekWarmup(true);
       } else {
-        console.log('⚠️ Backend not fully healthy');
-        setBackendStatus('waking');
-        return false;
+        setAiStatus('warming');
+        setDeepseekWarmup(false);
       }
       
     } catch (error) {
-      console.log('⚠️ Backend connection failed:', error.message);
-      setBackendStatus('sleeping');
-      setAiStatus('checking');
-      setLoadingMessage('Backend connection failed. Retrying...');
-      
-      // Retry after delay
-      setTimeout(() => {
-        axios.get(`${API_BASE_URL}/health`, { timeout: 15000 })
-          .then(() => {
-            setBackendStatus('ready');
-            setAiStatus('available');
-            console.log('✅ Backend connection established');
-          })
-          .catch(() => {
-            console.log('❌ Backend still unavailable');
-          });
-      }, 3000);
-      
-      return false;
+      console.log('DeepSeek API status check failed:', error.message);
+      setAiStatus('unavailable');
     }
   };
 
@@ -350,43 +285,38 @@ function App() {
         timeout: 8000
       });
       
-      if (response.data.status === 'healthy') {
-        setBackendStatus('ready');
+      setBackendStatus('ready');
+      setDeepseekWarmup(response.data.ai_warmup_complete || false);
+      if (response.data.model_info || response.data.model) {
+        setModelInfo(response.data.model_info || { name: response.data.model });
+      }
+      
+      if (response.data.ai_warmup_complete) {
         setAiStatus('available');
-        
-        // Update model info if available
-        if (response.data.ai_engine) {
-          setModelInfo({
-            name: response.data.ai_engine,
-            description: 'Self-Hosted AI Engine'
-          });
-        }
-        
-        return true;
       } else {
-        setBackendStatus('waking');
-        return false;
+        setAiStatus('warming');
       }
       
     } catch (error) {
       console.log('Backend health check failed:', error.message);
       setBackendStatus('sleeping');
-      return false;
     }
   };
 
   const setupPeriodicChecks = () => {
-    // Keep-alive ping every 5 minutes
     backendWakeInterval.current = setInterval(() => {
-      axios.get(`${API_BASE_URL}/health`, { timeout: 5000 })
-        .then(() => console.log('✅ Keep-alive ping successful'))
-        .catch(() => console.log('⚠️ Keep-alive ping failed'));
-    }, 5 * 60 * 1000);
+      axios.get(`${API_BASE_URL}/ping`, { timeout: 5000 })
+        .then(() => console.log('Keep-alive ping successful'))
+        .catch(() => console.log('Keep-alive ping failed'));
+    }, 3 * 60 * 1000);
     
-    // Status check every 30 seconds
-    statusCheckInterval.current = setInterval(() => {
-      if (backendStatus !== 'ready' || aiStatus !== 'available') {
-        checkBackendHealth();
+    warmupCheckInterval.current = setInterval(() => {
+      checkBackendHealth();
+    }, 60 * 1000);
+    
+    const statusCheckInterval = setInterval(() => {
+      if (aiStatus === 'warming' || aiStatus === 'checking') {
+        checkDeepseekStatus();
       }
     }, 30000);
     
@@ -457,8 +387,8 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      // Allow up to 20 files (self-hosted backend supports more)
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 20));
+      // Allow up to 10 files (DeepSeek batch size)
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10));
       setError('');
     }
   };
@@ -495,7 +425,7 @@ function App() {
     }
 
     if (backendStatus !== 'ready') {
-      setError('Backend is connecting. Please wait a moment...');
+      setError('Backend is warming up. Please wait a moment...');
       await wakeUpBackend();
       return;
     }
@@ -521,7 +451,11 @@ function App() {
         });
       }, 500);
 
-      setLoadingMessage('Self-Hosted AI analysis...');
+      if (aiStatus === 'available' && deepseekWarmup) {
+        setLoadingMessage('DeepSeek AI analysis...');
+      } else {
+        setLoadingMessage('Enhanced analysis (Warming up DeepSeek)...');
+      }
       setProgress(20);
 
       setLoadingMessage('Uploading and processing resume...');
@@ -531,7 +465,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 120000, // 2 minutes for self-hosted AI
+        timeout: 60000,
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -563,13 +497,13 @@ function App() {
       if (progressInterval) clearInterval(progressInterval);
       
       if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Request timeout. The backend might be processing. Please try again in 30 seconds.');
+        setError('Request timeout. The backend might be waking up. Please try again in 30 seconds.');
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('Rate limit reached. Please try again later.');
+        setError('Rate limit reached. DeepSeek API has limits. Please try again later.');
       } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
-        setError('Processing limit reached. Please wait a minute and try again.');
+        setError('DeepSeek API rate limit exceeded. Please wait a minute and try again.');
         setAiStatus('unavailable');
       } else {
         setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
@@ -593,7 +527,7 @@ function App() {
     }
 
     if (backendStatus !== 'ready') {
-      setError('Backend is connecting. Please wait a moment...');
+      setError('Backend is warming up. Please wait a moment...');
       await wakeUpBackend();
       return;
     }
@@ -658,11 +592,11 @@ function App() {
       if (progressInterval) clearInterval(progressInterval);
       
       if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Batch analysis timeout. The backend might be processing. Please try again.');
+        setError('Batch analysis timeout. The backend might be waking up. Please try again.');
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('Processing limit reached. Please try again later or reduce batch size.');
+        setError('DeepSeek API rate limit reached. Please try again later or reduce batch size.');
       } else {
         setError(err.response?.data?.error || 'An error occurred during batch analysis.');
       }
@@ -721,13 +655,13 @@ function App() {
         bgColor: 'rgba(0, 255, 157, 0.1)'
       };
       case 'waking': return { 
-        text: 'Backend Connecting', 
+        text: 'Backend Waking', 
         color: '#ffd166', 
         icon: <CloudRain size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       case 'sleeping': return { 
-        text: 'Backend Offline', 
+        text: 'Backend Sleeping', 
         color: '#ff6b6b', 
         icon: <CloudOff size={16} />,
         bgColor: 'rgba(255, 107, 107, 0.1)'
@@ -744,22 +678,28 @@ function App() {
   const getAiStatusMessage = () => {
     switch(aiStatus) {
       case 'checking': return { 
-        text: 'Checking AI Engine...', 
+        text: 'Checking DeepSeek...', 
         color: '#ffd166', 
         icon: <Brain size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
+      case 'warming': return { 
+        text: 'DeepSeek Warming', 
+        color: '#ff9800', 
+        icon: <Thermometer size={16} />,
+        bgColor: 'rgba(255, 152, 0, 0.1)'
+      };
       case 'available': return { 
-        text: 'AI Engine Ready 🤖', 
+        text: 'DeepSeek Ready 🧠', 
         color: '#00ff9d', 
-        icon: <BrainCircuit size={16} />,
+        icon: <Brain size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
       };
       case 'unavailable': return { 
-        text: 'AI Engine Offline', 
-        color: '#ff6b6b', 
-        icon: <Brain size={16} />,
-        bgColor: 'rgba(255, 107, 107, 0.1)'
+        text: 'Enhanced Analysis', 
+        color: '#ffd166', 
+        icon: <Info size={16} />,
+        bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       default: return { 
         text: 'AI Status', 
@@ -783,29 +723,29 @@ function App() {
     }, 100);
   };
 
-  const handleForceReconnect = async () => {
+  const handleForceWarmup = async () => {
     setIsWarmingUp(true);
-    setLoadingMessage('Reconnecting to backend...');
+    setLoadingMessage('Forcing DeepSeek API warm-up...');
     
     try {
-      await wakeUpBackend();
+      await forceDeepseekWarmup();
       setLoadingMessage('');
     } catch (error) {
-      console.log('Reconnection failed:', error);
+      console.log('Force warm-up failed:', error);
     } finally {
       setIsWarmingUp(false);
     }
   };
 
   const getModelDisplayName = (modelInfo) => {
-    if (!modelInfo) return 'Self-Hosted AI';
+    if (!modelInfo) return 'DeepSeek AI';
     if (typeof modelInfo === 'string') return modelInfo;
-    return modelInfo.name || 'Self-Hosted AI';
+    return modelInfo.name || 'DeepSeek AI';
   };
 
   const getModelDescription = (modelInfo) => {
-    if (!modelInfo || typeof modelInfo === 'string') return 'Custom NLP Engine';
-    return modelInfo.description || 'Custom NLP Engine';
+    if (!modelInfo || typeof modelInfo === 'string') return '32K context length';
+    return modelInfo.description || 'DeepSeek 32K context';
   };
 
   // Render functions for different views
@@ -822,7 +762,7 @@ function App() {
             {aiStatusInfo.icon} {aiStatusInfo.text}
           </span>
           <span className="status-badge always-active">
-            <ZapIcon size={14} /> Self-Hosted
+            <ZapIcon size={14} /> Always Active
           </span>
           {modelInfo && (
             <span className="status-badge model">
@@ -873,7 +813,7 @@ function App() {
               gap: '0.5rem'
             }}
           >
-            <Users size={16} /> Multiple Resumes (Up to {serviceStatus.batchCapacity})
+            <Users size={16} /> Multiple Resumes (Up to 10)
           </button>
         </div>
       </div>
@@ -890,7 +830,7 @@ function App() {
               <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
               <p className="card-subtitle">
                 {batchMode 
-                  ? `Upload multiple resumes (Max ${serviceStatus.batchCapacity}, 15MB each)` 
+                  ? 'Upload multiple resumes (Max 10, 15MB each)' 
                   : 'Supported: PDF, DOC, DOCX, TXT (Max 15MB)'}
               </p>
             </div>
@@ -1005,7 +945,7 @@ function App() {
                       <span className="upload-text">
                         Drag & drop multiple files or click to browse
                       </span>
-                      <span className="upload-hint">Max {serviceStatus.batchCapacity} files, 15MB each</span>
+                      <span className="upload-hint">Max 10 files, 15MB each</span>
                     </>
                   )}
                 </div>
@@ -1026,9 +966,9 @@ function App() {
           <div className="upload-stats">
             <div className="stat">
               <div className="stat-icon">
-                <BrainCircuit size={14} />
+                <Brain size={14} />
               </div>
-              <span>Self-Hosted AI analysis</span>
+              <span>DeepSeek AI analysis</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
@@ -1040,13 +980,13 @@ function App() {
               <div className="stat-icon">
                 <Activity size={14} />
               </div>
-              <span>Advanced NLP Processing</span>
+              <span>Batch Processing</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
-                <Database size={14} />
+                <Users size={14} />
               </div>
-              <span>Multi-factor Scoring</span>
+              <span>Up to 10 resumes</span>
             </div>
           </div>
         </div>
@@ -1088,13 +1028,13 @@ function App() {
         <div className="error-message glass">
           <AlertCircle size={20} />
           <span>{error}</span>
-          {error.includes('connecting') && (
+          {error.includes('warming up') && (
             <button 
               className="error-action-button"
-              onClick={handleForceReconnect}
+              onClick={wakeUpBackend}
             >
               <Activity size={16} />
-              Reconnect
+              Wake Backend
             </button>
           )}
         </div>
@@ -1125,9 +1065,9 @@ function App() {
             <div className="progress-stats">
               <span>{Math.round(batchMode ? batchProgress : progress)}%</span>
               <span>•</span>
-              <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Connecting...'}</span>
+              <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
               <span>•</span>
-              <span>AI Engine: {aiStatus === 'available' ? 'Ready 🤖' : 'Checking...'}</span>
+              <span>DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : 'Warming...'}</span>
               {modelInfo && (
                 <>
                   <span>•</span>
@@ -1144,7 +1084,7 @@ function App() {
             
             <div className="loading-note info">
               <Info size={14} />
-              <span>Self-Hosted AI with advanced NLP processing and multi-factor scoring</span>
+              <span>DeepSeek AI offers 32K context length for comprehensive resume analysis</span>
             </div>
           </div>
         </div>
@@ -1166,12 +1106,12 @@ function App() {
         ) : backendStatus === 'sleeping' ? (
           <div className="button-waking-content">
             <Activity className="spinner" />
-            <span>Reconnecting...</span>
+            <span>Waking Backend...</span>
           </div>
         ) : (
           <>
             <div className="button-content">
-              <BrainCircuit size={20} />
+              <Brain size={20} />
               <div className="button-text">
                 <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                 <span className="button-subtext">
@@ -1191,12 +1131,12 @@ function App() {
         {batchMode ? (
           <>
             <div className="tip">
-              <BrainCircuit size={16} />
-              <span>Self-Hosted AI with advanced NLP processing</span>
+              <Brain size={16} />
+              <span>DeepSeek AI with 32K context length for comprehensive analysis</span>
             </div>
             <div className="tip">
               <Activity size={16} />
-              <span>Process up to {serviceStatus.batchCapacity} resumes in a single batch</span>
+              <span>Process up to 10 resumes in a single batch</span>
             </div>
             <div className="tip">
               <TrendingUp size={16} />
@@ -1210,16 +1150,16 @@ function App() {
         ) : (
           <>
             <div className="tip">
-              <BrainCircuit size={16} />
-              <span>Self-Hosted AI - No external API dependencies</span>
+              <Brain size={16} />
+              <span>DeepSeek AI offers high-quality resume analysis</span>
             </div>
             <div className="tip">
-              <Database size={16} />
-              <span>Multi-factor scoring with 8 different dimensions</span>
+              <Thermometer size={16} />
+              <span>DeepSeek API automatically warms up when idle</span>
             </div>
             <div className="tip">
               <Activity size={16} />
-              <span>Advanced NLP with SpaCy + custom algorithms</span>
+              <span>Backend stays awake with automatic pings every 3 minutes</span>
             </div>
             <div className="tip">
               <Cpu size={16} />
@@ -1243,7 +1183,7 @@ function App() {
             <span>New Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>🤖 Resume Analysis Results</h2>
+            <h2>🧠 Resume Analysis Results</h2>
             <p>{analysis.candidate_name}</p>
           </div>
           <div className="navigation-actions">
@@ -1274,7 +1214,7 @@ function App() {
                 </span>
                 <span className="file-info">
                   <Cpu size={14} />
-                  AI Engine: {analysis.ai_engine || 'Self-Hosted AI'}
+                  Model: {analysis.ai_model || 'DeepSeek AI'}
                 </span>
               </div>
             </div>
@@ -1307,8 +1247,8 @@ function App() {
               </p>
               <div className="score-meta">
                 <span className="meta-item">
-                  <BrainCircuit size={12} />
-                  Processing Time: {analysis.processing_time || 'N/A'}
+                  <Brain size={12} />
+                  Response Time: {analysis.response_time || 'N/A'}
                 </span>
                 <span className="meta-item">
                   <CheckCircle size={12} />
@@ -1333,15 +1273,15 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {analysis.ai_engine || 'Self-Hosted AI'} • Multi-factor Scoring
+                {analysis.ai_model || 'DeepSeek AI'} • Consistent ATS Scoring
               </p>
             </div>
           </div>
           <div className="recommendation-content">
             <p className="recommendation-text">{analysis.recommendation}</p>
             <div className="confidence-badge">
-              <BrainCircuit size={16} />
-              <span>Self-Hosted AI Analysis</span>
+              <Brain size={16} />
+              <span>DeepSeek AI Analysis</span>
             </div>
           </div>
         </div>
@@ -1510,32 +1450,10 @@ function App() {
           </div>
         </div>
 
-        {/* Additional Insights from Self-Hosted AI */}
-        {analysis.career_advice && analysis.career_advice.length > 0 && (
-          <>
-            <div className="section-title">
-              <h2>Career Advice</h2>
-              <p>Personalized recommendations for professional growth</p>
-            </div>
-            
-            <div className="career-advice-grid">
-              {analysis.career_advice.slice(0, 4).map((advice, index) => (
-                <div key={index} className="career-advice-card glass">
-                  <div className="advice-header">
-                    <Lightbulb size={20} />
-                    <h4>Recommendation {index + 1}</h4>
-                  </div>
-                  <p className="advice-text">{advice}</p>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
         {/* AI Analysis Details */}
         <div className="ai-details-card glass">
           <div className="ai-details-header">
-            <BrainCircuit size={24} />
+            <Brain size={24} />
             <div>
               <h3>AI Analysis Details</h3>
               <p className="ai-details-subtitle">Technical information about this analysis</p>
@@ -1543,35 +1461,29 @@ function App() {
           </div>
           <div className="ai-details-content">
             <div className="ai-detail-item">
-              <span className="detail-label">AI Engine:</span>
-              <span className="detail-value">{analysis.ai_engine || 'Self-Hosted AI'}</span>
+              <span className="detail-label">AI Provider:</span>
+              <span className="detail-value">{analysis.ai_provider || 'DeepSeek'}</span>
             </div>
             <div className="ai-detail-item">
-              <span className="detail-label">Model Version:</span>
-              <span className="detail-value">{analysis.model_version || '2.0.0'}</span>
+              <span className="detail-label">AI Model:</span>
+              <span className="detail-value">{analysis.ai_model || 'DeepSeek AI'}</span>
             </div>
             <div className="ai-detail-item">
-              <span className="detail-label">Processing Time:</span>
-              <span className="detail-value">{analysis.processing_time || 'N/A'}</span>
+              <span className="detail-label">Response Time:</span>
+              <span className="detail-value">{analysis.response_time || 'N/A'}</span>
             </div>
             <div className="ai-detail-item">
               <span className="detail-label">Analysis ID:</span>
               <span className="detail-value">{analysis.analysis_id || 'N/A'}</span>
             </div>
             <div className="ai-detail-item">
-              <span className="detail-label">Analysis Depth:</span>
-              <span className="detail-value" style={{ color: '#00ff9d' }}>
-                {analysis.analysis_depth || 'Comprehensive'}
+              <span className="detail-label">AI Status:</span>
+              <span className="detail-value" style={{ 
+                color: analysis.ai_status === 'Warmed up' ? '#00ff9d' : '#ffd166' 
+              }}>
+                {analysis.ai_status || 'N/A'}
               </span>
             </div>
-            {analysis.cached && (
-              <div className="ai-detail-item">
-                <span className="detail-label">Cache Status:</span>
-                <span className="detail-value" style={{ color: '#ffd166' }}>
-                  Served from cache
-                </span>
-              </div>
-            )}
           </div>
         </div>
 
@@ -1605,7 +1517,7 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>🤖 Batch Analysis Results</h2>
+          <h2>🧠 Batch Analysis Results</h2>
           <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
         </div>
         <div className="navigation-actions">
@@ -1655,18 +1567,18 @@ function App() {
             <Cpu size={24} />
           </div>
           <div className="stat-content">
-            <div className="stat-value">{batchAnalysis?.ai_engine || 'Self-Hosted AI'}</div>
-            <div className="stat-label">AI Engine</div>
+            <div className="stat-value">{getModelDisplayName(batchAnalysis?.model_used)}</div>
+            <div className="stat-label">AI Model</div>
           </div>
         </div>
         
         <div className="stat-card">
           <div className="stat-icon warning">
-            <Activity size={24} />
+            <Brain size={24} />
           </div>
           <div className="stat-content">
-            <div className="stat-value">{batchAnalysis?.processing_time || 'N/A'}</div>
-            <div className="stat-label">Processing Time</div>
+            <div className="stat-value">DeepSeek</div>
+            <div className="stat-label">AI Provider</div>
           </div>
         </div>
       </div>
@@ -1674,7 +1586,7 @@ function App() {
       {/* Candidates Ranking */}
       <div className="section-title">
         <h2>Candidate Rankings</h2>
-        <p>Sorted by ATS Score (Highest to Lowest) • Self-Hosted AI Processing</p>
+        <p>Sorted by ATS Score (Highest to Lowest) • DeepSeek AI Processing</p>
       </div>
       
       <div className="batch-results-grid">
@@ -1884,7 +1796,7 @@ function App() {
               <div className="score-meta">
                 <span className="meta-item">
                   <Cpu size={12} />
-                  AI Engine: {candidate.ai_engine || 'Self-Hosted AI'}
+                  Model: {candidate.ai_model || 'DeepSeek AI'}
                 </span>
               </div>
             </div>
@@ -1901,15 +1813,15 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {candidate.ai_engine || 'Self-Hosted AI'} • Batch Processing
+                {candidate.ai_model || 'DeepSeek AI'} • Batch Processing
               </p>
             </div>
           </div>
           <div className="recommendation-content">
             <p className="recommendation-text">{candidate.recommendation}</p>
             <div className="confidence-badge">
-              <BrainCircuit size={16} />
-              <span>Self-Hosted AI Analysis</span>
+              <Brain size={16} />
+              <span>DeepSeek AI Analysis</span>
             </div>
           </div>
         </div>
@@ -2133,15 +2045,15 @@ function App() {
             {/* Logo and Title */}
             <div className="logo">
               <div className="logo-glow">
-                <BrainCircuit className="logo-icon" />
+                <Brain className="logo-icon" />
               </div>
               <div className="logo-text">
-                <h1>Self-Hosted Resume Analyzer</h1>
+                <h1>AI Resume Analyzer</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
-                  <span className="ai-badge">🤖 Self-Hosted AI</span>
+                  <span className="deepseek-badge">🧠 DeepSeek</span>
                   <span className="divider">•</span>
-                  <span className="tagline">Advanced NLP • No API Limits • Complete Privacy</span>
+                  <span className="tagline">32K Context • Up to 10 Resumes • Always Active</span>
                 </div>
               </div>
             </div>
@@ -2199,7 +2111,7 @@ function App() {
             >
               {aiStatusInfo.icon}
               <span>{aiStatusInfo.text}</span>
-              {aiStatus === 'checking' && <Loader size={12} className="pulse-spinner" />}
+              {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
             </div>
             
             {/* Model Info */}
@@ -2220,29 +2132,29 @@ function App() {
               </div>
             )}
             
-            {/* Reconnect Button */}
-            {backendStatus !== 'ready' && (
+            {/* Warm-up Button */}
+            {aiStatus !== 'available' && (
               <button 
-                className="feature reconnect-button"
-                onClick={handleForceReconnect}
+                className="feature warmup-button"
+                onClick={handleForceWarmup}
                 disabled={isWarmingUp}
               >
                 {isWarmingUp ? (
                   <Loader size={16} className="spinner" />
                 ) : (
-                  <Activity size={16} />
+                  <Thermometer size={16} />
                 )}
-                <span>Reconnect</span>
+                <span>Warm Up AI</span>
               </button>
             )}
             
-            {/* Service Status Toggle */}
+            {/* Quota Status Toggle */}
             <button 
-              className="feature service-toggle"
-              onClick={() => setShowServicePanel(!showServicePanel)}
+              className="feature quota-toggle"
+              onClick={() => setShowQuotaPanel(!showQuotaPanel)}
               title="Show service status"
             >
-              <Server size={16} />
+              <BarChart size={16} />
               <span>Service Status</span>
             </button>
           </div>
@@ -2258,67 +2170,61 @@ function App() {
       </header>
 
       <main className="main-content">
-        {/* Service Panel */}
-        {showServicePanel && (
-          <div className="service-status-panel glass">
-            <div className="service-panel-header">
-              <div className="service-title">
-                <Server size={20} />
-                <h3>Self-Hosted Service Status</h3>
+        {/* Status Panel */}
+        {showQuotaPanel && (
+          <div className="quota-status-panel glass">
+            <div className="quota-panel-header">
+              <div className="quota-title">
+                <Activity size={20} />
+                <h3>DeepSeek Service Status</h3>
               </div>
               <button 
-                className="close-service"
-                onClick={() => setShowServicePanel(false)}
+                className="close-quota"
+                onClick={() => setShowQuotaPanel(false)}
               >
                 <X size={18} />
               </button>
             </div>
             
-            <div className="service-summary">
+            <div className="quota-summary">
               <div className="summary-item">
                 <div className="summary-label">Backend Status</div>
                 <div className={`summary-value ${backendStatus === 'ready' ? 'success' : backendStatus === 'waking' ? 'warning' : 'error'}`}>
                   {backendStatus === 'ready' ? '✅ Active' : 
-                   backendStatus === 'waking' ? '🔥 Connecting' : 
-                   '💤 Offline'}
+                   backendStatus === 'waking' ? '🔥 Waking Up' : 
+                   '💤 Sleeping'}
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">AI Engine Status</div>
-                <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'checking' ? 'warning' : 'error'}`}>
-                  {aiStatus === 'available' ? '🤖 Ready' : 
-                   aiStatus === 'checking' ? '🔍 Checking' : 
-                   '⚠️ Offline'}
+                <div className="summary-label">DeepSeek API Status</div>
+                <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
+                  {aiStatus === 'available' ? '🧠 Ready' : 
+                   aiStatus === 'warming' ? '🔥 Warming' : 
+                   '⚠️ Enhanced Mode'}
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">AI Engine</div>
+                <div className="summary-label">AI Model</div>
                 <div className="summary-value">
-                  {serviceStatus.aiEngine}
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">NLP Model</div>
-                <div className="summary-value">
-                  {serviceStatus.nlpModel}
+                  {getModelDisplayName(modelInfo)}
                 </div>
               </div>
               <div className="summary-item">
                 <div className="summary-label">Batch Capacity</div>
                 <div className="summary-value success">
-                  📊 Up to {serviceStatus.batchCapacity} resumes
+                  📊 Up to 10 resumes
                 </div>
               </div>
               <div className="summary-item">
                 <div className="summary-label">Processing Method</div>
                 <div className="summary-value info">
-                  ⚡ Advanced Multi-factor
+                  ⚡ Staggered Sequential
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Version</div>
+                <div className="summary-label">Context Length</div>
                 <div className="summary-value">
-                  🏷️ {serviceStatus.version || '2.0.0'}
+                  🧠 32K tokens
                 </div>
               </div>
             </div>
@@ -2332,16 +2238,16 @@ function App() {
                 Refresh Status
               </button>
               <button 
-                className="action-button reconnect"
-                onClick={handleForceReconnect}
+                className="action-button warmup"
+                onClick={handleForceWarmup}
                 disabled={isWarmingUp}
               >
                 {isWarmingUp ? (
                   <Loader size={16} className="spinner" />
                 ) : (
-                  <Activity size={16} />
+                  <Thermometer size={16} />
                 )}
-                Reconnect
+                Force Warm-up
               </button>
             </div>
           </div>
@@ -2353,16 +2259,16 @@ function App() {
             <div className="status-indicators">
               <div className={`status-indicator ${backendStatus === 'ready' ? 'active' : 'inactive'}`}>
                 <div className="indicator-dot"></div>
-                <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Connecting'}</span>
+                <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}</span>
               </div>
               <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
                 <div className="indicator-dot"></div>
-                <span>AI Engine: {aiStatus === 'available' ? 'Ready 🤖' : aiStatus === 'checking' ? 'Checking...' : 'Offline'}</span>
+                <span>DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
               </div>
               {modelInfo && (
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Engine: {getModelDisplayName(modelInfo)}</span>
+                  <span>Model: {getModelDisplayName(modelInfo)}</span>
                 </div>
               )}
               <div className="status-indicator active">
@@ -2375,22 +2281,29 @@ function App() {
               {batchMode && (
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
-                  <span>Capacity: Up to {serviceStatus.batchCapacity} resumes</span>
+                  <span>Capacity: Up to 10 resumes</span>
                 </div>
               )}
             </div>
             
             {backendStatus !== 'ready' && (
-              <div className="connection-message">
+              <div className="wakeup-message">
                 <AlertCircle size={16} />
-                <span>Backend is connecting. Analysis may be slower for the first request.</span>
+                <span>Backend is waking up. Analysis may be slower for the first request.</span>
+              </div>
+            )}
+            
+            {aiStatus === 'warming' && (
+              <div className="wakeup-message">
+                <Thermometer size={16} />
+                <span>DeepSeek API is warming up. This ensures high-quality responses.</span>
               </div>
             )}
             
             {batchMode && (
-              <div className="batch-message">
-                <BrainCircuit size={16} />
-                <span>Batch mode: Processing up to {serviceStatus.batchCapacity} resumes with Self-Hosted AI</span>
+              <div className="multi-key-message">
+                <Brain size={16} />
+                <span>Batch mode: Processing up to 10 resumes with DeepSeek AI</span>
               </div>
             )}
           </div>
@@ -2405,26 +2318,26 @@ function App() {
         <div className="footer-content">
           <div className="footer-brand">
             <div className="footer-logo">
-              <BrainCircuit size={20} />
-              <span>Self-Hosted Resume Analyzer</span>
+              <Brain size={20} />
+              <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Advanced NLP with SpaCy • No API Limits • Complete Data Privacy • Multi-factor Scoring
+              DeepSeek AI with 32K context length • Up to 10 resumes per batch • Individual reports available
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
               <h4>Features</h4>
-              <a href="#">Self-Hosted AI</a>
-              <a href="#">Advanced NLP</a>
+              <a href="#">DeepSeek AI</a>
+              <a href="#">32K Context</a>
               <a href="#">Batch Processing</a>
               <a href="#">Excel Reports</a>
             </div>
             <div className="footer-section">
               <h4>Service</h4>
-              <a href="#">No API Limits</a>
-              <a href="#">Data Privacy</a>
+              <a href="#">Auto Warm-up</a>
+              <a href="#">Keep-alive</a>
               <a href="#">Health Checks</a>
               <a href="#">Status Monitor</a>
             </div>
@@ -2441,19 +2354,19 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 Self-Hosted Resume Analyzer. Built with React + Flask + Custom AI. No External APIs.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + DeepSeek AI. 32K Context Mode.</p>
           <div className="footer-stats">
             <span className="stat">
-              <Server size={12} />
-              Backend: {backendStatus === 'ready' ? 'Active' : 'Connecting'}
+              <CloudLightning size={12} />
+              Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
             </span>
             <span className="stat">
-              <BrainCircuit size={12} />
-              AI Engine: {aiStatus === 'available' ? 'Ready 🤖' : 'Checking'}
+              <Brain size={12} />
+              DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : 'Warming'}
             </span>
             <span className="stat">
               <Cpu size={12} />
-              Engine: {modelInfo ? getModelDisplayName(modelInfo) : 'Self-Hosted AI'}
+              Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
             </span>
             {batchMode && (
               <span className="stat">
