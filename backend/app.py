@@ -78,13 +78,17 @@ score_cache = {}
 cache_lock = threading.Lock()
 
 # Batch processing configuration
-MAX_CONCURRENT_REQUESTS = 3  # Max concurrent requests to DeepSeek API
+MAX_CONCURRENT_REQUESTS = 2  # Reduced from 3 to avoid rate limits
 MAX_BATCH_SIZE = 10  # Maximum number of resumes per batch
 MAX_INDIVIDUAL_REPORTS = 10  # Limit individual Excel reports
 
 # Rate limiting protection
-MAX_RETRIES = 3
-RETRY_DELAY_BASE = 3
+MAX_RETRIES = 2  # Reduced from 3
+RETRY_DELAY_BASE = 2  # Reduced from 3
+
+# Gunicorn timeout protection
+API_TIMEOUT = 25  # Reduced from 45 seconds
+UPLOAD_TIMEOUT = 90  # Increased for batch uploads
 
 # Memory optimization
 service_running = True
@@ -109,7 +113,7 @@ def set_cached_score(resume_hash, score):
     with cache_lock:
         score_cache[resume_hash] = score
 
-def call_deepseek_api(prompt, max_tokens=600, temperature=0.1, timeout=45, model_override=None, retry_count=0):
+def call_deepseek_api(prompt, max_tokens=500, temperature=0.1, timeout=API_TIMEOUT, model_override=None, retry_count=0):
     """Call DeepSeek API with optimized settings"""
     if not DEEPSEEK_API_KEY:
         print(f"❌ No DeepSeek API key configured")
@@ -122,7 +126,7 @@ def call_deepseek_api(prompt, max_tokens=600, temperature=0.1, timeout=45, model
     
     model_to_use = model_override or DEEPSEEK_MODEL or DEFAULT_MODEL
     
-    # Optimized payload for batch processing
+    # Optimized payload for faster response
     payload = {
         'model': model_to_use,
         'messages': [
@@ -164,7 +168,7 @@ def call_deepseek_api(prompt, max_tokens=600, temperature=0.1, timeout=45, model
             print(f"❌ Rate limit exceeded for DeepSeek API")
             
             if retry_count < MAX_RETRIES:
-                wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(5, 10)
+                wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(3, 8)
                 print(f"⏳ Rate limited, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
                 time.sleep(wait_time)
                 return call_deepseek_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
@@ -173,8 +177,8 @@ def call_deepseek_api(prompt, max_tokens=600, temperature=0.1, timeout=45, model
         elif response.status_code == 503:
             print(f"❌ Service unavailable for DeepSeek API")
             
-            if retry_count < 2:
-                wait_time = 15 + random.uniform(5, 10)
+            if retry_count < 1:
+                wait_time = 10 + random.uniform(3, 7)
                 print(f"⏳ Service unavailable, retrying in {wait_time:.1f}s")
                 time.sleep(wait_time)
                 return call_deepseek_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
@@ -187,12 +191,16 @@ def call_deepseek_api(prompt, max_tokens=600, temperature=0.1, timeout=45, model
     except requests.exceptions.Timeout:
         print(f"❌ DeepSeek API timeout after {timeout}s")
         
-        if retry_count < 2:
-            wait_time = 10 + random.uniform(5, 10)
-            print(f"⏳ Timeout, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/3)")
+        if retry_count < 1:
+            wait_time = 8 + random.uniform(3, 6)
+            print(f"⏳ Timeout, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/2)")
             time.sleep(wait_time)
             return call_deepseek_api(prompt, max_tokens, temperature, timeout, model_override, retry_count + 1)
         return {'error': 'timeout', 'status': 408}
+    
+    except requests.exceptions.RequestException as e:
+        print(f"❌ DeepSeek API Connection Error: {str(e)}")
+        return {'error': 'connection_error', 'status': 503}
     
     except Exception as e:
         print(f"❌ DeepSeek API Exception: {str(e)}")
@@ -217,7 +225,7 @@ def warmup_deepseek_service():
             prompt="Hello, are you ready? Respond with just 'ready'.",
             max_tokens=10,
             temperature=0.1,
-            timeout=15
+            timeout=10  # Reduced timeout for warm-up
         )
         
         if isinstance(response, dict) and 'error' in response:
@@ -253,7 +261,7 @@ def keep_service_warm():
                     response = call_deepseek_api(
                         prompt="Ping - just say 'pong'",
                         max_tokens=5,
-                        timeout=20
+                        timeout=15  # Reduced timeout
                     )
                     if response and 'pong' in str(response).lower():
                         print(f"  ✅ DeepSeek keep-alive successful")
@@ -278,7 +286,7 @@ def extract_text_from_pdf(file_path):
                 reader = PdfReader(file_path)
                 text = ""
                 
-                for page_num, page in enumerate(reader.pages[:4]):  # Reduced to 4 pages
+                for page_num, page in enumerate(reader.pages[:3]):  # Reduced to 3 pages max
                     try:
                         page_text = page.extract_text()
                         if page_text:
@@ -299,15 +307,15 @@ def extract_text_from_pdf(file_path):
                             text = content.decode('utf-8', errors='ignore')
                             if text.strip():
                                 words = text.split()
-                                text = ' '.join(words[:600])  # Reduced length
+                                text = ' '.join(words[:400])  # Reduced length
                     except:
                         text = "Error: Could not extract text from PDF file"
         
         if not text.strip():
             return "Error: PDF appears to be empty or text could not be extracted"
         
-        if len(text) > 2000:  # Reduced from 3000
-            text = text[:2000] + "\n[Text truncated for optimal processing...]"
+        if len(text) > 1500:  # Reduced from 2000
+            text = text[:1500] + "\n[Text truncated for optimal processing...]"
             
         return text
     except Exception as e:
@@ -318,13 +326,13 @@ def extract_text_from_docx(file_path):
     """Extract text from DOCX file"""
     try:
         doc = Document(file_path)
-        text = "\n".join([paragraph.text for paragraph in doc.paragraphs[:40] if paragraph.text.strip()])  # Reduced to 40
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs[:30] if paragraph.text.strip()])  # Reduced to 30
         
         if not text.strip():
             return "Error: Document appears to be empty"
         
-        if len(text) > 2000:  # Reduced from 3000
-            text = text[:2000] + "\n[Text truncated for optimal processing...]"
+        if len(text) > 1500:  # Reduced from 2000
+            text = text[:1500] + "\n[Text truncated for optimal processing...]"
             
         return text
     except Exception as e:
@@ -344,8 +352,8 @@ def extract_text_from_txt(file_path):
                 if not text.strip():
                     return "Error: Text file appears to be empty"
                 
-                if len(text) > 2000:  # Reduced from 3000
-                    text = text[:2000] + "\n[Text truncated for optimal processing...]"
+                if len(text) > 1500:  # Reduced from 2000
+                    text = text[:1500] + "\n[Text truncated for optimal processing...]"
                     
                 return text
             except UnicodeDecodeError:
@@ -364,9 +372,9 @@ def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis
         print(f"❌ No DeepSeek API key configured.")
         return generate_fallback_analysis(filename, "No API key available")
     
-    # Optimize text length to reduce API load
-    resume_text = resume_text[:1800]  # Reduced from 2500
-    job_description = job_description[:800]  # Reduced from 1000
+    # Optimize text length to reduce API load and timeout
+    resume_text = resume_text[:1200]  # Reduced from 1800
+    job_description = job_description[:600]  # Reduced from 800
     
     # Check cache for consistent scoring
     resume_hash = calculate_resume_hash(resume_text, job_description)
@@ -401,9 +409,9 @@ Provide analysis in this JSON format only:
         
         response = call_deepseek_api(
             prompt=prompt,
-            max_tokens=400,  # Reduced from 500
+            max_tokens=300,  # Reduced from 400
             temperature=0.1,
-            timeout=30  # Reduced from 45
+            timeout=API_TIMEOUT  # Use global timeout
         )
         
         if isinstance(response, dict) and 'error' in response:
@@ -559,7 +567,7 @@ def process_single_resume(args):
         
         # Add delay based on index to avoid overwhelming API
         if index > 0:
-            delay = 0.5 + (index % 3) * 0.3  # Stagger delays
+            delay = 0.8 + (index % 3) * 0.4  # Increased delays
             print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
             time.sleep(delay)
         
@@ -687,6 +695,7 @@ def home():
             <p><strong>API Provider:</strong> DeepSeek</p>
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
             <p><strong>Processing:</strong> Sequential with delays</p>
+            <p><strong>API Timeout:</strong> ''' + str(API_TIMEOUT) + ''' seconds</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
             
             <h2>📡 Endpoints</h2>
@@ -890,7 +899,7 @@ def analyze_resume_batch():
             
             # Add delay between processing to avoid rate limits
             if index < len(resume_files) - 1:
-                delay = 1.0 + random.uniform(0, 0.5)  # Increased base delay
+                delay = 1.5 + random.uniform(0, 0.5)  # Increased base delay
                 print(f"⏳ Adding {delay:.1f}s delay before next resume...")
                 time.sleep(delay)
         
@@ -1287,7 +1296,7 @@ def quick_check():
             response = call_deepseek_api(
                 prompt="Say 'ready'",
                 max_tokens=10,
-                timeout=15
+                timeout=10  # Reduced timeout
             )
             
             response_time = time.time() - start_time
@@ -1305,7 +1314,8 @@ def quick_check():
                     'ai_provider': 'deepseek',
                     'model': DEEPSEEK_MODEL or DEFAULT_MODEL,
                     'warmup_complete': warmup_complete,
-                    'max_batch_size': MAX_BATCH_SIZE
+                    'max_batch_size': MAX_BATCH_SIZE,
+                    'api_timeout': API_TIMEOUT
                 })
             else:
                 return jsonify({
@@ -1347,7 +1357,8 @@ def ping():
         'model': model_to_use,
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
         'keep_alive_active': True,
-        'max_batch_size': MAX_BATCH_SIZE
+        'max_batch_size': MAX_BATCH_SIZE,
+        'api_timeout': API_TIMEOUT
     })
 
 @app.route('/health', methods=['GET'])
@@ -1370,13 +1381,14 @@ def health_check():
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'reports_folder_exists': os.path.exists(REPORTS_FOLDER),
         'inactive_minutes': inactive_minutes,
-        'version': '15.0.0',
-        'optimizations': ['staggered_processing', 'single_api_key', 'reduced_token_usage', 'better_fallback'],
+        'version': '16.0.0',
+        'optimizations': ['staggered_processing', 'reduced_timeouts', 'smaller_payloads', 'better_fallback'],
         'configuration': {
             'max_batch_size': MAX_BATCH_SIZE,
             'max_concurrent_requests': MAX_CONCURRENT_REQUESTS,
             'max_retries': MAX_RETRIES,
-            'max_individual_reports': MAX_INDIVIDUAL_REPORTS
+            'max_individual_reports': MAX_INDIVIDUAL_REPORTS,
+            'api_timeout_seconds': API_TIMEOUT
         },
         'processing_method': 'staggered_sequential_with_delays'
     })
@@ -1412,11 +1424,11 @@ if __name__ == '__main__':
     print(f"🔑 API Key: {'Configured' if DEEPSEEK_API_KEY else 'Not configured'}")
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
-    print(f"✅ Staggered Sequential Processing: Enabled")
+    print(f"✅ API Timeout: {API_TIMEOUT} seconds")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Max Concurrent Requests: {MAX_CONCURRENT_REQUESTS}")
-    print(f"✅ Optimized Token Usage: Enabled")
-    print(f"✅ Better Fallback Analysis: Enabled")
+    print(f"✅ Reduced Payloads: Enabled")
+    print(f"✅ Timeout Protection: Enabled")
     print("="*50 + "\n")
     
     if not DEEPSEEK_API_KEY:
