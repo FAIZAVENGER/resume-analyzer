@@ -19,6 +19,8 @@ import {
   FileX, Calendar, Mail, Phone, MapPin, Link,
   ThumbsUp, AlertOctagon, Lightbulb, GitBranch,
   Code, Database, Server, Terminal, Palette,
+  Music, Camera, Video, Headphones, Mic,
+  MessageSquare, Heart, Share2, Bookmark,
   Eye, EyeOff, Search, Settings, Bell,
   HelpCircle, Shield as ShieldIcon, Key,
   LogOut, UserPlus, UserCheck, UserX,
@@ -28,15 +30,31 @@ import {
   Maximize2, Minimize2, Plus, Minus,
   Edit, Trash2, Copy, Scissors, Type,
   Bold, Italic, Underline, List,
-  FileImage, File, FileText as FileTextIcon,
-  Maximize, Minimize, X as CloseIcon,
-  ChevronDown, ChevronUp, ExternalLink as ExternalLinkIcon,
-  FileCode, FileArchive, FileVideo, FileAudio,
-  FileCheck, FileWarning, FileQuestion, FileMinus,
-  FilePlus, FileSlash, FileSearch, FileDigit,
-  FileJson, FileXml, FileType, FileOutput,
-  Download as DownloadIcon,
-  ExternalLink as ExternalLinkIcon2
+  Hash, Quote, Divide, Percent,
+  DollarSign, Euro, Pound, Yen,
+  Bitcoin, CreditCard, ShoppingCart,
+  Package, Truck, Box, Warehouse,
+  Building, Home as HomeIcon, Navigation,
+  Compass, Map, Globe as GlobeIcon,
+  Sunrise, Sunset, Moon, CloudSun,
+  Umbrella, Wind, ThermometerSun,
+  Droplets, Waves, Tree, Flower,
+  Leaf, Bug, Fish, Bird, Cat,
+  Dog, Rabbit, Cow, Pig, Egg,
+  Apple, Carrot, Coffee as CoffeeIcon,
+  Wine, Beer, Cake, Cookie, IceCream,
+  Pizza, Hamburger, FrenchFries, Drumstick,
+  EggFried, Soup, Milk, GlassWater,
+  Citrus, Pepper, Salt, Sugar,
+  Wheat, Croissant, Sandwich, Donut,
+  Candy, Citrus as Lemon, Cherry,
+  Strawberry, Grape, Watermelon, Peach,
+  Pear, Banana, Avocado, Broccoli,
+  Corn, Eggplant, Mushroom, Onion,
+  Potato, Tomato, Pumpkin, Radish,
+  HotPepper, Garlic, Basil, Sprout,
+  Bone, Skull, Ghost, Smile, Frown,
+  Meh, Laugh, Angry, surprised
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -74,18 +92,11 @@ function App() {
   const [currentView, setCurrentView] = useState('main');
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(null);
   
-  // Resume Preview State
-  const [showResumePreview, setShowResumePreview] = useState(false);
-  const [resumePreviewContent, setResumePreviewContent] = useState(null);
-  const [resumePreviewLoading, setResumePreviewLoading] = useState(false);
-  const [previewMode, setPreviewMode] = useState('pdf'); // 'pdf' or 'original'
-  
   const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com';
   
   const keepAliveInterval = useRef(null);
   const backendWakeInterval = useRef(null);
   const warmupCheckInterval = useRef(null);
-  const iframeRef = useRef(null);
 
   // Navigation functions
   const navigateToSingleResults = () => {
@@ -111,8 +122,6 @@ function App() {
     setResumeFile(null);
     setResumeFiles([]);
     setJobDescription('');
-    setShowResumePreview(false);
-    setResumePreviewContent(null);
     window.scrollTo(0, 0);
   };
 
@@ -122,8 +131,6 @@ function App() {
     } else if (currentView === 'batch-results' || currentView === 'single-results') {
       setCurrentView('main');
     }
-    setShowResumePreview(false);
-    setResumePreviewContent(null);
     window.scrollTo(0, 0);
   };
 
@@ -315,90 +322,6 @@ function App() {
     }, 30000);
     
     keepAliveInterval.current = statusCheckInterval;
-  };
-
-  // Resume Preview Functions
-  const fetchResumePreview = async (analysisId, candidateName, hasPdfPreview = true) => {
-    try {
-      setResumePreviewLoading(true);
-      setShowResumePreview(true);
-      setPreviewMode(hasPdfPreview ? 'pdf' : 'original');
-      
-      // For PDF preview, we'll use an iframe
-      if (hasPdfPreview) {
-        const previewUrl = `${API_BASE_URL}/resume-preview/${analysisId}`;
-        setResumePreviewContent({
-          type: 'pdf',
-          url: previewUrl,
-          filename: `${candidateName}_resume_preview.pdf`,
-          candidateName: candidateName
-        });
-      } else {
-        // For non-PDF files, we'll download and handle based on type
-        const response = await axios.get(`${API_BASE_URL}/resume-preview/${analysisId}`, {
-          responseType: 'blob',
-          timeout: 30000
-        });
-        
-        const blob = new Blob([response.data]);
-        const url = URL.createObjectURL(blob);
-        const filename = response.headers['content-disposition'] 
-          ? response.headers['content-disposition'].split('filename=')[1].replace(/"/g, '')
-          : `${candidateName}_resume`;
-        
-        setResumePreviewContent({
-          type: 'download',
-          url: url,
-          filename: filename,
-          candidateName: candidateName,
-          blob: blob
-        });
-      }
-      
-      setResumePreviewLoading(false);
-      
-    } catch (error) {
-      console.log('Error fetching resume preview:', error);
-      setResumePreviewContent({
-        type: 'error',
-        message: 'Failed to load resume preview. The file may have expired or is not available.',
-        candidateName: candidateName
-      });
-      setResumePreviewLoading(false);
-    }
-  };
-
-  const downloadOriginalResume = async (analysisId, candidateName) => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/resume-original/${analysisId}`, {
-        responseType: 'blob'
-      });
-      
-      const blob = new Blob([response.data]);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = response.headers['content-disposition'] 
-        ? response.headers['content-disposition'].split('filename=')[1].replace(/"/g, '')
-        : `${candidateName}_original_resume`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
-    } catch (error) {
-      console.log('Error downloading original resume:', error);
-      setError('Failed to download original resume.');
-    }
-  };
-
-  const closeResumePreview = () => {
-    setShowResumePreview(false);
-    setResumePreviewContent(null);
-    // Clean up blob URLs
-    if (resumePreviewContent?.type === 'download' && resumePreviewContent.url) {
-      URL.revokeObjectURL(resumePreviewContent.url);
-    }
   };
 
   const handleDrag = (e) => {
@@ -824,171 +747,6 @@ function App() {
     return modelInfo.name || 'Groq AI';
   };
 
-  // Get file icon based on file extension
-  const getFileIcon = (filename) => {
-    if (!filename) return <File size={20} />;
-    
-    const ext = filename.split('.').pop().toLowerCase();
-    switch(ext) {
-      case 'pdf':
-        return <File size={20} />;
-      case 'doc':
-      case 'docx':
-        return <FileTextIcon size={20} />;
-      case 'txt':
-        return <FileCode size={20} />;
-      default:
-        return <File size={20} />;
-    }
-  };
-
-  // Get file type display name
-  const getFileTypeDisplay = (filename) => {
-    if (!filename) return 'File';
-    
-    const ext = filename.split('.').pop().toLowerCase();
-    switch(ext) {
-      case 'pdf':
-        return 'PDF Document';
-      case 'doc':
-        return 'Word Document';
-      case 'docx':
-        return 'Word Document';
-      case 'txt':
-        return 'Text File';
-      default:
-        return 'Document';
-    }
-  };
-
-  // Render Resume Preview Modal
-  const renderResumePreviewModal = () => {
-    if (!showResumePreview) return null;
-    
-    return (
-      <div className="resume-preview-modal-overlay" onClick={closeResumePreview}>
-        <div className="resume-preview-modal glass" onClick={(e) => e.stopPropagation()}>
-          <div className="resume-preview-header">
-            <div className="preview-title">
-              <FileText size={20} />
-              <div>
-                <h3>Resume Preview</h3>
-                <p className="preview-subtitle">
-                  {resumePreviewContent?.candidateName || 'Candidate'}
-                  {previewMode === 'pdf' ? ' • PDF Preview' : ' • Original File'}
-                </p>
-              </div>
-            </div>
-            <div className="preview-actions">
-              {resumePreviewContent?.type === 'pdf' && (
-                <button 
-                  className="preview-action-btn"
-                  onClick={() => window.open(resumePreviewContent.url, '_blank')}
-                  title="Open in new tab"
-                >
-                  <ExternalLinkIcon2 size={18} />
-                </button>
-              )}
-              {resumePreviewContent?.type === 'download' && (
-                <button 
-                  className="preview-action-btn"
-                  onClick={() => {
-                    const link = document.createElement('a');
-                    link.href = resumePreviewContent.url;
-                    link.download = resumePreviewContent.filename;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                  }}
-                  title="Download file"
-                >
-                  <DownloadIcon size={18} />
-                </button>
-              )}
-              <button onClick={closeResumePreview} className="close-preview-btn">
-                <CloseIcon size={20} />
-              </button>
-            </div>
-          </div>
-          
-          <div className="resume-preview-content">
-            {resumePreviewLoading ? (
-              <div className="preview-loading">
-                <Loader size={32} className="spinner" />
-                <p>Loading resume preview...</p>
-              </div>
-            ) : resumePreviewContent?.type === 'error' ? (
-              <div className="preview-error">
-                <AlertCircle size={48} />
-                <h4>Unable to Load Resume</h4>
-                <p>{resumePreviewContent.message}</p>
-                <button onClick={closeResumePreview} className="close-btn">
-                  Close
-                </button>
-              </div>
-            ) : resumePreviewContent?.type === 'pdf' ? (
-              <div className="pdf-preview-container">
-                <iframe
-                  ref={iframeRef}
-                  src={resumePreviewContent.url}
-                  title={`Resume Preview: ${resumePreviewContent.candidateName}`}
-                  className="pdf-preview-frame"
-                  sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-                />
-                <div className="pdf-preview-note">
-                  <Info size={14} />
-                  <span>
-                    PDF preview embedded. For better viewing, you can 
-                    <button 
-                      className="inline-link"
-                      onClick={() => window.open(resumePreviewContent.url, '_blank')}
-                    >
-                      open in new tab
-                    </button>
-                    .
-                  </span>
-                </div>
-              </div>
-            ) : resumePreviewContent?.type === 'download' ? (
-              <div className="download-preview-container">
-                <div className="download-preview-info">
-                  <File size={48} />
-                  <h4>Original File Preview</h4>
-                  <p>This file type cannot be previewed directly in the browser.</p>
-                  <p className="file-info">
-                    <strong>Filename:</strong> {resumePreviewContent.filename}
-                  </p>
-                  <div className="download-actions">
-                    <button 
-                      className="download-btn primary"
-                      onClick={() => {
-                        const link = document.createElement('a');
-                        link.href = resumePreviewContent.url;
-                        link.download = resumePreviewContent.filename;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                      }}
-                    >
-                      <DownloadIcon size={18} />
-                      Download Original File
-                    </button>
-                    <button 
-                      className="download-btn secondary"
-                      onClick={closeResumePreview}
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   // Render functions for different views
   const renderMainView = () => (
     <div className="upload-section">
@@ -1222,9 +980,9 @@ function App() {
             </div>
             <div className="stat">
               <div className="stat-icon">
-                <Eye size={14} />
+                <Activity size={14} />
               </div>
-              <span>PDF Preview</span>
+              <span>Parallel Processing</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
@@ -1329,7 +1087,7 @@ function App() {
             
             <div className="loading-note info">
               <Info size={14} />
-              <span>All resumes are automatically converted to PDF for easy preview</span>
+              <span>Groq AI offers 128K context length for comprehensive resume analysis</span>
             </div>
           </div>
         </div>
@@ -1362,7 +1120,7 @@ function App() {
                 <span className="button-subtext">
                   {batchMode 
                     ? `${resumeFiles.length} resume(s) • ${getAvailableKeysCount()} keys • ~${Math.ceil(resumeFiles.length/3)}s` 
-                    : `${getModelDisplayName(modelInfo)} • PDF Preview`}
+                    : `${getModelDisplayName(modelInfo)} • Single`}
                 </span>
               </div>
             </div>
@@ -1379,16 +1137,16 @@ function App() {
               <span>Groq AI with 128K context length for comprehensive analysis</span>
             </div>
             <div className="tip">
-              <Eye size={16} />
-              <span>All resumes are automatically converted to PDF for easy preview</span>
+              <Activity size={16} />
+              <span>Process up to 10 resumes in parallel with {getAvailableKeysCount()} API keys</span>
             </div>
             <div className="tip">
               <Zap size={16} />
               <span>~10-15 seconds for 10 resumes (Round-robin parallel processing)</span>
             </div>
             <div className="tip">
-              <File size={16} />
-              <span>View original resume structure in PDF format directly in browser</span>
+              <Download size={16} />
+              <span>Download comprehensive Excel report with all candidate data</span>
             </div>
           </>
         ) : (
@@ -1398,16 +1156,16 @@ function App() {
               <span>Groq AI offers ultra-fast resume analysis</span>
             </div>
             <div className="tip">
-              <Eye size={16} />
-              <span>PDF preview shows the exact original resume structure and formatting</span>
+              <Thermometer size={16} />
+              <span>Groq API automatically warms up when idle</span>
             </div>
             <div className="tip">
               <Activity size={16} />
               <span>Backend stays awake with automatic pings every 3 minutes</span>
             </div>
             <div className="tip">
-              <File size={16} />
-              <span>DOC/DOCX/TXT files are automatically converted to PDF for perfect preview</span>
+              <Cpu size={16} />
+              <span>Using: {getModelDisplayName(modelInfo)}</span>
             </div>
           </>
         )}
@@ -1420,9 +1178,6 @@ function App() {
 
     return (
       <div className="results-section">
-        {/* Resume Preview Modal */}
-        {renderResumePreviewModal()}
-        
         {/* Navigation Header */}
         <div className="navigation-header glass">
           <button onClick={navigateToMain} className="back-button">
@@ -1441,7 +1196,7 @@ function App() {
           </div>
         </div>
 
-        {/* Candidate Header with Resume Preview Button */}
+        {/* Candidate Header */}
         <div className="analysis-header">
           <div className="candidate-info">
             <div className="candidate-avatar">
@@ -1463,28 +1218,6 @@ function App() {
                   <Cpu size={14} />
                   Model: {analysis.ai_model || 'Groq AI'}
                 </span>
-                {analysis.resume_stored && (
-                  <div className="resume-actions">
-                    <button 
-                      className="view-resume-btn"
-                      onClick={() => fetchResumePreview(
-                        analysis.analysis_id, 
-                        analysis.candidate_name, 
-                        analysis.has_pdf_preview
-                      )}
-                    >
-                      <Eye size={14} />
-                      {analysis.has_pdf_preview ? 'View PDF Preview' : 'View Resume'}
-                    </button>
-                    <button 
-                      className="download-original-btn"
-                      onClick={() => downloadOriginalResume(analysis.analysis_id, analysis.candidate_name)}
-                      title="Download original file"
-                    >
-                      <DownloadIcon size={14} />
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -1533,106 +1266,8 @@ function App() {
                 </span>
               </div>
             </div>
-          </div>
         </div>
-
-        {/* Resume Preview Card */}
-        {analysis.resume_stored && (
-          <div className="resume-preview-card glass">
-            <div className="resume-preview-card-header">
-              <div className="preview-card-title">
-                <FileText size={24} />
-                <div>
-                  <h3>Original Resume Preview</h3>
-                  <p className="preview-card-subtitle">
-                    View the exact original resume structure and formatting
-                  </p>
-                </div>
-              </div>
-              <div className="preview-card-badges">
-                {analysis.has_pdf_preview && (
-                  <span className="preview-badge pdf">
-                    <File size={14} />
-                    PDF Preview Available
-                  </span>
-                )}
-                <span className="preview-badge stored">
-                  <FileCheck size={14} />
-                  Original Stored
-                </span>
-              </div>
-            </div>
-            
-            <div className="resume-preview-card-content">
-              <div className="resume-file-details">
-                <div className="file-detail">
-                  <span className="detail-label">Original File:</span>
-                  <span className="detail-value">
-                    <FileTextIcon size={14} />
-                    {analysis.resume_original_filename || analysis.filename}
-                  </span>
-                </div>
-                <div className="file-detail">
-                  <span className="detail-label">File Size:</span>
-                  <span className="detail-value">{analysis.file_size}</span>
-                </div>
-                <div className="file-detail">
-                  <span className="detail-label">File Type:</span>
-                  <span className="detail-value">
-                    {getFileTypeDisplay(analysis.resume_original_filename || analysis.filename)}
-                  </span>
-                </div>
-                <div className="file-detail">
-                  <span className="detail-label">Preview Type:</span>
-                  <span className="detail-value">
-                    {analysis.has_pdf_preview ? 'PDF (Converted for perfect viewing)' : 'Original Format'}
-                  </span>
-                </div>
-              </div>
-              
-              <div className="resume-preview-actions">
-                <button 
-                  className="preview-action-btn primary"
-                  onClick={() => fetchResumePreview(
-                    analysis.analysis_id, 
-                    analysis.candidate_name, 
-                    analysis.has_pdf_preview
-                  )}
-                >
-                  <Eye size={18} />
-                  <span>
-                    {analysis.has_pdf_preview ? 'View PDF Preview' : 'Preview Original File'}
-                  </span>
-                </button>
-                <button 
-                  className="preview-action-btn secondary"
-                  onClick={() => downloadOriginalResume(analysis.analysis_id, analysis.candidate_name)}
-                >
-                  <DownloadIcon size={18} />
-                  <span>Download Original</span>
-                </button>
-                {analysis.has_pdf_preview && (
-                  <button 
-                    className="preview-action-btn outline"
-                    onClick={() => window.open(`${API_BASE_URL}/resume-preview/${analysis.analysis_id}`, '_blank')}
-                  >
-                    <ExternalLinkIcon2 size={18} />
-                    <span>Open PDF in New Tab</span>
-                  </button>
-                )}
-              </div>
-              
-              <div className="resume-preview-note">
-                <Info size={14} />
-                <span>
-                  {analysis.has_pdf_preview 
-                    ? 'Non-PDF files (DOC/DOCX/TXT) are automatically converted to PDF to preserve original formatting and structure for perfect preview.'
-                    : 'PDF files are displayed directly. Original formatting and structure are preserved.'}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
+        </div>
 
         {/* Recommendation Card */}
         <div className="recommendation-card glass" style={{
@@ -1743,6 +1378,10 @@ function App() {
               <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
                 {analysis.experience_summary || "No experience summary available."}
               </p>
+              <div className="summary-footer">
+                <span className="summary-tag">Professional Experience</span>
+                <span className="summary-tag">{analysis.years_experience || 'N/A'} experience</span>
+              </div>
             </div>
           </div>
 
@@ -1757,7 +1396,46 @@ function App() {
               <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
                 {analysis.education_summary || "No education summary available."}
               </p>
+              <div className="summary-footer">
+                <span className="summary-tag">Academic Background</span>
+                <span className="summary-tag">Detailed Analysis</span>
+              </div>
             </div>
+          </div>
+        </div>
+
+        {/* Additional Candidate Info */}
+        <div className="candidate-info-grid glass">
+          <div className="info-card">
+            <div className="info-header">
+              <Target size={20} />
+              <h4>Job Title Suggestion</h4>
+            </div>
+            <div className="info-value">{analysis.job_title_suggestion || 'N/A'}</div>
+          </div>
+          
+          <div className="info-card">
+            <div className="info-header">
+              <Calendar size={20} />
+              <h4>Years Experience</h4>
+            </div>
+            <div className="info-value">{analysis.years_experience || 'N/A'}</div>
+          </div>
+          
+          <div className="info-card">
+            <div className="info-header">
+              <Building size={20} />
+              <h4>Industry Fit</h4>
+            </div>
+            <div className="info-value">{analysis.industry_fit || 'N/A'}</div>
+          </div>
+          
+          <div className="info-card">
+            <div className="info-header">
+              <DollarSign size={20} />
+              <h4>Salary Expectation</h4>
+            </div>
+            <div className="info-value">{analysis.salary_expectation || 'N/A'}</div>
           </div>
         </div>
 
@@ -1819,6 +1497,55 @@ function App() {
           </div>
         </div>
 
+        {/* AI Analysis Details */}
+        <div className="ai-details-card glass">
+          <div className="ai-details-header">
+            <Brain size={24} />
+            <div>
+              <h3>AI Analysis Details</h3>
+              <p className="ai-details-subtitle">Technical information about this analysis</p>
+            </div>
+          </div>
+          <div className="ai-details-content">
+            <div className="ai-detail-item">
+              <span className="detail-label">AI Provider:</span>
+              <span className="detail-value">{analysis.ai_provider || 'Groq'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">AI Model:</span>
+              <span className="detail-value">{analysis.ai_model || 'Groq AI'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">API Key Used:</span>
+              <span className="detail-value">{analysis.key_used || 'N/A'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">Response Time:</span>
+              <span className="detail-value">{analysis.response_time || 'N/A'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">Analysis ID:</span>
+              <span className="detail-value">{analysis.analysis_id || 'N/A'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">AI Status:</span>
+              <span className="detail-value" style={{ 
+                color: analysis.ai_status === 'Warmed up' ? '#00ff9d' : '#ffd166' 
+              }}>
+                {analysis.ai_status || 'N/A'}
+              </span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">Filename:</span>
+              <span className="detail-value">{analysis.filename || 'N/A'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">File Size:</span>
+              <span className="detail-value">{analysis.file_size || 'N/A'}</span>
+            </div>
+          </div>
+        </div>
+
         {/* Action Section */}
         <div className="action-section glass">
           <div className="action-content">
@@ -1840,361 +1567,289 @@ function App() {
     );
   };
 
-  const renderBatchResultsView = () => {
-    if (!batchAnalysis) return null;
-
-    return (
-      <div className="results-section">
-        {/* Resume Preview Modal */}
-        {renderResumePreviewModal()}
-        
-        {/* Navigation Header */}
-        <div className="navigation-header glass">
-          <button onClick={navigateToMain} className="back-button">
-            <ArrowLeft size={20} />
-            <span>Back to Analysis</span>
+  const renderBatchResultsView = () => (
+    <div className="results-section">
+      {/* Navigation Header */}
+      <div className="navigation-header glass">
+        <button onClick={navigateToMain} className="back-button">
+          <ArrowLeft size={20} />
+          <span>Back to Analysis</span>
+        </button>
+        <div className="navigation-title">
+          <h2>⚡ Batch Analysis Results (Groq Parallel)</h2>
+          <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
+        </div>
+        <div className="navigation-actions">
+          <button className="download-report-btn" onClick={handleBatchDownload}>
+            <DownloadCloud size={18} />
+            <span>Download Full Detailed Report</span>
           </button>
-          <div className="navigation-title">
-            <h2>⚡ Batch Analysis Results (Groq Parallel)</h2>
-            <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
-          </div>
-          <div className="navigation-actions">
-            <button className="download-report-btn" onClick={handleBatchDownload}>
-              <DownloadCloud size={18} />
-              <span>Download Full Detailed Report</span>
-            </button>
-          </div>
         </div>
+      </div>
 
-        {/* Key Statistics */}
-        {batchAnalysis?.key_statistics && (
-          <div className="key-stats-container glass">
-            <div className="key-stats-header">
-              <Key size={20} />
-              <h3>API Key Usage Statistics</h3>
-            </div>
-            <div className="key-stats-grid">
-              {batchAnalysis.key_statistics.map((keyStat, index) => (
-                <div key={index} className="key-stat-card">
-                  <div className="key-stat-header">
-                    <div className={`key-status-indicator ${keyStat.status === 'available' ? 'available' : 'cooling'}`}>
-                      {keyStat.status === 'available' ? '✅' : '🔄'}
-                    </div>
-                    <span className="key-name">{keyStat.key}</span>
+      {/* Key Statistics */}
+      {batchAnalysis?.key_statistics && (
+        <div className="key-stats-container glass">
+          <div className="key-stats-header">
+            <Key size={20} />
+            <h3>API Key Usage Statistics</h3>
+          </div>
+          <div className="key-stats-grid">
+            {batchAnalysis.key_statistics.map((keyStat, index) => (
+              <div key={index} className="key-stat-card">
+                <div className="key-stat-header">
+                  <div className={`key-status-indicator ${keyStat.status === 'available' ? 'available' : 'cooling'}`}>
+                    {keyStat.status === 'available' ? '✅' : '🔄'}
                   </div>
-                  <div className="key-stat-content">
-                    <div className="key-usage">
-                      <span className="usage-label">Used:</span>
-                      <span className="usage-value">{keyStat.used} resumes</span>
-                    </div>
-                    <div className="key-status">
-                      <span className="status-label">Status:</span>
-                      <span className={`status-value ${keyStat.status}`}>
-                        {keyStat.status === 'available' ? 'Available' : 'Cooling'}
-                      </span>
-                    </div>
+                  <span className="key-name">{keyStat.key}</span>
+                </div>
+                <div className="key-stat-content">
+                  <div className="key-usage">
+                    <span className="usage-label">Used:</span>
+                    <span className="usage-value">{keyStat.used} resumes</span>
+                  </div>
+                  <div className="key-status">
+                    <span className="status-label">Status:</span>
+                    <span className={`status-value ${keyStat.status}`}>
+                      {keyStat.status === 'available' ? 'Available' : 'Cooling'}
+                    </span>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Stats */}
-        <div className="multi-key-stats-container glass">
-          <div className="stat-card">
-            <div className="stat-icon success">
-              <Check size={24} />
-            </div>
-            <div className="stat-content">
-              <div className="stat-value">{batchAnalysis?.successfully_analyzed || 0}</div>
-              <div className="stat-label">Successful</div>
-            </div>
-          </div>
-          
-          {batchAnalysis?.failed_files > 0 && (
-            <div className="stat-card">
-              <div className="stat-icon error">
-                <X size={24} />
               </div>
-              <div className="stat-content">
-                <div className="stat-value">{batchAnalysis?.failed_files || 0}</div>
-                <div className="stat-label">Failed</div>
-              </div>
-          </div>
-          )}
-          
-          <div className="stat-card">
-            <div className="stat-icon info">
-              <Users size={24} />
-            </div>
-            <div className="stat-content">
-              <div className="stat-value">{batchAnalysis?.total_files || 0}</div>
-              <div className="stat-label">Total Files</div>
-            </div>
-          </div>
-          
-          <div className="stat-card">
-            <div className="stat-icon primary">
-              <File size={24} />
-            </div>
-            <div className="stat-content">
-              <div className="stat-value">
-                {batchAnalysis?.analyses?.filter(a => a.has_pdf_preview).length || 0}
-              </div>
-              <div className="stat-label">PDF Preview</div>
-            </div>
-          </div>
-          
-          <div className="stat-card">
-            <div className="stat-icon success">
-              <Eye size={24} />
-            </div>
-            <div className="stat-content">
-              <div className="stat-value">
-                {batchAnalysis?.analyses?.filter(a => a.resume_stored).length || 0}
-              </div>
-              <div className="stat-label">Resumes Stored</div>
-            </div>
-          </div>
-          
-          <div className="stat-card">
-            <div className="stat-icon warning">
-              <Brain size={24} />
-            </div>
-            <div className="stat-content">
-              <div className="stat-value">Groq</div>
-              <div className="stat-label">AI Provider</div>
-            </div>
+            ))}
           </div>
         </div>
+      )}
 
-        {/* Performance Info */}
-        {batchAnalysis?.performance && (
-          <div className="performance-info glass">
-            <div className="performance-header">
-              <Activity size={20} />
-              <h3>Performance Metrics</h3>
-            </div>
-            <div className="performance-content">
-              <div className="performance-item">
-                <span className="performance-label">Processing Time:</span>
-                <span className="performance-value">{batchAnalysis.processing_time}</span>
-              </div>
-              <div className="performance-item">
-                <span className="performance-label">Processing Method:</span>
-                <span className="performance-value">{batchAnalysis.processing_method === 'round_robin_parallel' ? 'Round-robin Parallel' : batchAnalysis.processing_method}</span>
-              </div>
-              {batchAnalysis.performance && (
-                <div className="performance-item">
-                  <span className="performance-label">Speed:</span>
-                  <span className="performance-value">{batchAnalysis.performance}</span>
-                </div>
-              )}
-              {batchAnalysis.success_rate && (
-                <div className="performance-item">
-                  <span className="performance-label">Success Rate:</span>
-                  <span className="performance-value">{batchAnalysis.success_rate}</span>
-                </div>
-              )}
-            </div>
+      {/* Stats */}
+      <div className="multi-key-stats-container glass">
+        <div className="stat-card">
+          <div className="stat-icon success">
+            <Check size={24} />
           </div>
-        )}
-
-        {/* Candidates Ranking */}
-        <div className="section-title">
-          <h2>Candidate Rankings (5-8 skills analysis each)</h2>
-          <p>Sorted by ATS Score (Highest to Lowest) • Groq Parallel Processing</p>
+          <div className="stat-content">
+            <div className="stat-value">{batchAnalysis?.successfully_analyzed || 0}</div>
+            <div className="stat-label">Successful</div>
+          </div>
         </div>
         
-        <div className="batch-results-grid">
-          {batchAnalysis?.analyses?.map((candidate, index) => (
-            <div key={index} className="batch-candidate-card glass">
-              <div className="batch-card-header">
-                <div className="candidate-rank">
-                  <div className="rank-badge">#{candidate.rank}</div>
-                  <div className="candidate-main-info">
-                    <h3 className="candidate-name">{candidate.candidate_name}</h3>
-                    <div className="candidate-meta">
-                      <span className="file-info">
-                        <FileText size={12} />
-                        {candidate.filename}
-                      </span>
-                      <span className="file-size">{candidate.file_size}</span>
-                      {candidate.key_used && (
-                        <span className="key-used">
-                          <Key size={12} />
-                          {candidate.key_used}
-                        </span>
-                      )}
-                      {candidate.resume_stored && (
-                        <div className="resume-preview-badges">
-                          {candidate.has_pdf_preview && (
-                            <span className="preview-badge mini pdf">
-                              <File size={10} />
-                              PDF
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="candidate-score-display">
-                  <div className="score-large" style={{ color: getScoreColor(candidate.overall_score) }}>
-                    {candidate.overall_score}
-                  </div>
-                  <div className="score-label">ATS Score</div>
-                </div>
-              </div>
-              
-              <div className="batch-card-content">
-                <div className="recommendation-badge" style={{ 
-                  background: getScoreColor(candidate.overall_score) + '20',
-                  color: getScoreColor(candidate.overall_score),
-                  border: `1px solid ${getScoreColor(candidate.overall_score)}40`
-                }}>
-                  {candidate.recommendation}
-                </div>
-                
-                <div className="skills-preview">
-                  <div className="skills-section">
-                    <div className="skills-header">
-                      <CheckCircle size={14} />
-                      <span>Matched Skills ({candidate.skills_matched?.length || 0})</span>
-                    </div>
-                    <div className="skills-list">
-                      {candidate.skills_matched?.slice(0, 4).map((skill, idx) => (
-                        <span key={idx} className="skill-tag success">{skill}</span>
-                      ))}
-                      {candidate.skills_matched?.length > 4 && (
-                        <span className="more-skills">+{candidate.skills_matched.length - 4} more</span>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="skills-section">
-                    <div className="skills-header">
-                      <XCircle size={14} />
-                      <span>Missing Skills ({candidate.skills_missing?.length || 0})</span>
-                    </div>
-                    <div className="skills-list">
-                      {candidate.skills_missing?.slice(0, 4).map((skill, idx) => (
-                        <span key={idx} className="skill-tag error">{skill}</span>
-                      ))}
-                      {candidate.skills_missing?.length > 4 && (
-                        <span className="more-skills">+{candidate.skills_missing.length - 4} more</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                
-                {candidate.resume_stored && (
-                  <div className="resume-preview-mini">
-                    <div className="resume-mini-header">
-                      <FileText size={14} />
-                      <span>Resume Available</span>
-                    </div>
-                    <div className="resume-mini-actions">
-                      <button 
-                        className="view-resume-btn mini"
-                        onClick={() => fetchResumePreview(
-                          candidate.analysis_id, 
-                          candidate.candidate_name, 
-                          candidate.has_pdf_preview
-                        )}
-                      >
-                        <Eye size={12} />
-                        {candidate.has_pdf_preview ? 'PDF Preview' : 'View'}
-                      </button>
-                      <button 
-                        className="download-original-btn mini"
-                        onClick={() => downloadOriginalResume(candidate.analysis_id, candidate.candidate_name)}
-                        title="Download original file"
-                      >
-                        <DownloadIcon size={12} />
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-              
-              <div className="batch-card-footer">
-                <button 
-                  className="view-details-btn"
-                  onClick={() => navigateToCandidateDetail(index)}
-                >
-                  View Full Details (5-8 skills each)
-                  <ChevronRight size={16} />
-                </button>
-                {candidate.analysis_id && (
-                  <button 
-                    className="download-individual-btn"
-                    onClick={() => handleIndividualDownload(candidate.analysis_id)}
-                    title="Download individual detailed report"
-                  >
-                    <FileDown size={16} />
-                  </button>
-                )}
-              </div>
+        {batchAnalysis?.failed_files > 0 && (
+          <div className="stat-card">
+            <div className="stat-icon error">
+              <X size={24} />
             </div>
-          ))}
+            <div className="stat-content">
+              <div className="stat-value">{batchAnalysis?.failed_files || 0}</div>
+              <div className="stat-label">Failed</div>
+            </div>
+        </div>
+        )}
+        
+        <div className="stat-card">
+          <div className="stat-icon info">
+            <Users size={24} />
+          </div>
+          <div className="stat-content">
+            <div className="stat-value">{batchAnalysis?.total_files || 0}</div>
+            <div className="stat-label">Total Files</div>
+          </div>
+        </div>
+        
+        <div className="stat-card">
+          <div className="stat-icon primary">
+            <Cpu size={24} />
+          </div>
+          <div className="stat-content">
+            <div className="stat-value">{batchAnalysis?.model_used || 'Groq AI'}</div>
+            <div className="stat-label">AI Model</div>
+          </div>
+        </div>
+        
+        <div className="stat-card">
+          <div className="stat-icon warning">
+            <Brain size={24} />
+          </div>
+          <div className="stat-content">
+            <div className="stat-value">Groq</div>
+            <div className="stat-label">AI Provider</div>
+          </div>
         </div>
 
-        {/* Resume Preview Info */}
-        {batchAnalysis?.analyses?.some(a => a.resume_stored) && (
-          <div className="resume-preview-info glass">
-            <div className="resume-preview-info-header">
-              <File size={20} />
-              <h3>Resume Preview Information</h3>
-            </div>
-            <div className="resume-preview-info-content">
-              <p>
-                <Info size={16} />
-                <span>
-                  {batchAnalysis.analyses.filter(a => a.has_pdf_preview).length} out of {batchAnalysis.analyses.length} resumes have PDF preview available.
-                  Non-PDF files (DOC/DOCX/TXT) are automatically converted to PDF to preserve original formatting.
-                  Click "PDF Preview" on any candidate card to view the exact original resume structure.
-                </span>
-              </p>
-              <div className="preview-stats">
-                <div className="preview-stat">
-                  <div className="stat-value">{batchAnalysis.analyses.filter(a => a.has_pdf_preview).length}</div>
-                  <div className="stat-label">PDF Preview</div>
-                </div>
-                <div className="preview-stat">
-                  <div className="stat-value">{batchAnalysis.analyses.filter(a => a.resume_stored).length}</div>
-                  <div className="stat-label">Original Stored</div>
-                </div>
-                <div className="preview-stat">
-                  <div className="stat-value">1 hour</div>
-                  <div className="stat-label">Retention</div>
-                </div>
-              </div>
-            </div>
+        <div className="stat-card">
+          <div className="stat-icon success">
+            <Zap size={24} />
           </div>
-        )}
-
-        {/* Action Buttons */}
-        <div className="action-section glass">
-          <div className="action-content">
-            <h3>Batch Analysis Complete</h3>
-            <p>Download comprehensive Excel report with detailed candidate analysis (5-8 skills each)</p>
-          </div>
-          <div className="action-buttons">
-            <button className="download-button" onClick={handleBatchDownload}>
-              <DownloadCloud size={20} />
-              <span>Download Full Detailed Batch Report</span>
-            </button>
-            <button className="reset-button" onClick={navigateToMain}>
-              <RefreshCw size={20} />
-              <span>New Batch Analysis</span>
-            </button>
+          <div className="stat-content">
+            <div className="stat-value">{batchAnalysis?.available_keys || 0}</div>
+            <div className="stat-label">Keys Used</div>
           </div>
         </div>
       </div>
-    );
-  };
+
+      {/* Performance Info */}
+      {batchAnalysis?.performance && (
+        <div className="performance-info glass">
+          <div className="performance-header">
+            <Activity size={20} />
+            <h3>Performance Metrics</h3>
+          </div>
+          <div className="performance-content">
+            <div className="performance-item">
+              <span className="performance-label">Processing Time:</span>
+              <span className="performance-value">{batchAnalysis.processing_time}</span>
+            </div>
+            <div className="performance-item">
+              <span className="performance-label">Processing Method:</span>
+              <span className="performance-value">{batchAnalysis.processing_method === 'round_robin_parallel' ? 'Round-robin Parallel' : batchAnalysis.processing_method}</span>
+            </div>
+            {batchAnalysis.performance && (
+              <div className="performance-item">
+                <span className="performance-label">Speed:</span>
+                <span className="performance-value">{batchAnalysis.performance}</span>
+              </div>
+            )}
+            {batchAnalysis.success_rate && (
+              <div className="performance-item">
+                <span className="performance-label">Success Rate:</span>
+                <span className="performance-value">{batchAnalysis.success_rate}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Candidates Ranking */}
+      <div className="section-title">
+        <h2>Candidate Rankings (5-8 skills analysis each)</h2>
+        <p>Sorted by ATS Score (Highest to Lowest) • Groq Parallel Processing</p>
+      </div>
+      
+      <div className="batch-results-grid">
+        {batchAnalysis?.analyses?.map((candidate, index) => (
+          <div key={index} className="batch-candidate-card glass">
+            <div className="batch-card-header">
+              <div className="candidate-rank">
+                <div className="rank-badge">#{candidate.rank}</div>
+                <div className="candidate-main-info">
+                  <h3 className="candidate-name">{candidate.candidate_name}</h3>
+                  <div className="candidate-meta">
+                    <span className="file-info">{candidate.filename}</span>
+                    <span className="file-size">{candidate.file_size}</span>
+                    {candidate.key_used && (
+                      <span className="key-used">
+                        <Key size={12} />
+                        {candidate.key_used}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="candidate-score-display">
+                <div className="score-large" style={{ color: getScoreColor(candidate.overall_score) }}>
+                  {candidate.overall_score}
+                </div>
+                <div className="score-label">ATS Score</div>
+              </div>
+            </div>
+            
+            <div className="batch-card-content">
+              <div className="recommendation-badge" style={{ 
+                background: getScoreColor(candidate.overall_score) + '20',
+                color: getScoreColor(candidate.overall_score),
+                border: `1px solid ${getScoreColor(candidate.overall_score)}40`
+              }}>
+                {candidate.recommendation}
+              </div>
+              
+              <div className="skills-preview">
+                <div className="skills-section">
+                  <div className="skills-header">
+                    <CheckCircle size={14} />
+                    <span>Matched Skills ({candidate.skills_matched?.length || 0})</span>
+                  </div>
+                  <div className="skills-list">
+                    {candidate.skills_matched?.slice(0, 4).map((skill, idx) => (
+                      <span key={idx} className="skill-tag success">{skill}</span>
+                    ))}
+                    {candidate.skills_matched?.length > 4 && (
+                      <span className="more-skills">+{candidate.skills_matched.length - 4} more</span>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="skills-section">
+                  <div className="skills-header">
+                    <XCircle size={14} />
+                    <span>Missing Skills ({candidate.skills_missing?.length || 0})</span>
+                  </div>
+                  <div className="skills-list">
+                    {candidate.skills_missing?.slice(0, 4).map((skill, idx) => (
+                      <span key={idx} className="skill-tag error">{skill}</span>
+                    ))}
+                    {candidate.skills_missing?.length > 4 && (
+                      <span className="more-skills">+{candidate.skills_missing.length - 4} more</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              <div className="additional-info">
+                <div className="info-row">
+                  <span className="info-label">Job Title:</span>
+                  <span className="info-value">{candidate.job_title_suggestion || 'N/A'}</span>
+                </div>
+                <div className="info-row">
+                  <span className="info-label">Experience:</span>
+                  <span className="info-value">{candidate.years_experience || 'N/A'}</span>
+                </div>
+                <div className="info-row">
+                  <span className="info-label">Industry Fit:</span>
+                  <span className="info-value">{candidate.industry_fit || 'N/A'}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="batch-card-footer">
+              <button 
+                className="view-details-btn"
+                onClick={() => navigateToCandidateDetail(index)}
+              >
+                View Full Details (5-8 skills each)
+                <ChevronRight size={16} />
+              </button>
+              {candidate.analysis_id && (
+                <button 
+                  className="download-individual-btn"
+                  onClick={() => handleIndividualDownload(candidate.analysis_id)}
+                  title="Download individual detailed report"
+                >
+                  <FileDown size={16} />
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Action Buttons */}
+      <div className="action-section glass">
+        <div className="action-content">
+          <h3>Batch Analysis Complete</h3>
+          <p>Download comprehensive Excel report with detailed candidate analysis (5-8 skills each)</p>
+        </div>
+        <div className="action-buttons">
+          <button className="download-button" onClick={handleBatchDownload}>
+            <DownloadCloud size={20} />
+            <span>Download Full Detailed Batch Report</span>
+          </button>
+          <button className="reset-button" onClick={navigateToMain}>
+            <RefreshCw size={20} />
+            <span>New Batch Analysis</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   const renderCandidateDetailView = () => {
     const candidate = batchAnalysis?.analyses?.[selectedCandidateIndex];
@@ -2214,9 +1869,6 @@ function App() {
 
     return (
       <div className="results-section">
-        {/* Resume Preview Modal */}
-        {renderResumePreviewModal()}
-        
         {/* Navigation Header */}
         <div className="navigation-header glass">
           <button onClick={navigateBack} className="back-button">
@@ -2247,7 +1899,7 @@ function App() {
           </div>
         </div>
 
-        {/* Candidate Header with Resume Preview */}
+        {/* Candidate Header */}
         <div className="analysis-header">
           <div className="candidate-info">
             <div className="candidate-avatar">
@@ -2269,28 +1921,6 @@ function App() {
                     <Key size={14} />
                     {candidate.key_used}
                   </span>
-                )}
-                {candidate.resume_stored && (
-                  <div className="resume-actions">
-                    <button 
-                      className="view-resume-btn"
-                      onClick={() => fetchResumePreview(
-                        candidate.analysis_id, 
-                        candidate.candidate_name, 
-                        candidate.has_pdf_preview
-                      )}
-                    >
-                      <Eye size={14} />
-                      {candidate.has_pdf_preview ? 'View PDF Preview' : 'View Resume'}
-                    </button>
-                    <button 
-                      className="download-original-btn"
-                      onClick={() => downloadOriginalResume(candidate.analysis_id, candidate.candidate_name)}
-                      title="Download original file"
-                    >
-                      <DownloadIcon size={14} />
-                    </button>
-                  </div>
                 )}
               </div>
             </div>
@@ -2330,116 +1960,10 @@ function App() {
                   <Key size={12} />
                   {candidate.key_used || 'Groq API'}
                 </span>
-                <span className="meta-item">
-                  <CheckCircle size={12} />
-                  {candidate.skills_matched?.length || 0} skills matched
-                </span>
-                <span className="meta-item">
-                  <XCircle size={12} />
-                  {candidate.skills_missing?.length || 0} skills missing
-                </span>
               </div>
             </div>
           </div>
         </div>
-
-        {/* Resume Preview Card */}
-        {candidate.resume_stored && (
-          <div className="resume-preview-card glass">
-            <div className="resume-preview-card-header">
-              <div className="preview-card-title">
-                <FileText size={24} />
-                <div>
-                  <h3>Original Resume Preview</h3>
-                  <p className="preview-card-subtitle">
-                    View the exact original resume structure and formatting
-                  </p>
-                </div>
-              </div>
-              <div className="preview-card-badges">
-                {candidate.has_pdf_preview && (
-                  <span className="preview-badge pdf">
-                    <File size={14} />
-                    PDF Preview Available
-                  </span>
-                )}
-                <span className="preview-badge stored">
-                  <FileCheck size={14} />
-                  Original Stored
-                </span>
-              </div>
-            </div>
-            
-            <div className="resume-preview-card-content">
-              <div className="resume-file-details">
-                <div className="file-detail">
-                  <span className="detail-label">Original File:</span>
-                  <span className="detail-value">
-                    <FileTextIcon size={14} />
-                    {candidate.resume_original_filename || candidate.filename}
-                  </span>
-                </div>
-                <div className="file-detail">
-                  <span className="detail-label">File Size:</span>
-                  <span className="detail-value">{candidate.file_size}</span>
-                </div>
-                <div className="file-detail">
-                  <span className="detail-label">File Type:</span>
-                  <span className="detail-value">
-                    {getFileTypeDisplay(candidate.resume_original_filename || candidate.filename)}
-                  </span>
-                </div>
-                <div className="file-detail">
-                  <span className="detail-label">Preview Type:</span>
-                  <span className="detail-value">
-                    {candidate.has_pdf_preview ? 'PDF (Converted for perfect viewing)' : 'Original Format'}
-                  </span>
-                </div>
-              </div>
-              
-              <div className="resume-preview-actions">
-                <button 
-                  className="preview-action-btn primary"
-                  onClick={() => fetchResumePreview(
-                    candidate.analysis_id, 
-                    candidate.candidate_name, 
-                    candidate.has_pdf_preview
-                  )}
-                >
-                  <Eye size={18} />
-                  <span>
-                    {candidate.has_pdf_preview ? 'View PDF Preview' : 'Preview Original File'}
-                  </span>
-                </button>
-                <button 
-                  className="preview-action-btn secondary"
-                  onClick={() => downloadOriginalResume(candidate.analysis_id, candidate.candidate_name)}
-                >
-                  <DownloadIcon size={18} />
-                  <span>Download Original</span>
-                </button>
-                {candidate.has_pdf_preview && (
-                  <button 
-                    className="preview-action-btn outline"
-                    onClick={() => window.open(`${API_BASE_URL}/resume-preview/${candidate.analysis_id}`, '_blank')}
-                  >
-                    <ExternalLinkIcon2 size={18} />
-                    <span>Open PDF in New Tab</span>
-                  </button>
-                )}
-              </div>
-              
-              <div className="resume-preview-note">
-                <Info size={14} />
-                <span>
-                  {candidate.has_pdf_preview 
-                    ? 'Non-PDF files (DOC/DOCX/TXT) are automatically converted to PDF to preserve original formatting and structure for perfect preview.'
-                    : 'PDF files are displayed directly. Original formatting and structure are preserved.'}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Recommendation Card */}
         <div className="recommendation-card glass" style={{
@@ -2451,7 +1975,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {candidate.ai_model || 'Groq AI'} • {candidate.key_used || 'Groq API'}
+                {candidate.ai_model || 'Groq AI'} • Batch Processing • {candidate.key_used || 'Groq API'}
               </p>
             </div>
           </div>
@@ -2464,7 +1988,7 @@ function App() {
           </div>
         </div>
 
-        {/* Skills Analysis */}
+        {/* Skills Analysis - 5-8 skills each */}
         <div className="section-title">
           <h2>Skills Analysis (5-8 skills each)</h2>
           <p>Detailed breakdown of matched and missing skills</p>
@@ -2532,7 +2056,7 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section */}
+        {/* Summary Section with Detailed 5-7 sentences */}
         <div className="section-title">
           <h2>Detailed Profile Summary</h2>
           <p>Comprehensive insights extracted from resume</p>
@@ -2550,6 +2074,10 @@ function App() {
               <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
                 {candidate.experience_summary || "No experience summary available."}
               </p>
+              <div className="summary-footer">
+                <span className="summary-tag">Professional Experience</span>
+                <span className="summary-tag">{candidate.years_experience || 'N/A'} experience</span>
+              </div>
             </div>
           </div>
 
@@ -2564,7 +2092,46 @@ function App() {
               <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
                 {candidate.education_summary || "No education summary available."}
               </p>
+              <div className="summary-footer">
+                <span className="summary-tag">Academic Background</span>
+                <span className="summary-tag">Detailed Analysis</span>
+              </div>
             </div>
+          </div>
+        </div>
+
+        {/* Additional Candidate Info */}
+        <div className="candidate-info-grid glass">
+          <div className="info-card">
+            <div className="info-header">
+              <Target size={20} />
+              <h4>Job Title Suggestion</h4>
+            </div>
+            <div className="info-value">{candidate.job_title_suggestion || 'N/A'}</div>
+          </div>
+          
+          <div className="info-card">
+            <div className="info-header">
+              <Calendar size={20} />
+              <h4>Years Experience</h4>
+            </div>
+            <div className="info-value">{candidate.years_experience || 'N/A'}</div>
+          </div>
+          
+          <div className="info-card">
+            <div className="info-header">
+              <Building size={20} />
+              <h4>Industry Fit</h4>
+            </div>
+            <div className="info-value">{candidate.industry_fit || 'N/A'}</div>
+          </div>
+          
+          <div className="info-card">
+            <div className="info-header">
+              <DollarSign size={20} />
+              <h4>Salary Expectation</h4>
+            </div>
+            <div className="info-value">{candidate.salary_expectation || 'N/A'}</div>
           </div>
         </div>
 
@@ -2630,7 +2197,7 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Candidate Analysis Complete</h3>
-            <p>Download individual detailed report or return to batch results</p>
+            <p>Download individual detailed report or full batch report</p>
           </div>
           <div className="action-buttons">
             {candidate.analysis_id && (
@@ -2642,6 +2209,10 @@ function App() {
                 <span>Download Individual Detailed Report</span>
               </button>
             )}
+            <button className="download-button secondary" onClick={handleBatchDownload}>
+              <DownloadCloud size={20} />
+              <span>Download Full Batch Report</span>
+            </button>
             <button className="reset-button" onClick={navigateBack}>
               <ArrowLeft size={20} />
               <span>Back to Rankings</span>
@@ -2652,6 +2223,7 @@ function App() {
     );
   };
 
+  // Main render function
   const renderCurrentView = () => {
     switch (currentView) {
       case 'single-results':
@@ -2666,251 +2238,403 @@ function App() {
   };
 
   return (
-    <div className="App">
-      <header className="header glass">
-        <div className="header-left">
-          <div className="logo">
-            <img src={logoImage} alt="LeadSOC Logo" className="logo-img" />
-            <div className="logo-text">
-              <span className="logo-title">LeadSOC</span>
-              <span className="logo-subtitle">Resume Analyzer Pro</span>
+    <div className="app">
+      {/* Animated Background Elements */}
+      <div className="bg-grid"></div>
+      <div className="bg-blur-1"></div>
+      <div className="bg-blur-2"></div>
+      
+      {/* Header */}
+      <header className="header">
+        <div className="header-content">
+          <div className="header-main">
+            {/* Logo and Title */}
+            <div className="logo">
+              <div className="logo-glow">
+                <Brain className="logo-icon" />
+              </div>
+              <div className="logo-text">
+                <h1>AI Resume Analyzer (Groq)</h1>
+                <div className="logo-subtitle">
+                  <span className="powered-by">Powered by</span>
+                  <span className="groq-badge">⚡ Groq</span>
+                  <span className="divider">•</span>
+                  <span className="tagline">5-8 Skills Analysis • Detailed Reports • Always Active</span>
+                </div>
+              </div>
+            </div>
+            
+            {/* Leadsoc Logo */}
+            <div className="leadsoc-logo-container">
+              <button
+                onClick={handleLeadsocClick}
+                className="leadsoc-logo-link"
+                disabled={isNavigating}
+                title="Visit LEADSOC - Partnering Your Success"
+              >
+                {isNavigating ? (
+                  <div className="leadsoc-loading">
+                    <Loader size={20} className="spinner" />
+                    <span>Opening...</span>
+                  </div>
+                ) : (
+                  <>
+                    <img 
+                      src={logoImage} 
+                      alt="LEADSOC - partnering your success" 
+                      className="leadsoc-logo"
+                    />
+                    <ExternalLink size={14} className="external-link-icon" />
+                  </>
+                )}
+              </button>
             </div>
           </div>
-        </div>
-        
-        <div className="header-center">
-          <div className="nav-breadcrumbs">
-            {currentView === 'main' && (
-              <span className="nav-item active">
-                <Home size={16} />
-                <span>Upload</span>
-              </span>
-            )}
-            {(currentView === 'single-results' || currentView === 'batch-results') && (
-              <>
-                <span className="nav-item" onClick={navigateToMain}>
-                  <Home size={16} />
-                  <span>Upload</span>
-                </span>
-                <ChevronRight size={16} className="breadcrumb-separator" />
-                <span className="nav-item active">
-                  {currentView === 'single-results' ? (
-                    <>
-                      <FileText size={16} />
-                      <span>Results</span>
-                    </>
-                  ) : (
-                    <>
-                      <Users size={16} />
-                      <span>Batch Results</span>
-                    </>
-                  )}
-                </span>
-              </>
-            )}
-            {currentView === 'candidate-detail' && (
-              <>
-                <span className="nav-item" onClick={navigateToMain}>
-                  <Home size={16} />
-                  <span>Upload</span>
-                </span>
-                <ChevronRight size={16} className="breadcrumb-separator" />
-                <span className="nav-item" onClick={navigateToBatchResults}>
-                  <Users size={16} />
-                  <span>Batch Results</span>
-                </span>
-                <ChevronRight size={16} className="breadcrumb-separator" />
-                <span className="nav-item active">
-                  <User size={16} />
-                  <span>Candidate Details</span>
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-        
-        <div className="header-right">
-          <div className="service-info">
-            {isWarmingUp && (
-              <div className="warming-up-indicator">
-                <Activity className="spinner" size={14} />
-                <span>Warming up...</span>
+          
+          <div className="header-features">
+            {/* Backend Status */}
+            <div 
+              className="feature backend-status-indicator" 
+              style={{ 
+                backgroundColor: backendStatusInfo.bgColor,
+                borderColor: `${backendStatusInfo.color}30`,
+                color: backendStatusInfo.color
+              }}
+            >
+              {backendStatusInfo.icon}
+              <span>{backendStatusInfo.text}</span>
+              {backendStatus === 'waking' && <Loader size={12} className="pulse-spinner" />}
+            </div>
+            
+            {/* AI Status */}
+            <div 
+              className="feature ai-status-indicator" 
+              style={{ 
+                backgroundColor: aiStatusInfo.bgColor,
+                borderColor: `${aiStatusInfo.color}30`,
+                color: aiStatusInfo.color
+              }}
+            >
+              {aiStatusInfo.icon}
+              <span>{aiStatusInfo.text}</span>
+              {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
+            </div>
+            
+            {/* Key Status */}
+            <div className="feature key-status">
+              <Key size={16} />
+              <span>{getAvailableKeysCount()}/3 Keys</span>
+            </div>
+            
+            {/* Model Info */}
+            {modelInfo && (
+              <div className="feature model-info">
+                <Cpu size={16} />
+                <span>{getModelDisplayName(modelInfo)}</span>
               </div>
             )}
-            <div className="ai-model-info">
-              <Brain size={14} />
-              <span>{getModelDisplayName(modelInfo) || 'Groq AI'}</span>
-            </div>
-            <div className="batch-info" style={{ display: 'flex', gap: '0.5rem' }}>
-              <Users size={14} />
-              <span>Batch: {MAX_BATCH_SIZE}</span>
-            </div>
-            <div className="view-mode">
-              {currentView === 'single-results' && (
-                <span className="view-badge">
-                  <FileText size={12} /> Single
-                </span>
-              )}
-              {(currentView === 'batch-results' || currentView === 'candidate-detail') && (
-                <span className="view-badge batch">
-                  <Users size={12} /> Batch
-                </span>
-              )}
-            </div>
+            
+            {/* Navigation Indicator */}
+            {currentView !== 'main' && (
+              <div className="feature nav-indicator">
+                <Grid size={16} />
+                <span>{currentView === 'single-results' ? 'Single Analysis' : 
+                       currentView === 'batch-results' ? 'Batch Results' : 
+                       'Candidate Details'}</span>
+              </div>
+            )}
+            
+            {/* Warm-up Button */}
+            {aiStatus !== 'available' && (
+              <button 
+                className="feature warmup-button"
+                onClick={handleForceWarmup}
+                disabled={isWarmingUp}
+              >
+                {isWarmingUp ? (
+                  <Loader size={16} className="spinner" />
+                ) : (
+                  <Thermometer size={16} />
+                )}
+                <span>Warm Up AI</span>
+              </button>
+            )}
+            
+            {/* Quota Status Toggle */}
+            <button 
+              className="feature quota-toggle"
+              onClick={() => setShowQuotaPanel(!showQuotaPanel)}
+              title="Show service status"
+            >
+              <BarChart size={16} />
+              <span>Service Status</span>
+            </button>
           </div>
+        </div>
+        
+        <div className="header-wave">
+          <svg viewBox="0 0 1200 120" preserveAspectRatio="none">
+            <path d="M0,0V46.29c47.79,22.2,103.59,32.17,158,28,70.36-5.37,136.33-33.31,206.8-37.5C438.64,32.43,512.34,53.67,583,72.05c69.27,18,138.3,24.88,209.4,13.08,36.15-6,69.85-17.84,104.45-29.34C989.49,25,1113-14.29,1200,52.47V0Z" opacity=".25" fill="currentColor"></path>
+            <path d="M0,0V15.81C13,36.92,27.64,56.86,47.69,72.05,99.41,111.27,165,111,224.58,91.58c31.15-10.15,60.09-26.07,89.67-39.8,40.92-19,84.73-46,130.83-49.67,36.26-2.85,70.9,9.42,98.6,31.56,31.77,25.39,62.32,62,103.63,73,40.44,10.79,81.35-6.69,119.13-24.28s75.16-39,116.92-43.05c59.73-5.85,113.28,22.88,168.9,38.84,30.2,8.66,59,6.17,87.09-7.5,22.43-10.89,48-26.93,60.65-49.24V0Z" opacity=".5" fill="currentColor"></path>
+            <path d="M0,0V5.63C149.93,59,314.09,71.32,475.83,42.57c43-7.64,84.23-20.12,127.61-26.46,59-8.63,112.48,12.24,165.56,35.4C827.93,77.22,886,95.24,951.2,90c86.53-7,172.46-45.71,248.8-84.81V0Z" fill="currentColor"></path>
+          </svg>
         </div>
       </header>
 
       <main className="main-content">
+        {/* Status Panel */}
+        {showQuotaPanel && (
+          <div className="quota-status-panel glass">
+            <div className="quota-panel-header">
+              <div className="quota-title">
+                <Activity size={20} />
+                <h3>Groq Service Status</h3>
+              </div>
+              <button 
+                className="close-quota"
+                onClick={() => setShowQuotaPanel(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className="quota-summary">
+              <div className="summary-item">
+                <div className="summary-label">Backend Status</div>
+                <div className={`summary-value ${backendStatus === 'ready' ? 'success' : backendStatus === 'waking' ? 'warning' : 'error'}`}>
+                  {backendStatus === 'ready' ? '✅ Active' : 
+                   backendStatus === 'waking' ? '🔥 Waking Up' : 
+                   '💤 Sleeping'}
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Groq API Status</div>
+                <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
+                  {aiStatus === 'available' ? '⚡ Ready' : 
+                   aiStatus === 'warming' ? '🔥 Warming' : 
+                   '⚠️ Enhanced Mode'}
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Available Keys</div>
+                <div className={`summary-value ${getAvailableKeysCount() >= 2 ? 'success' : getAvailableKeysCount() === 1 ? 'warning' : 'error'}`}>
+                  🔑 {getAvailableKeysCount()}/3 keys
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">AI Model</div>
+                <div className="summary-value">
+                  {getModelDisplayName(modelInfo)}
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Batch Capacity</div>
+                <div className="summary-value success">
+                  📊 Up to 10 resumes
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Skills Analysis</div>
+                <div className="summary-value info">
+                  ⚡ 5-8 skills each
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Performance</div>
+                <div className="summary-value success">
+                  🚀 ~10-15s for 10 resumes
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Context Length</div>
+                <div className="summary-value">
+                  🧠 128K tokens
+                </div>
+              </div>
+            </div>
+            
+            <div className="key-distribution">
+              <h4>Key Distribution Strategy</h4>
+              <div className="distribution-grid">
+                <div className="distribution-item">
+                  <div className="distribution-key">🔑 Key 1</div>
+                  <div className="distribution-resumes">Resumes: 1, 4, 7, 10</div>
+                </div>
+                <div className="distribution-item">
+                  <div className="distribution-key">🔑 Key 2</div>
+                  <div className="distribution-resumes">Resumes: 2, 5, 8</div>
+                </div>
+                <div className="distribution-item">
+                  <div className="distribution-key">🔑 Key 3</div>
+                  <div className="distribution-resumes">Resumes: 3, 6, 9</div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="action-buttons-panel">
+              <button 
+                className="action-button refresh"
+                onClick={checkBackendHealth}
+              >
+                <RefreshCw size={16} />
+                Refresh Status
+              </button>
+              <button 
+                className="action-button warmup"
+                onClick={handleForceWarmup}
+                disabled={isWarmingUp}
+              >
+                {isWarmingUp ? (
+                  <Loader size={16} className="spinner" />
+                ) : (
+                  <Thermometer size={16} />
+                )}
+                Force Warm-up
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Status Banner */}
+        <div className="top-notice-bar glass">
+          <div className="notice-content">
+            <div className="status-indicators">
+              <div className={`status-indicator ${backendStatus === 'ready' ? 'active' : 'inactive'}`}>
+                <div className="indicator-dot"></div>
+                <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}</span>
+              </div>
+              <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
+                <div className="indicator-dot"></div>
+                <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
+              </div>
+              <div className="status-indicator active">
+                <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                <span>Keys: {getAvailableKeysCount()}/3</span>
+              </div>
+              {modelInfo && (
+                <div className="status-indicator active">
+                  <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                  <span>Model: {getModelDisplayName(modelInfo)}</span>
+                </div>
+              )}
+              <div className="status-indicator active">
+                <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
+                <span>Skills: 5-8 each</span>
+              </div>
+              <div className="status-indicator active">
+                <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                <span>Mode: {currentView === 'single-results' ? 'Single Analysis' : 
+                              currentView === 'batch-results' ? 'Batch Analysis' : 
+                              currentView === 'candidate-detail' ? 'Candidate Details' : 
+                              batchMode ? 'Batch' : 'Single'}</span>
+              </div>
+              {batchMode && (
+                <div className="status-indicator active">
+                  <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
+                  <span>Capacity: Up to 10 resumes</span>
+                </div>
+              )}
+            </div>
+            
+            {backendStatus !== 'ready' && (
+              <div className="wakeup-message">
+                <AlertCircle size={16} />
+                <span>Backend is waking up. Analysis may be slower for the first request.</span>
+              </div>
+            )}
+            
+            {aiStatus === 'warming' && (
+              <div className="wakeup-message">
+                <Thermometer size={16} />
+                <span>Groq API is warming up. This ensures high-quality responses.</span>
+              </div>
+            )}
+            
+            {batchMode && getAvailableKeysCount() > 0 && (
+              <div className="multi-key-message">
+                <Zap size={16} />
+                <span>Parallel mode: Processing {resumeFiles.length} resumes with {getAvailableKeysCount()} keys (~{Math.ceil(resumeFiles.length/3)}s)</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Render Current View */}
         {renderCurrentView()}
       </main>
 
+      {/* Footer */}
       <footer className="footer">
         <div className="footer-content">
-          <div className="footer-section">
+          <div className="footer-brand">
             <div className="footer-logo">
-              <img src={logoImage} alt="LeadSOC" className="footer-logo-img" />
-              <span className="footer-logo-text">LeadSOC</span>
+              <Brain size={20} />
+              <span>AI Resume Analyzer (Groq)</span>
             </div>
-            <p className="footer-tagline">AI-Powered Resume Analysis Platform</p>
-            <div className="footer-status">
-              <span className="footer-status-item">
-                <span className="status-dot" style={{ 
-                  backgroundColor: backendStatus === 'ready' ? '#00ff9d' : 
-                                 backendStatus === 'waking' ? '#ffd166' : '#ff6b6b' 
-                }}></span>
-                <span>Backend: {backendStatus === 'ready' ? 'Active' : 
-                               backendStatus === 'waking' ? 'Waking' : 'Sleeping'}</span>
-              </span>
-              <span className="footer-status-item">
-                <span className="status-dot" style={{ 
-                  backgroundColor: aiStatus === 'available' ? '#00ff9d' : 
-                                 aiStatus === 'warming' ? '#ffd166' : '#ff6b6b' 
-                }}></span>
-                <span>Groq AI: {aiStatus === 'available' ? 'Ready' : 
-                               aiStatus === 'warming' ? 'Warming' : 'Checking'}</span>
-              </span>
-              <span className="footer-status-item">
-                <span className="status-dot" style={{ backgroundColor: '#00ff9d' }}></span>
-                <span>PDF Preview: Active</span>
-              </span>
-            </div>
+            <p className="footer-tagline">
+              Groq AI with 128K context • 3-key parallel processing • 5-8 skills analysis each • Detailed Excel reports
+            </p>
           </div>
           
-          <div className="footer-section">
-            <h4>Features</h4>
-            <ul className="footer-links">
-              <li>5-8 Skills Analysis</li>
-              <li>Detailed 5-7 Sentence Summaries</li>
-              <li>Batch Processing (10 resumes)</li>
-              <li>Original Resume PDF Preview</li>
-              <li>Parallel Processing with 3 Keys</li>
-              <li>1 Hour Resume Retention</li>
-            </ul>
-          </div>
-          
-          <div className="footer-section">
-            <h4>Powered By</h4>
-            <div className="tech-stack">
-              <div className="tech-item">
-                <Brain size={14} />
-                <span>Groq AI</span>
-              </div>
-              <div className="tech-item">
-                <Cpu size={14} />
-                <span>{getModelDisplayName(modelInfo)}</span>
-              </div>
-              <div className="tech-item">
-                <Key size={14} />
-                <span>3 API Keys</span>
-              </div>
-              <div className="tech-item">
-                <Zap size={14} />
-                <span>Parallel Processing</span>
-              </div>
+          <div className="footer-links">
+            <div className="footer-section">
+              <h4>Features</h4>
+              <a href="#">Groq AI</a>
+              <a href="#">128K Context</a>
+              <a href="#">5-8 Skills Analysis</a>
+              <a href="#">Detailed Reports</a>
             </div>
-          </div>
-          
-          <div className="footer-section">
-            <h4>Quick Links</h4>
-            <div className="footer-actions">
-              <button onClick={navigateToMain} className="footer-button">
-                <Home size={14} />
-                <span>New Analysis</span>
-              </button>
-              {currentView === 'single-results' && analysis && (
-                <button onClick={handleDownload} className="footer-button">
-                  <DownloadCloud size={14} />
-                  <span>Download Report</span>
-                </button>
+            <div className="footer-section">
+              <h4>Service</h4>
+              <a href="#">3-Key Parallel</a>
+              <a href="#">Auto Warm-up</a>
+              <a href="#">Health Checks</a>
+              <a href="#">Status Monitor</a>
+            </div>
+            <div className="footer-section">
+              <h4>Navigation</h4>
+              <a href="#" onClick={navigateToMain}>New Analysis</a>
+              {currentView !== 'main' && (
+                <a href="#" onClick={navigateBack}>Go Back</a>
               )}
-              {(currentView === 'batch-results' || currentView === 'candidate-detail') && batchAnalysis && (
-                <button onClick={handleBatchDownload} className="footer-button">
-                  <FileSpreadsheet size={14} />
-                  <span>Download Batch Report</span>
-                </button>
-              )}
-              <button onClick={() => window.open('https://www.leadsoc.com/', '_blank')} className="footer-button">
-                <ExternalLinkIcon2 size={14} />
-                <span>Visit LeadSOC</span>
-              </button>
+              <a href="#">Support</a>
+              <a href="#">Documentation</a>
             </div>
           </div>
         </div>
         
         <div className="footer-bottom">
-          <div className="footer-copyright">
-            <span>© {new Date().getFullYear()} LeadSOC Resume Analyzer Pro</span>
-            <span className="version">v2.4.0 • Groq Parallel • PDF Preview</span>
-          </div>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. 5-8 Skills Analysis Mode.</p>
           <div className="footer-stats">
-            <span className="footer-stat">
-              <FileText size={12} />
-              <span>{analysis || batchAnalysis ? 'Analyzed' : 'Ready'}</span>
+            <span className="stat">
+              <CloudLightning size={12} />
+              Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
             </span>
-            <span className="footer-stat">
-              <Cpu size={12} />
-              <span>{getModelDisplayName(modelInfo)}</span>
+            <span className="stat">
+              <Brain size={12} />
+              Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming'}
             </span>
-            <span className="footer-stat">
+            <span className="stat">
               <Key size={12} />
-              <span>Keys: {getAvailableKeysCount()}/3</span>
+              Keys: {getAvailableKeysCount()}/3
+            </span>
+            <span className="stat">
+              <Cpu size={12} />
+              Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
+            </span>
+            {batchMode && (
+              <span className="stat">
+                <Activity size={12} />
+                Batch: {resumeFiles.length} resumes
+              </span>
+            )}
+            <span className="stat">
+              <Target size={12} />
+              Skills: 5-8 each
             </span>
           </div>
         </div>
       </footer>
-
-      {/* Debug Panel (only show in development) */}
-      {process.env.NODE_ENV === 'development' && (
-        <div className="debug-panel glass">
-          <div className="debug-header">
-            <Settings size={14} />
-            <span>Debug Info</span>
-          </div>
-          <div className="debug-content">
-            <div className="debug-item">
-              <span>View:</span>
-              <span>{currentView}</span>
-            </div>
-            <div className="debug-item">
-              <span>Backend:</span>
-              <span>{backendStatus}</span>
-            </div>
-            <div className="debug-item">
-              <span>AI Status:</span>
-              <span>{aiStatus}</span>
-            </div>
-            <div className="debug-item">
-              <span>Warmup:</span>
-              <span>{groqWarmup ? 'Yes' : 'No'}</span>
-            </div>
-            <div className="debug-item">
-              <span>API Keys:</span>
-              <span>{getAvailableKeysCount()}/3</span>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
