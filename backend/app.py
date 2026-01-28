@@ -1,7 +1,5 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
 import os
 import json
 import time
@@ -14,10 +12,9 @@ import threading
 import atexit
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+import re
 
 # Import our custom modules
-from config import config
-from models import db, Analysis, BatchAnalysis, SkillTrend, Cache
 from nlp_processor import NLPProcessor
 from resume_parser import ResumeParser
 from scoring_engine import ScoringEngine
@@ -29,19 +26,20 @@ load_dotenv()
 # Create Flask app
 app = Flask(__name__)
 
-# Load configuration
-config_name = os.getenv('FLASK_CONFIG', 'default')
-app.config.from_object(config[config_name])
-
-# Initialize extensions
+# CORS
 CORS(app, resources={r"/*": {"origins": "*"}})
-db.init_app(app)
-migrate = Migrate(app, db)
+
+# Configuration
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+REPORTS_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reports')
+AI_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ai_models')
+MAX_BATCH_SIZE = 20
+MAX_FILE_SIZE = 15 * 1024 * 1024  # 15MB
 
 # Create directories
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-os.makedirs(app.config['REPORTS_FOLDER'], exist_ok=True)
-os.makedirs(app.config['AI_MODEL_PATH'], exist_ok=True)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(REPORTS_FOLDER, exist_ok=True)
+os.makedirs(AI_MODEL_PATH, exist_ok=True)
 
 # Initialize AI Engine
 print("🤖 Initializing AI Engine...")
@@ -58,7 +56,8 @@ except Exception as e:
 
 # Global variables
 service_running = True
-analysis_cache = {}
+analysis_cache = {}  # Simple in-memory cache
+skill_trends = {}    # In-memory skill tracking
 
 # Background cleanup thread
 def cleanup_old_files():
@@ -71,8 +70,8 @@ def cleanup_old_files():
             cutoff = now - (24 * 3600)  # 24 hours
             
             # Clean uploads folder
-            for filename in os.listdir(app.config['UPLOAD_FOLDER']):
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            for filename in os.listdir(UPLOAD_FOLDER):
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
                 if os.path.isfile(filepath):
                     if os.path.getmtime(filepath) < cutoff:
                         os.remove(filepath)
@@ -80,8 +79,8 @@ def cleanup_old_files():
             
             # Clean reports folder (keep for 7 days)
             report_cutoff = now - (7 * 24 * 3600)
-            for filename in os.listdir(app.config['REPORTS_FOLDER']):
-                filepath = os.path.join(app.config['REPORTS_FOLDER'], filename)
+            for filename in os.listdir(REPORTS_FOLDER):
+                filepath = os.path.join(REPORTS_FOLDER, filename)
                 if os.path.isfile(filepath):
                     if os.path.getmtime(filepath) < report_cutoff:
                         os.remove(filepath)
@@ -112,91 +111,40 @@ def get_cached_analysis(resume_hash: str, job_hash: str) -> dict:
         if datetime.now() < cached_data['expires']:
             return cached_data['analysis']
     
-    # Check database cache
-    with app.app_context():
-        cache_entry = Cache.query.filter_by(key=cache_key).first()
-        if cache_entry and cache_entry.expires_at > datetime.utcnow():
-            try:
-                analysis = json.loads(cache_entry.value)
-                # Store in memory cache
-                analysis_cache[cache_key] = {
-                    'analysis': analysis,
-                    'expires': cache_entry.expires_at
-                }
-                return analysis
-            except:
-                pass
-    
     return None
 
 def set_cached_analysis(resume_hash: str, job_hash: str, analysis: dict):
     """Cache analysis result"""
     cache_key = f"{resume_hash}:{job_hash}"
-    expires = datetime.utcnow() + timedelta(hours=24)
+    expires = datetime.now() + timedelta(hours=24)
     
     # Store in memory cache
     analysis_cache[cache_key] = {
         'analysis': analysis,
         'expires': expires
     }
+
+def update_skill_trends(skills: list):
+    """Update skill trends in memory"""
+    for skill in skills:
+        if skill in skill_trends:
+            skill_trends[skill] += 1
+        else:
+            skill_trends[skill] = 1
     
-    # Store in database cache
-    with app.app_context():
-        cache_entry = Cache(
-            key=cache_key,
-            value=json.dumps(analysis),
-            expires_at=expires
-        )
-        db.session.merge(cache_entry)
-        db.session.commit()
-
-def save_analysis_to_db(analysis_id: str, analysis_data: dict):
-    """Save analysis to database"""
-    with app.app_context():
-        analysis = Analysis(
-            id=analysis_id,
-            candidate_name=analysis_data.get('candidate_name', ''),
-            filename=analysis_data.get('filename', ''),
-            job_description_hash=hashlib.sha256(
-                analysis_data.get('job_description', '').encode()
-            ).hexdigest()[:64],
-            overall_score=analysis_data.get('overall_score', 0),
-            grade=analysis_data.get('grade', ''),
-            recommendation=analysis_data.get('recommendation', ''),
-            analysis_data=json.dumps(analysis_data)
-        )
-        db.session.add(analysis)
-        db.session.commit()
-
-def update_skill_trends(skills: list, industry: str = 'general'):
-    """Update skill trends in database"""
-    with app.app_context():
-        for skill in skills:
-            trend = SkillTrend.query.filter_by(
-                skill_name=skill,
-                industry=industry
-            ).first()
-            
-            if trend:
-                trend.frequency += 1
-                trend.last_seen = datetime.utcnow()
-            else:
-                trend = SkillTrend(
-                    skill_name=skill,
-                    frequency=1,
-                    industry=industry,
-                    last_seen=datetime.utcnow()
-                )
-                db.session.add(trend)
-        
-        db.session.commit()
+    # Keep only top 100 skills to prevent memory bloat
+    if len(skill_trends) > 100:
+        # Sort by frequency and keep top 100
+        top_skills = sorted(skill_trends.items(), key=lambda x: x[1], reverse=True)[:100]
+        skill_trends.clear()
+        skill_trends.update(dict(top_skills))
 
 def create_excel_report(analysis_data: dict, filename: str = None) -> str:
     """Create Excel report from analysis data"""
     if not filename:
         filename = f"analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     
-    filepath = os.path.join(app.config['REPORTS_FOLDER'], filename)
+    filepath = os.path.join(REPORTS_FOLDER, filename)
     
     wb = Workbook()
     ws = wb.active
@@ -234,7 +182,7 @@ def create_excel_report(analysis_data: dict, filename: str = None) -> str:
         ("ATS Score", f"{analysis_data.get('overall_score', 0)}/100"),
         ("Grade", analysis_data.get('grade', 'N/A')),
         ("Recommendation", analysis_data.get('recommendation', 'N/A')),
-        ("AI Engine", analysis_data.get('ai_engine', 'ResumeAnalyzer AI')),
+        ("AI Engine", analysis_data.get('ai_engine', 'Self-Hosted AI')),
         ("Experience Level", analysis_data.get('experience_level', 'N/A')),
         ("Industry Fit", analysis_data.get('industry_fit', 'N/A'))
     ]
@@ -398,7 +346,7 @@ def create_batch_excel_report(analyses: list, job_description: str, filename: st
     if not filename:
         filename = f"batch_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     
-    filepath = os.path.join(app.config['REPORTS_FOLDER'], filename)
+    filepath = os.path.join(REPORTS_FOLDER, filename)
     
     wb = Workbook()
     
@@ -422,7 +370,7 @@ def create_batch_excel_report(analyses: list, job_description: str, filename: st
     ws_summary['A5'] = "Job Description"
     ws_summary['B5'] = job_description[:100] + ("..." if len(job_description) > 100 else "")
     ws_summary['A6'] = "AI Engine"
-    ws_summary['B6'] = "ResumeAnalyzer AI v2.0"
+    ws_summary['B6'] = "Self-Hosted AI v2.0"
     
     # Candidates Ranking Table
     row = 8
@@ -543,11 +491,11 @@ def home():
             
             <div class="status">
                 <strong>Status:</strong> ✅ Operational<br>
-                <strong>AI Engine:</strong> ResumeAnalyzer AI v2.0<br>
+                <strong>AI Engine:</strong> Self-Hosted AI v2.0<br>
                 <strong>NLP Model:</strong> SpaCy + Custom Algorithms<br>
                 <strong>Scoring:</strong> Advanced Multi-factor Analysis<br>
                 <strong>Batch Capacity:</strong> Up to 20 resumes<br>
-                <strong>Database:</strong> Active
+                <strong>Database:</strong> Not Required (Memory Cached)
             </div>
             
             <h2>📡 API Endpoints</h2>
@@ -594,13 +542,13 @@ def analyze_resume():
         file_size = resume_file.tell()
         resume_file.seek(0)
         
-        if file_size > 15 * 1024 * 1024:
+        if file_size > MAX_FILE_SIZE:
             return jsonify({'error': 'File size too large. Maximum size is 15MB.'}), 400
         
         # Save uploaded file
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"resume_{timestamp}{file_ext}")
+        file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}{file_ext}")
         resume_file.save(file_path)
         
         # Parse resume
@@ -631,11 +579,6 @@ def analyze_resume():
             # Cache the result
             set_cached_analysis(resume_hash, job_hash, analysis)
             
-            # Save to database
-            analysis_id = generate_analysis_id()
-            analysis['analysis_id'] = analysis_id
-            save_analysis_to_db(analysis_id, analysis)
-            
             # Update skill trends
             if 'skills' in resume_text:
                 update_skill_trends(resume_text['skills'])
@@ -644,6 +587,7 @@ def analyze_resume():
         excel_filename = f"analysis_{timestamp}.xlsx"
         excel_path = create_excel_report(analysis, excel_filename)
         analysis['excel_filename'] = os.path.basename(excel_path)
+        analysis['analysis_id'] = generate_analysis_id()
         
         # Clean up
         if os.path.exists(file_path):
@@ -678,8 +622,8 @@ def analyze_resume_batch():
         if len(resume_files) == 0:
             return jsonify({'error': 'No files selected'}), 400
         
-        if len(resume_files) > app.config['MAX_BATCH_SIZE']:
-            return jsonify({'error': f'Maximum {app.config["MAX_BATCH_SIZE"]} resumes allowed per batch'}), 400
+        if len(resume_files) > MAX_BATCH_SIZE:
+            return jsonify({'error': f'Maximum {MAX_BATCH_SIZE} resumes allowed per batch'}), 400
         
         print(f"📦 Processing batch of {len(resume_files)} resumes")
         
@@ -701,7 +645,7 @@ def analyze_resume_batch():
                 
                 # Save file
                 file_ext = os.path.splitext(resume_file.filename)[1].lower()
-                file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"batch_{batch_id}_{index}{file_ext}")
+                file_path = os.path.join(UPLOAD_FOLDER, f"batch_{batch_id}_{index}{file_ext}")
                 resume_file.save(file_path)
                 
                 # Parse resume
@@ -734,6 +678,10 @@ def analyze_resume_batch():
                 analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
                 
                 all_analyses.append(analysis)
+                
+                # Update skill trends
+                if 'skills' in resume_text:
+                    update_skill_trends(resume_text['skills'])
                 
                 # Clean up
                 if os.path.exists(file_path):
@@ -775,24 +723,10 @@ def analyze_resume_batch():
             'batch_excel_filename': os.path.basename(batch_excel_path) if batch_excel_path else None,
             'analyses': all_analyses,
             'processing_time': f"{time.time() - start_time:.2f}s",
-            'ai_engine': 'ResumeAnalyzer AI v2.0',
-            'max_batch_size': app.config['MAX_BATCH_SIZE'],
+            'ai_engine': 'Self-Hosted AI v2.0',
+            'max_batch_size': MAX_BATCH_SIZE,
             'success_rate': f"{(len(all_analyses) / len(resume_files)) * 100:.1f}%" if resume_files else "0%"
         }
-        
-        # Save batch to database
-        with app.app_context():
-            batch_analysis = BatchAnalysis(
-                id=generate_analysis_id(),
-                batch_id=batch_id,
-                total_files=len(resume_files),
-                successfully_analyzed=len(all_analyses),
-                failed_files=len(errors),
-                analysis_data=json.dumps(response),
-                excel_report_path=batch_excel_path
-            )
-            db.session.add(batch_analysis)
-            db.session.commit()
         
         print(f"✅ Batch analysis completed in {time.time() - start_time:.2f}s")
         return jsonify(response)
@@ -806,7 +740,7 @@ def download_report(filename):
     """Download Excel report"""
     try:
         safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
-        file_path = os.path.join(app.config['REPORTS_FOLDER'], safe_filename)
+        file_path = os.path.join(REPORTS_FOLDER, safe_filename)
         
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 404
@@ -825,30 +759,32 @@ def download_report(filename):
 def health_check():
     """Health check endpoint"""
     try:
-        # Check database
-        with app.app_context():
-            db.session.execute('SELECT 1')
-        
         # Check directories
         dirs_ok = all(os.path.exists(d) for d in [
-            app.config['UPLOAD_FOLDER'],
-            app.config['REPORTS_FOLDER'],
-            app.config['AI_MODEL_PATH']
+            UPLOAD_FOLDER,
+            REPORTS_FOLDER,
+            AI_MODEL_PATH
         ])
         
         # Check NLP model
         nlp_ok = nlp_processor._nlp is not None
         
+        # Cache stats
+        cache_size = len(analysis_cache)
+        skill_trends_size = len(skill_trends)
+        
         return jsonify({
             'status': 'healthy',
-            'database': 'connected',
             'directories': 'ok' if dirs_ok else 'error',
             'nlp_model': 'loaded' if nlp_ok else 'error',
             'ai_engine': 'operational',
             'timestamp': datetime.now().isoformat(),
             'version': '2.0.0',
-            'max_batch_size': app.config['MAX_BATCH_SIZE'],
-            'cache_size': len(analysis_cache)
+            'max_batch_size': MAX_BATCH_SIZE,
+            'cache_size': cache_size,
+            'skill_trends_size': skill_trends_size,
+            'memory_cache': 'active',
+            'database': 'not_required'
         })
         
     except Exception as e:
@@ -862,33 +798,21 @@ def health_check():
 def get_statistics():
     """Get statistics"""
     try:
-        with app.app_context():
-            # Get counts
-            total_analyses = Analysis.query.count()
-            total_batches = BatchAnalysis.query.count()
-            
-            # Get recent analyses
-            recent_analyses = Analysis.query.order_by(Analysis.created_at.desc()).limit(10).all()
-            
-            # Get skill trends
-            popular_skills = SkillTrend.query.order_by(SkillTrend.frequency.desc()).limit(10).all()
-            
-            # Get average score
-            avg_score = db.session.query(db.func.avg(Analysis.overall_score)).scalar() or 0
-            
-            return jsonify({
-                'total_analyses': total_analyses,
-                'total_batches': total_batches,
-                'average_score': round(float(avg_score), 1),
-                'recent_analyses': [a.to_dict() for a in recent_analyses],
-                'popular_skills': [
-                    {'skill': s.skill_name, 'frequency': s.frequency, 'industry': s.industry}
-                    for s in popular_skills
-                ],
-                'cache_size': len(analysis_cache),
-                'system_time': datetime.now().isoformat()
-            })
-            
+        # Get popular skills
+        popular_skills = sorted(skill_trends.items(), key=lambda x: x[1], reverse=True)[:10]
+        
+        return jsonify({
+            'cache_size': len(analysis_cache),
+            'skill_trends_size': len(skill_trends),
+            'popular_skills': [
+                {'skill': skill, 'frequency': freq}
+                for skill, freq in popular_skills
+            ],
+            'system_time': datetime.now().isoformat(),
+            'ai_engine': 'Self-Hosted AI v2.0',
+            'max_batch_size': MAX_BATCH_SIZE
+        })
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -897,15 +821,13 @@ def clear_cache():
     """Clear cache"""
     try:
         analysis_cache.clear()
-        
-        with app.app_context():
-            Cache.query.delete()
-            db.session.commit()
+        skill_trends.clear()
         
         return jsonify({
             'success': True,
             'message': 'Cache cleared',
-            'cleared_items': 'all'
+            'cache_cleared': True,
+            'skill_trends_cleared': True
         })
         
     except Exception as e:
@@ -921,21 +843,17 @@ def cleanup_on_exit():
 atexit.register(cleanup_on_exit)
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-        print("✅ Database tables created")
-    
     print("\n" + "="*50)
     print("🚀 Self-Hosted Resume Analyzer AI")
     print("="*50)
-    print(f"🤖 AI Engine: ResumeAnalyzer AI v2.0")
+    print(f"🤖 AI Engine: Self-Hosted AI v2.0")
     print(f"🧠 NLP Model: SpaCy + Custom Algorithms")
     print(f"📊 Scoring: Advanced Multi-factor Analysis")
-    print(f"📁 Upload folder: {app.config['UPLOAD_FOLDER']}")
-    print(f"📁 Reports folder: {app.config['REPORTS_FOLDER']}")
-    print(f"💾 Database: {app.config['SQLALCHEMY_DATABASE_URI']}")
-    print(f"📦 Max batch size: {app.config['MAX_BATCH_SIZE']}")
-    print(f"⚡ Cache: Enabled (24 hours)")
+    print(f"📁 Upload folder: {UPLOAD_FOLDER}")
+    print(f"📁 Reports folder: {REPORTS_FOLDER}")
+    print(f"📦 Max batch size: {MAX_BATCH_SIZE}")
+    print(f"⚡ Cache: In-Memory (24 hours)")
+    print(f"💾 Database: Not Required")
     print("="*50)
     
     port = int(os.environ.get('PORT', 5002))
