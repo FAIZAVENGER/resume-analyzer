@@ -178,7 +178,7 @@ function App() {
   const [currentView, setCurrentView] = useState('main'); // 'main', 'single-results', 'batch-results', 'candidate-detail'
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(null);
   
-  const API_BASE_URL = 'http://localhost:5002'; // Update this to your backend URL
+  const API_BASE_URL = 'https://resume-analyzer-1-pevo.onrender.com'; // Update this to your backend URL
   
   const keepAliveInterval = useRef(null);
   const backendWakeInterval = useRef(null);
