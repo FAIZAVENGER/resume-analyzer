@@ -74,7 +74,7 @@ function App() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [aiStatus, setAiStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState('checking');
-  const [openaiWarmup, setOpenaiWarmup] = useState(false);
+  const [deepseekWarmup, setDeepseekWarmup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -170,12 +170,12 @@ function App() {
           totalKeys: healthResponse.data.api_key_configured ? 1 : 0
         });
         
-        setOpenaiWarmup(healthResponse.data.ai_warmup_complete || false);
+        setDeepseekWarmup(healthResponse.data.ai_warmup_complete || false);
         setModelInfo(healthResponse.data.model_info || { name: healthResponse.data.model });
         setBackendStatus('ready');
       }
       
-      await forceOpenAIWarmup();
+      await forceDeepseekWarmup();
       
       setupPeriodicChecks();
       
@@ -223,10 +223,10 @@ function App() {
     }
   };
 
-  const forceOpenAIWarmup = async () => {
+  const forceDeepseekWarmup = async () => {
     try {
       setAiStatus('warming');
-      setLoadingMessage('Warming up OpenAI API...');
+      setLoadingMessage('Warming up DeepSeek API...');
       
       const response = await axios.get(`${API_BASE_URL}/warmup`, {
         timeout: 15000
@@ -234,26 +234,26 @@ function App() {
       
       if (response.data.warmup_complete) {
         setAiStatus('available');
-        setOpenaiWarmup(true);
-        console.log('✅ OpenAI API warmed up successfully');
+        setDeepseekWarmup(true);
+        console.log('✅ DeepSeek API warmed up successfully');
       } else {
         setAiStatus('warming');
-        console.log('⚠️ OpenAI API still warming up');
+        console.log('⚠️ DeepSeek API still warming up');
         
-        setTimeout(() => checkOpenAIStatus(), 5000);
+        setTimeout(() => checkDeepseekStatus(), 5000);
       }
       
       setLoadingMessage('');
       
     } catch (error) {
-      console.log('⚠️ OpenAI API warm-up failed:', error.message);
+      console.log('⚠️ DeepSeek API warm-up failed:', error.message);
       setAiStatus('unavailable');
       
-      setTimeout(() => checkOpenAIStatus(), 3000);
+      setTimeout(() => checkDeepseekStatus(), 3000);
     }
   };
 
-  const checkOpenAIStatus = async () => {
+  const checkDeepseekStatus = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/quick-check`, {
         timeout: 10000
@@ -261,20 +261,20 @@ function App() {
       
       if (response.data.available) {
         setAiStatus('available');
-        setOpenaiWarmup(true);
+        setDeepseekWarmup(true);
         if (response.data.model) {
           setModelInfo(response.data.model_info || { name: response.data.model });
         }
       } else if (response.data.warmup_complete) {
         setAiStatus('available');
-        setOpenaiWarmup(true);
+        setDeepseekWarmup(true);
       } else {
         setAiStatus('warming');
-        setOpenaiWarmup(false);
+        setDeepseekWarmup(false);
       }
       
     } catch (error) {
-      console.log('OpenAI API status check failed:', error.message);
+      console.log('DeepSeek API status check failed:', error.message);
       setAiStatus('unavailable');
     }
   };
@@ -286,7 +286,7 @@ function App() {
       });
       
       setBackendStatus('ready');
-      setOpenaiWarmup(response.data.ai_warmup_complete || false);
+      setDeepseekWarmup(response.data.ai_warmup_complete || false);
       if (response.data.model_info || response.data.model) {
         setModelInfo(response.data.model_info || { name: response.data.model });
       }
@@ -316,7 +316,7 @@ function App() {
     
     const statusCheckInterval = setInterval(() => {
       if (aiStatus === 'warming' || aiStatus === 'checking') {
-        checkOpenAIStatus();
+        checkDeepseekStatus();
       }
     }, 30000);
     
@@ -387,7 +387,7 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      // Allow up to 10 files (OpenAI batch size)
+      // Allow up to 10 files (DeepSeek batch size)
       setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10));
       setError('');
     }
@@ -451,10 +451,10 @@ function App() {
         });
       }, 500);
 
-      if (aiStatus === 'available' && openaiWarmup) {
-        setLoadingMessage('OpenAI analysis...');
+      if (aiStatus === 'available' && deepseekWarmup) {
+        setLoadingMessage('DeepSeek AI analysis...');
       } else {
-        setLoadingMessage('Enhanced analysis (Warming up OpenAI)...');
+        setLoadingMessage('Enhanced analysis (Warming up DeepSeek)...');
       }
       setProgress(20);
 
@@ -501,15 +501,9 @@ function App() {
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('Rate limit reached. OpenAI API has limits. Please try again later.');
+        setError('Rate limit reached. DeepSeek API has limits. Please try again later.');
       } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
-        setError('OpenAI API rate limit exceeded. Please wait a minute and try again.');
-        setAiStatus('unavailable');
-      } else if (err.response?.status === 402) {
-        setError('OpenAI API quota exceeded. Please check your billing.');
-        setAiStatus('unavailable');
-      } else if (err.response?.status === 401) {
-        setError('OpenAI API authentication failed. Please check API key.');
+        setError('DeepSeek API rate limit exceeded. Please wait a minute and try again.');
         setAiStatus('unavailable');
       } else {
         setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
@@ -602,13 +596,7 @@ function App() {
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('OpenAI API rate limit reached. Please try again later or reduce batch size.');
-      } else if (err.response?.status === 402) {
-        setError('OpenAI API quota exceeded. Please check your billing.');
-        setAiStatus('unavailable');
-      } else if (err.response?.status === 401) {
-        setError('OpenAI API authentication failed. Please check API key.');
-        setAiStatus('unavailable');
+        setError('DeepSeek API rate limit reached. Please try again later or reduce batch size.');
       } else {
         setError(err.response?.data?.error || 'An error occurred during batch analysis.');
       }
@@ -690,19 +678,19 @@ function App() {
   const getAiStatusMessage = () => {
     switch(aiStatus) {
       case 'checking': return { 
-        text: 'Checking OpenAI...', 
+        text: 'Checking DeepSeek...', 
         color: '#ffd166', 
         icon: <Brain size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       case 'warming': return { 
-        text: 'OpenAI Warming', 
+        text: 'DeepSeek Warming', 
         color: '#ff9800', 
         icon: <Thermometer size={16} />,
         bgColor: 'rgba(255, 152, 0, 0.1)'
       };
       case 'available': return { 
-        text: 'OpenAI Ready 🤖', 
+        text: 'DeepSeek Ready 🧠', 
         color: '#00ff9d', 
         icon: <Brain size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
@@ -722,34 +710,6 @@ function App() {
     }
   };
 
-  const getModelDisplayName = (modelInfo) => {
-    if (!modelInfo) return 'OpenAI GPT-4o Mini';
-    if (typeof modelInfo === 'string') {
-      // Map OpenAI model names to friendly names
-      const modelMap = {
-        'gpt-4o': 'GPT-4o',
-        'gpt-4o-mini': 'GPT-4o Mini',
-        'gpt-3.5-turbo': 'GPT-3.5 Turbo',
-        'default': 'OpenAI'
-      };
-      return modelMap[modelInfo] || modelInfo;
-    }
-    return modelInfo.name || 'OpenAI';
-  };
-
-  const getModelDescription = (modelInfo) => {
-    if (!modelInfo || typeof modelInfo === 'string') {
-      const modelDesc = {
-        'gpt-4o': '128K context • Most capable GPT-4 model',
-        'gpt-4o-mini': '128K context • Faster, cheaper version',
-        'gpt-3.5-turbo': '16K context • Fast and cost-effective',
-        'default': '128K context length'
-      };
-      return modelDesc[modelInfo] || modelDesc['default'];
-    }
-    return modelInfo.description || 'OpenAI 128K context';
-  };
-
   const backendStatusInfo = getBackendStatusMessage();
   const aiStatusInfo = getAiStatusMessage();
 
@@ -765,16 +725,27 @@ function App() {
 
   const handleForceWarmup = async () => {
     setIsWarmingUp(true);
-    setLoadingMessage('Forcing OpenAI API warm-up...');
+    setLoadingMessage('Forcing DeepSeek API warm-up...');
     
     try {
-      await forceOpenAIWarmup();
+      await forceDeepseekWarmup();
       setLoadingMessage('');
     } catch (error) {
       console.log('Force warm-up failed:', error);
     } finally {
       setIsWarmingUp(false);
     }
+  };
+
+  const getModelDisplayName = (modelInfo) => {
+    if (!modelInfo) return 'DeepSeek AI';
+    if (typeof modelInfo === 'string') return modelInfo;
+    return modelInfo.name || 'DeepSeek AI';
+  };
+
+  const getModelDescription = (modelInfo) => {
+    if (!modelInfo || typeof modelInfo === 'string') return '32K context length';
+    return modelInfo.description || 'DeepSeek 32K context';
   };
 
   // Render functions for different views
@@ -997,7 +968,7 @@ function App() {
               <div className="stat-icon">
                 <Brain size={14} />
               </div>
-              <span>OpenAI analysis</span>
+              <span>DeepSeek AI analysis</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
@@ -1096,7 +1067,7 @@ function App() {
               <span>•</span>
               <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
               <span>•</span>
-              <span>OpenAI: {aiStatus === 'available' ? 'Ready 🤖' : 'Warming...'}</span>
+              <span>DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : 'Warming...'}</span>
               {modelInfo && (
                 <>
                   <span>•</span>
@@ -1113,7 +1084,7 @@ function App() {
             
             <div className="loading-note info">
               <Info size={14} />
-              <span>OpenAI offers 128K context length for comprehensive resume analysis</span>
+              <span>DeepSeek AI offers 32K context length for comprehensive resume analysis</span>
             </div>
           </div>
         </div>
@@ -1161,7 +1132,7 @@ function App() {
           <>
             <div className="tip">
               <Brain size={16} />
-              <span>OpenAI with 128K context length for comprehensive analysis</span>
+              <span>DeepSeek AI with 32K context length for comprehensive analysis</span>
             </div>
             <div className="tip">
               <Activity size={16} />
@@ -1180,11 +1151,11 @@ function App() {
           <>
             <div className="tip">
               <Brain size={16} />
-              <span>OpenAI offers high-quality resume analysis</span>
+              <span>DeepSeek AI offers high-quality resume analysis</span>
             </div>
             <div className="tip">
               <Thermometer size={16} />
-              <span>OpenAI API automatically warms up when idle</span>
+              <span>DeepSeek API automatically warms up when idle</span>
             </div>
             <div className="tip">
               <Activity size={16} />
@@ -1212,7 +1183,7 @@ function App() {
             <span>New Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>🤖 Resume Analysis Results</h2>
+            <h2>🧠 Resume Analysis Results</h2>
             <p>{analysis.candidate_name}</p>
           </div>
           <div className="navigation-actions">
@@ -1243,7 +1214,7 @@ function App() {
                 </span>
                 <span className="file-info">
                   <Cpu size={14} />
-                  Model: {analysis.ai_model || 'OpenAI'}
+                  Model: {analysis.ai_model || 'DeepSeek AI'}
                 </span>
               </div>
             </div>
@@ -1302,7 +1273,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {analysis.ai_model || 'OpenAI'} • Consistent ATS Scoring
+                {analysis.ai_model || 'DeepSeek AI'} • Consistent ATS Scoring
               </p>
             </div>
           </div>
@@ -1310,7 +1281,7 @@ function App() {
             <p className="recommendation-text">{analysis.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>OpenAI Analysis</span>
+              <span>DeepSeek AI Analysis</span>
             </div>
           </div>
         </div>
@@ -1491,11 +1462,11 @@ function App() {
           <div className="ai-details-content">
             <div className="ai-detail-item">
               <span className="detail-label">AI Provider:</span>
-              <span className="detail-value">{analysis.ai_provider || 'OpenAI'}</span>
+              <span className="detail-value">{analysis.ai_provider || 'DeepSeek'}</span>
             </div>
             <div className="ai-detail-item">
               <span className="detail-label">AI Model:</span>
-              <span className="detail-value">{analysis.ai_model || 'OpenAI'}</span>
+              <span className="detail-value">{analysis.ai_model || 'DeepSeek AI'}</span>
             </div>
             <div className="ai-detail-item">
               <span className="detail-label">Response Time:</span>
@@ -1504,6 +1475,14 @@ function App() {
             <div className="ai-detail-item">
               <span className="detail-label">Analysis ID:</span>
               <span className="detail-value">{analysis.analysis_id || 'N/A'}</span>
+            </div>
+            <div className="ai-detail-item">
+              <span className="detail-label">AI Status:</span>
+              <span className="detail-value" style={{ 
+                color: analysis.ai_status === 'Warmed up' ? '#00ff9d' : '#ffd166' 
+              }}>
+                {analysis.ai_status || 'N/A'}
+              </span>
             </div>
           </div>
         </div>
@@ -1538,7 +1517,7 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>🤖 Batch Analysis Results</h2>
+          <h2>🧠 Batch Analysis Results</h2>
           <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
         </div>
         <div className="navigation-actions">
@@ -1598,7 +1577,7 @@ function App() {
             <Brain size={24} />
           </div>
           <div className="stat-content">
-            <div className="stat-value">OpenAI</div>
+            <div className="stat-value">DeepSeek</div>
             <div className="stat-label">AI Provider</div>
           </div>
         </div>
@@ -1607,7 +1586,7 @@ function App() {
       {/* Candidates Ranking */}
       <div className="section-title">
         <h2>Candidate Rankings</h2>
-        <p>Sorted by ATS Score (Highest to Lowest) • OpenAI Processing</p>
+        <p>Sorted by ATS Score (Highest to Lowest) • DeepSeek AI Processing</p>
       </div>
       
       <div className="batch-results-grid">
@@ -1817,7 +1796,7 @@ function App() {
               <div className="score-meta">
                 <span className="meta-item">
                   <Cpu size={12} />
-                  Model: {candidate.ai_model || 'OpenAI'}
+                  Model: {candidate.ai_model || 'DeepSeek AI'}
                 </span>
               </div>
             </div>
@@ -1834,7 +1813,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {candidate.ai_model || 'OpenAI'} • Batch Processing
+                {candidate.ai_model || 'DeepSeek AI'} • Batch Processing
               </p>
             </div>
           </div>
@@ -1842,7 +1821,7 @@ function App() {
             <p className="recommendation-text">{candidate.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>OpenAI Analysis</span>
+              <span>DeepSeek AI Analysis</span>
             </div>
           </div>
         </div>
@@ -2072,9 +2051,9 @@ function App() {
                 <h1>AI Resume Analyzer</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
-                  <span className="openai-badge">🤖 OpenAI</span>
+                  <span className="deepseek-badge">🧠 DeepSeek</span>
                   <span className="divider">•</span>
-                  <span className="tagline">128K Context • Up to 10 Resumes • Always Active</span>
+                  <span className="tagline">32K Context • Up to 10 Resumes • Always Active</span>
                 </div>
               </div>
             </div>
@@ -2197,7 +2176,7 @@ function App() {
             <div className="quota-panel-header">
               <div className="quota-title">
                 <Activity size={20} />
-                <h3>OpenAI Service Status</h3>
+                <h3>DeepSeek Service Status</h3>
               </div>
               <button 
                 className="close-quota"
@@ -2217,9 +2196,9 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">OpenAI API Status</div>
+                <div className="summary-label">DeepSeek API Status</div>
                 <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
-                  {aiStatus === 'available' ? '🤖 Ready' : 
+                  {aiStatus === 'available' ? '🧠 Ready' : 
                    aiStatus === 'warming' ? '🔥 Warming' : 
                    '⚠️ Enhanced Mode'}
                 </div>
@@ -2245,7 +2224,7 @@ function App() {
               <div className="summary-item">
                 <div className="summary-label">Context Length</div>
                 <div className="summary-value">
-                  🧠 128K tokens
+                  🧠 32K tokens
                 </div>
               </div>
             </div>
@@ -2284,7 +2263,7 @@ function App() {
               </div>
               <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
                 <div className="indicator-dot"></div>
-                <span>OpenAI: {aiStatus === 'available' ? 'Ready 🤖' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
+                <span>DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
               </div>
               {modelInfo && (
                 <div className="status-indicator active">
@@ -2317,14 +2296,14 @@ function App() {
             {aiStatus === 'warming' && (
               <div className="wakeup-message">
                 <Thermometer size={16} />
-                <span>OpenAI API is warming up. This ensures high-quality responses.</span>
+                <span>DeepSeek API is warming up. This ensures high-quality responses.</span>
               </div>
             )}
             
             {batchMode && (
               <div className="multi-key-message">
                 <Brain size={16} />
-                <span>Batch mode: Processing up to 10 resumes with OpenAI</span>
+                <span>Batch mode: Processing up to 10 resumes with DeepSeek AI</span>
               </div>
             )}
           </div>
@@ -2343,15 +2322,15 @@ function App() {
               <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              OpenAI with 128K context length • Up to 10 resumes per batch • Individual reports available
+              DeepSeek AI with 32K context length • Up to 10 resumes per batch • Individual reports available
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
               <h4>Features</h4>
-              <a href="#">OpenAI GPT-4o</a>
-              <a href="#">128K Context</a>
+              <a href="#">DeepSeek AI</a>
+              <a href="#">32K Context</a>
               <a href="#">Batch Processing</a>
               <a href="#">Excel Reports</a>
             </div>
@@ -2375,7 +2354,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + OpenAI. 128K Context Mode.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + DeepSeek AI. 32K Context Mode.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
@@ -2383,7 +2362,7 @@ function App() {
             </span>
             <span className="stat">
               <Brain size={12} />
-              OpenAI: {aiStatus === 'available' ? 'Ready 🤖' : 'Warming'}
+              DeepSeek: {aiStatus === 'available' ? 'Ready 🧠' : 'Warming'}
             </span>
             <span className="stat">
               <Cpu size={12} />
