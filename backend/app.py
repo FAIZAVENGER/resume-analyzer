@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
-from PyPDF2 import PdfReader
+from PyPDF2 import PdfReader, PdfWriter
 from docx import Document
 import os
 import json
@@ -22,6 +22,10 @@ import gc
 import sys
 import base64
 import io
+import subprocess
+import tempfile
+import shutil
+from pathlib import Path
 
 # Load environment variables
 load_dotenv()
@@ -138,18 +142,43 @@ def store_resume_file(file_data, filename, analysis_id):
         preview_filename = f"{analysis_id}_{safe_filename}"
         preview_path = os.path.join(RESUME_PREVIEW_FOLDER, preview_filename)
         
-        # Save the file
+        # Save the original file
         with open(preview_path, 'wb') as f:
             if isinstance(file_data, bytes):
                 f.write(file_data)
             else:
                 file_data.save(f)
         
+        # Also create a PDF version for preview if not already PDF
+        file_ext = os.path.splitext(filename)[1].lower()
+        pdf_preview_path = None
+        
+        if file_ext == '.pdf':
+            pdf_preview_path = preview_path
+        else:
+            # Try to convert to PDF for better preview
+            try:
+                pdf_filename = f"{analysis_id}_{safe_filename.rsplit('.', 1)[0]}_preview.pdf"
+                pdf_preview_path = os.path.join(RESUME_PREVIEW_FOLDER, pdf_filename)
+                
+                if file_ext in ['.docx', '.doc']:
+                    # Try to convert DOC/DOCX to PDF
+                    convert_doc_to_pdf(preview_path, pdf_preview_path)
+                elif file_ext == '.txt':
+                    # Convert TXT to PDF
+                    convert_txt_to_pdf(preview_path, pdf_preview_path)
+            except Exception as e:
+                print(f"⚠️ Could not create PDF preview: {str(e)}")
+                pdf_preview_path = None
+        
         # Store in memory for quick access
         resume_storage[analysis_id] = {
             'filename': preview_filename,
             'original_filename': filename,
             'path': preview_path,
+            'pdf_path': pdf_preview_path,
+            'file_type': file_ext[1:],  # Remove dot
+            'has_pdf_preview': pdf_preview_path is not None and os.path.exists(pdf_preview_path),
             'stored_at': datetime.now().isoformat()
         }
         
@@ -158,6 +187,141 @@ def store_resume_file(file_data, filename, analysis_id):
     except Exception as e:
         print(f"❌ Error storing resume for preview: {str(e)}")
         return None
+
+def convert_doc_to_pdf(doc_path, pdf_path):
+    """Convert DOC/DOCX to PDF using LibreOffice or fallback methods"""
+    try:
+        # Check if LibreOffice is available
+        if shutil.which('libreoffice'):
+            # Use LibreOffice for conversion
+            cmd = [
+                'libreoffice', '--headless', '--convert-to', 'pdf',
+                '--outdir', os.path.dirname(pdf_path),
+                doc_path
+            ]
+            subprocess.run(cmd, check=True, capture_output=True, timeout=30)
+            
+            # Rename the output file
+            expected_pdf = doc_path.rsplit('.', 1)[0] + '.pdf'
+            if os.path.exists(expected_pdf):
+                shutil.move(expected_pdf, pdf_path)
+                return True
+        else:
+            # Fallback: Try using python-docx2pdf if available
+            try:
+                from docx2pdf import convert
+                convert(doc_path, pdf_path)
+                return True
+            except ImportError:
+                pass
+            
+            # Another fallback: Create a simple PDF from text
+            extract_text_and_create_pdf(doc_path, pdf_path)
+            return True
+            
+    except Exception as e:
+        print(f"⚠️ DOC to PDF conversion failed: {str(e)}")
+        # Create a simple PDF from extracted text
+        extract_text_and_create_pdf(doc_path, pdf_path)
+        return True
+    
+    return False
+
+def convert_txt_to_pdf(txt_path, pdf_path):
+    """Convert TXT to PDF"""
+    try:
+        extract_text_and_create_pdf(txt_path, pdf_path)
+        return True
+    except Exception as e:
+        print(f"⚠️ TXT to PDF conversion failed: {str(e)}")
+        return False
+
+def extract_text_and_create_pdf(input_path, pdf_path):
+    """Extract text and create a simple PDF"""
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+        from reportlab.lib.units import inch
+        
+        # Extract text based on file type
+        file_ext = os.path.splitext(input_path)[1].lower()
+        
+        if file_ext == '.pdf':
+            text = extract_text_from_pdf(input_path)
+        elif file_ext in ['.docx', '.doc']:
+            text = extract_text_from_docx(input_path)
+        elif file_ext == '.txt':
+            text = extract_text_from_txt(input_path)
+        else:
+            text = "Cannot preview this file type."
+        
+        # Create PDF
+        doc = SimpleDocTemplate(pdf_path, pagesize=letter,
+                                rightMargin=72, leftMargin=72,
+                                topMargin=72, bottomMargin=72)
+        
+        styles = getSampleStyleSheet()
+        story = []
+        
+        # Add title
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=30
+        )
+        title = Paragraph("Resume Preview", title_style)
+        story.append(title)
+        
+        # Add file info
+        info_style = ParagraphStyle(
+            'CustomInfo',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor='gray',
+            spaceAfter=20
+        )
+        info_text = f"Original file: {os.path.basename(input_path)} | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        info = Paragraph(info_text, info_style)
+        story.append(info)
+        
+        story.append(Spacer(1, 20))
+        
+        # Add content
+        content_style = ParagraphStyle(
+            'CustomContent',
+            parent=styles['Normal'],
+            fontSize=11,
+            leading=14,
+            spaceBefore=6,
+            spaceAfter=6
+        )
+        
+        # Split text into paragraphs
+        paragraphs = text.split('\n')
+        for para in paragraphs:
+            if para.strip():
+                story.append(Paragraph(para.replace('\t', '&nbsp;' * 4), content_style))
+        
+        # Build PDF
+        doc.build(story)
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ Failed to create PDF from text: {str(e)}")
+        # Create minimal PDF
+        try:
+            from reportlab.pdfgen import canvas
+            c = canvas.Canvas(pdf_path)
+            c.drawString(100, 750, "Resume Preview")
+            c.drawString(100, 730, f"File: {os.path.basename(input_path)}")
+            c.drawString(100, 710, "Unable to display content. Please download the original file.")
+            c.save()
+            return True
+        except:
+            return False
 
 def get_resume_preview(analysis_id):
     """Get resume preview data"""
@@ -173,14 +337,41 @@ def cleanup_resume_previews():
             stored_time = datetime.fromisoformat(resume_storage[analysis_id]['stored_at'])
             if (now - stored_time).total_seconds() > 3600:  # 1 hour retention
                 try:
-                    if os.path.exists(resume_storage[analysis_id]['path']):
-                        os.remove(resume_storage[analysis_id]['path'])
+                    # Clean up all related files
+                    paths_to_clean = [
+                        resume_storage[analysis_id]['path'],
+                        resume_storage[analysis_id].get('pdf_path')
+                    ]
+                    
+                    for path in paths_to_clean:
+                        if path and os.path.exists(path):
+                            os.remove(path)
+                    
                     del resume_storage[analysis_id]
                     print(f"🧹 Cleaned up resume preview for {analysis_id}")
-                except:
-                    pass
+                except Exception as e:
+                    print(f"⚠️ Error cleaning up files for {analysis_id}: {str(e)}")
+        # Also clean up any orphaned files
+        cleanup_orphaned_files()
     except Exception as e:
         print(f"⚠️ Error cleaning up resume previews: {str(e)}")
+
+def cleanup_orphaned_files():
+    """Clean up orphaned files in preview folder"""
+    try:
+        now = datetime.now()
+        for filename in os.listdir(RESUME_PREVIEW_FOLDER):
+            filepath = os.path.join(RESUME_PREVIEW_FOLDER, filename)
+            if os.path.isfile(filepath):
+                file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
+                if (now - file_time).total_seconds() > 7200:  # 2 hours
+                    try:
+                        os.remove(filepath)
+                        print(f"🧹 Cleaned up orphaned file: {filename}")
+                    except:
+                        pass
+    except Exception as e:
+        print(f"⚠️ Error cleaning up orphaned files: {str(e)}")
 
 def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45, retry_count=0):
     """Call Groq API with optimized settings"""
@@ -746,9 +937,14 @@ def process_single_resume(args):
         
         # Add resume preview info
         analysis['resume_stored'] = preview_filename is not None
+        analysis['has_pdf_preview'] = False
+        
         if preview_filename:
             analysis['resume_preview_filename'] = preview_filename
             analysis['resume_original_filename'] = resume_file.filename
+            # Check if PDF preview is available
+            if analysis_id in resume_storage and resume_storage[analysis_id].get('has_pdf_preview'):
+                analysis['has_pdf_preview'] = True
         
         try:
             if index < MAX_BATCH_SIZE:
@@ -852,7 +1048,10 @@ def home():
                 <strong>GET /quick-check</strong> - Check Groq API availability
             </div>
             <div class="endpoint">
-                <strong>GET /resume-preview/&lt;analysis_id&gt;</strong> - Get resume preview
+                <strong>GET /resume-preview/&lt;analysis_id&gt;</strong> - Get resume preview (PDF)
+            </div>
+            <div class="endpoint">
+                <strong>GET /resume-original/&lt;analysis_id&gt;</strong> - Download original resume file
             </div>
         </div>
     </body>
@@ -938,9 +1137,14 @@ def analyze_resume():
         
         # Add resume preview info
         analysis['resume_stored'] = preview_filename is not None
+        analysis['has_pdf_preview'] = False
+        
         if preview_filename:
             analysis['resume_preview_filename'] = preview_filename
             analysis['resume_original_filename'] = resume_file.filename
+            # Check if PDF preview is available
+            if analysis_id in resume_storage and resume_storage[analysis_id].get('has_pdf_preview'):
+                analysis['has_pdf_preview'] = True
         
         total_time = time.time() - start_time
         print(f"✅ Request completed in {total_time:.2f} seconds")
@@ -1059,7 +1263,7 @@ def analyze_resume_batch():
             'successfully_analyzed': len(all_analyses),
             'failed_files': len(errors),
             'errors': errors,
-            'batch_excel_filename': os.pathasename(batch_excel_path) if batch_excel_path else None,
+            'batch_excel_filename': os.path.basename(batch_excel_path) if batch_excel_path else None,
             'batch_id': batch_id,
             'analyses': all_analyses,
             'model_used': GROQ_MODEL,
@@ -1085,7 +1289,7 @@ def analyze_resume_batch():
 
 @app.route('/resume-preview/<analysis_id>', methods=['GET'])
 def get_resume_preview(analysis_id):
-    """Get resume preview for an analysis"""
+    """Get resume preview as PDF"""
     update_activity()
     
     try:
@@ -1096,43 +1300,62 @@ def get_resume_preview(analysis_id):
         if not resume_info:
             return jsonify({'error': 'Resume preview not found'}), 404
         
-        preview_path = resume_info['path']
-        original_filename = resume_info['original_filename']
+        # Try to use PDF preview if available
+        preview_path = resume_info.get('pdf_path') or resume_info['path']
         
         if not os.path.exists(preview_path):
-            return jsonify({'error': 'Resume file not found'}), 404
+            return jsonify({'error': 'Preview file not found'}), 404
         
         # Determine file type
-        file_ext = os.path.splitext(original_filename)[1].lower()
+        file_ext = os.path.splitext(preview_path)[1].lower()
         
-        # For PDF files, we can serve directly
         if file_ext == '.pdf':
             return send_file(
                 preview_path,
                 as_attachment=False,
-                download_name=original_filename,
+                download_name=f"resume_preview_{analysis_id}.pdf",
                 mimetype='application/pdf'
             )
-        # For other files, we'll extract text and return as JSON
         else:
-            if file_ext in ['.docx', '.doc']:
-                content = extract_text_from_docx(preview_path)
-            elif file_ext == '.txt':
-                content = extract_text_from_txt(preview_path)
-            else:
-                return jsonify({'error': 'Unsupported file format for preview'}), 400
-            
-            return jsonify({
-                'filename': original_filename,
-                'content': content,
-                'file_type': file_ext[1:],  # Remove dot
-                'analysis_id': analysis_id,
-                'preview_type': 'text'
-            })
+            # If not PDF, try to convert or return original
+            return send_file(
+                preview_path,
+                as_attachment=True,
+                download_name=resume_info['original_filename'],
+                mimetype='application/octet-stream'
+            )
             
     except Exception as e:
         print(f"❌ Resume preview error: {traceback.format_exc()}")
         return jsonify({'error': f'Failed to get resume preview: {str(e)}'}), 500
+
+@app.route('/resume-original/<analysis_id>', methods=['GET'])
+def get_resume_original(analysis_id):
+    """Download original resume file"""
+    update_activity()
+    
+    try:
+        print(f"📄 Original resume request for: {analysis_id}")
+        
+        # Get resume info from storage
+        resume_info = get_resume_preview(analysis_id)
+        if not resume_info:
+            return jsonify({'error': 'Resume not found'}), 404
+        
+        original_path = resume_info['path']
+        
+        if not os.path.exists(original_path):
+            return jsonify({'error': 'Resume file not found'}), 404
+        
+        return send_file(
+            original_path,
+            as_attachment=True,
+            download_name=resume_info['original_filename']
+        )
+            
+    except Exception as e:
+        print(f"❌ Original resume download error: {traceback.format_exc()}")
+        return jsonify({'error': f'Failed to download resume: {str(e)}'}), 500
 
 def create_detailed_individual_report(analysis_data, filename="resume_analysis_report.xlsx"):
     """Create a detailed Excel report with all analysis data for individual candidate"""
@@ -1187,6 +1410,7 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
             ("Analysis ID", analysis_data.get('analysis_id', 'N/A')),
             ("AI Status", analysis_data.get('ai_status', 'N/A')),
             ("Resume Stored", "Yes" if analysis_data.get('resume_stored') else "No"),
+            ("PDF Preview Available", "Yes" if analysis_data.get('has_pdf_preview') else "No"),
         ]
         
         for label, value in info_fields:
@@ -1451,7 +1675,7 @@ def create_detailed_batch_report(analyses, job_description, filename="batch_resu
         # Candidates Overview Table
         row = 20
         headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "Key Used", 
-                   "Skills Matched", "Skills Missing", "Strengths", "Improvement Areas", "Resume Stored"]
+                   "Skills Matched", "Skills Missing", "Resume Stored", "PDF Preview"]
         
         for col, header in enumerate(headers, start=1):
             cell = ws_summary.cell(row=row, column=col)
@@ -1473,13 +1697,8 @@ def create_detailed_batch_report(analyses, job_description, filename="batch_resu
             missing = analysis.get('skills_missing', [])
             ws_summary.cell(row=row, column=7, value=", ".join(missing[:5]) if missing else "All matched")
             
-            key_strengths = analysis.get('key_strengths', [])
-            ws_summary.cell(row=row, column=8, value=", ".join(key_strengths[:3]) if key_strengths else "N/A")
-            
-            improvements = analysis.get('areas_for_improvement', [])
-            ws_summary.cell(row=row, column=9, value=", ".join(improvements[:3]) if improvements else "N/A")
-            
-            ws_summary.cell(row=row, column=10, value="Yes" if analysis.get('resume_stored') else "No")
+            ws_summary.cell(row=row, column=8, value="Yes" if analysis.get('resume_stored') else "No")
+            ws_summary.cell(row=row, column=9, value="Yes" if analysis.get('has_pdf_preview') else "No")
             
             row += 1
         
@@ -1548,6 +1767,7 @@ def populate_candidate_sheet(ws, analysis, candidate_num):
         ("File Size", analysis.get('file_size', 'N/A')),
         ("Analysis ID", analysis.get('analysis_id', 'N/A')),
         ("Resume Stored", "Yes" if analysis.get('resume_stored') else "No"),
+        ("PDF Preview", "Available" if analysis.get('has_pdf_preview') else "Not available"),
     ]
     
     for label, value in info_data:
@@ -1640,7 +1860,7 @@ def populate_skills_matrix_sheet(ws, analyses):
     ws['A3'] = "Candidate Name"
     ws['B3'] = "Skills Matched (5-8 skills)"
     ws['C3'] = "Skills Missing (5-8 skills)"
-    ws['D3'] = "Resume Available"
+    ws['D3'] = "Resume Preview"
     
     for cell in ['A3', 'B3', 'C3', 'D3']:
         ws[cell].font = header_font
@@ -1656,7 +1876,12 @@ def populate_skills_matrix_sheet(ws, analyses):
         missing = analysis.get('skills_missing', [])
         ws[f'C{row}'] = ", ".join(missing[:8]) if missing else "All matched"
         
-        ws[f'D{row}'] = "Yes" if analysis.get('resume_stored') else "No"
+        if analysis.get('has_pdf_preview'):
+            ws[f'D{row}'] = "PDF Available"
+        elif analysis.get('resume_stored'):
+            ws[f'D{row}'] = "Original Available"
+        else:
+            ws[f'D{row}'] = "No"
         
         row += 1
     
@@ -1898,7 +2123,7 @@ def health_check():
         'resume_previews_folder_exists': os.path.exists(RESUME_PREVIEW_FOLDER),
         'resume_previews_stored': len(resume_storage),
         'inactive_minutes': inactive_minutes,
-        'version': '2.3.0',
+        'version': '2.4.0',
         'key_status': key_status,
         'available_keys': available_keys,
         'configuration': {
@@ -1911,7 +2136,8 @@ def health_check():
         'processing_method': 'round_robin_parallel',
         'performance_target': '10 resumes in 10-15 seconds',
         'skills_analysis': '5-8 skills per category',
-        'resume_preview': 'Enabled (1 hour retention)'
+        'resume_preview': 'Enabled with PDF conversion (1 hour retention)',
+        'pdf_preview_available': any(r.get('has_pdf_preview') for r in resume_storage.values())
     })
 
 def cleanup_on_exit():
@@ -1924,9 +2150,9 @@ def cleanup_on_exit():
         # Clean up temporary files
         for folder in [UPLOAD_FOLDER, RESUME_PREVIEW_FOLDER]:
             for filename in os.listdir(folder):
-                file_path = os.path.join(folder, filename)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
+                filepath = os.path.join(folder, filename)
+                if os.path.isfile(filepath):
+                    os.remove(filepath)
         print("✅ Cleaned up temporary files")
     except:
         pass
@@ -1966,9 +2192,19 @@ if __name__ == '__main__':
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
     print(f"✅ Detailed Summaries: 5-7 sentences each")
-    print(f"✅ Resume Preview: Enabled (1 hour retention)")
+    print(f"✅ Resume Preview: Enabled with PDF conversion")
+    print(f"✅ PDF Preview: Automatic conversion for DOC/DOCX/TXT files")
     print(f"✅ Performance: ~10 resumes in 10-15 seconds")
     print("="*50 + "\n")
+    
+    # Check for required dependencies
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+        print("✅ PDF generation library available")
+    except ImportError:
+        print("⚠️  Warning: reportlab not installed. Install with: pip install reportlab")
+        print("   PDF previews for non-PDF files will be limited")
     
     if available_keys == 0:
         print("⚠️  WARNING: No Groq API keys found!")
