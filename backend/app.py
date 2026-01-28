@@ -21,6 +21,7 @@ import random
 import gc
 import sys
 import base64
+import io
 
 # Load environment variables
 load_dotenv()
@@ -46,14 +47,13 @@ last_activity_time = datetime.now()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 REPORTS_FOLDER = os.path.join(BASE_DIR, 'reports')
-RESUME_STORAGE_FOLDER = os.path.join(BASE_DIR, 'resume_storage')
+RESUME_PREVIEW_FOLDER = os.path.join(BASE_DIR, 'resume_previews')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
-os.makedirs(RESUME_STORAGE_FOLDER, exist_ok=True)
-
+os.makedirs(RESUME_PREVIEW_FOLDER, exist_ok=True)
 print(f"📁 Upload folder: {UPLOAD_FOLDER}")
 print(f"📁 Reports folder: {REPORTS_FOLDER}")
-print(f"📁 Resume Storage folder: {RESUME_STORAGE_FOLDER}")
+print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
 
 # Cache for consistent scoring
 score_cache = {}
@@ -131,58 +131,56 @@ def set_cached_score(resume_hash, score):
         score_cache[resume_hash] = score
 
 def store_resume_file(file_data, filename, analysis_id):
-    """Store resume file permanently for later viewing"""
+    """Store resume file for later preview"""
     try:
-        # Create a safe filename
-        safe_filename = f"{analysis_id}_{filename}"
-        filepath = os.path.join(RESUME_STORAGE_FOLDER, safe_filename)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+        preview_filename = f"{analysis_id}_{safe_filename}"
+        preview_path = os.path.join(RESUME_PREVIEW_FOLDER, preview_filename)
         
         # Save the file
-        file_data.save(filepath)
+        with open(preview_path, 'wb') as f:
+            if isinstance(file_data, bytes):
+                f.write(file_data)
+            else:
+                file_data.save(f)
         
-        # Store in memory tracking
+        # Store in memory for quick access
         resume_storage[analysis_id] = {
-            'filename': safe_filename,
+            'filename': preview_filename,
             'original_filename': filename,
-            'path': filepath,
+            'path': preview_path,
             'stored_at': datetime.now().isoformat()
         }
         
-        print(f"✅ Resume stored: {safe_filename} for analysis {analysis_id}")
-        return safe_filename
+        print(f"✅ Resume stored for preview: {preview_filename}")
+        return preview_filename
     except Exception as e:
-        print(f"❌ Error storing resume file: {str(e)}")
+        print(f"❌ Error storing resume for preview: {str(e)}")
         return None
 
-def get_resume_file(analysis_id):
-    """Get stored resume file by analysis ID"""
-    return resume_storage.get(analysis_id)
+def get_resume_preview(analysis_id):
+    """Get resume preview data"""
+    if analysis_id in resume_storage:
+        return resume_storage[analysis_id]
+    return None
 
-def cleanup_old_resumes(max_age_hours=24):
-    """Clean up old resume files"""
+def cleanup_resume_previews():
+    """Clean up old resume previews"""
     try:
-        current_time = datetime.now()
-        expired_files = []
-        
-        for analysis_id, file_info in list(resume_storage.items()):
-            stored_time = datetime.fromisoformat(file_info['stored_at'])
-            age_hours = (current_time - stored_time).total_seconds() / 3600
-            
-            if age_hours > max_age_hours:
-                # Remove file from disk
-                if os.path.exists(file_info['path']):
-                    os.remove(file_info['path'])
-                expired_files.append(analysis_id)
-        
-        # Remove from memory tracking
-        for analysis_id in expired_files:
-            del resume_storage[analysis_id]
-            
-        if expired_files:
-            print(f"🧹 Cleaned up {len(expired_files)} old resume files")
-            
+        now = datetime.now()
+        for analysis_id in list(resume_storage.keys()):
+            stored_time = datetime.fromisoformat(resume_storage[analysis_id]['stored_at'])
+            if (now - stored_time).total_seconds() > 3600:  # 1 hour retention
+                try:
+                    if os.path.exists(resume_storage[analysis_id]['path']):
+                        os.remove(resume_storage[analysis_id]['path'])
+                    del resume_storage[analysis_id]
+                    print(f"🧹 Cleaned up resume preview for {analysis_id}")
+                except:
+                    pass
     except Exception as e:
-        print(f"⚠️ Error cleaning up old resumes: {str(e)}")
+        print(f"⚠️ Error cleaning up resume previews: {str(e)}")
 
 def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45, retry_count=0):
     """Call Groq API with optimized settings"""
@@ -471,11 +469,7 @@ Provide COMPREHENSIVE analysis in this JSON format:
     "overall_score": 75,
     "recommendation": "Strongly Recommended/Recommended/Consider/Not Recommended",
     "key_strengths": ["strength1", "strength2", "strength3", "strength4", "strength5", "strength6"],
-    "areas_for_improvement": ["area1", "area2", "area3", "area4", "area5", "area6"],
-    "job_title_suggestion": "Suggested job title based on experience and skills",
-    "years_experience": "Estimated years of relevant experience with details",
-    "industry_fit": "Detailed assessment of how well candidate fits the target industry",
-    "salary_expectation": "Estimated salary range based on experience, location, and industry"
+    "areas_for_improvement": ["area1", "area2", "area3", "area4", "area5", "area6"]
 }}
 
 IMPORTANT: 
@@ -483,7 +477,8 @@ IMPORTANT:
 2. Provide DETAILED 5-7 sentence summaries for both experience_summary and education_summary
 3. Include specific examples, technologies, and achievements
 4. Make key_strengths and areas_for_improvement lists 6 items each
-5. Be thorough and comprehensive in analysis"""
+5. Be thorough and comprehensive in analysis
+6. DO NOT include job_title_suggestion, years_experience, industry_fit, or salary_expectation fields"""
 
     try:
         print(f"⚡ Sending to Groq API (Key {key_index})...")
@@ -573,11 +568,7 @@ def validate_analysis(analysis, filename):
         'overall_score': 70,
         'recommendation': 'Consider for Interview',
         'key_strengths': ['Strong technical foundation', 'Excellent communication skills', 'Proven track record of delivery', 'Leadership capabilities', 'Adaptability to change', 'Attention to detail'],
-        'areas_for_improvement': ['Could benefit from advanced certifications', 'Limited experience in cloud platforms', 'Could enhance project management skills', 'Needs more industry-specific knowledge', 'Should gain experience with newer technologies', 'Could improve presentation skills'],
-        'job_title_suggestion': 'Senior Professional Role based on experience',
-        'years_experience': '5-7 years of progressive experience',
-        'industry_fit': 'Strong fit with demonstrated skills and experience',
-        'salary_expectation': 'Competitive market rate based on experience and location'
+        'areas_for_improvement': ['Could benefit from advanced certifications', 'Limited experience in cloud platforms', 'Could enhance project management skills', 'Needs more industry-specific knowledge', 'Should gain experience with newer technologies', 'Could improve presentation skills']
     }
     
     for field, default_value in required_fields.items():
@@ -613,6 +604,12 @@ def validate_analysis(analysis, filename):
     analysis['key_strengths'] = analysis.get('key_strengths', [])[:6]
     analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:6]
     
+    # Remove unwanted fields
+    unwanted_fields = ['job_title_suggestion', 'years_experience', 'industry_fit', 'salary_expectation']
+    for field in unwanted_fields:
+        if field in analysis:
+            del analysis[field]
+    
     return analysis
 
 def generate_fallback_analysis(filename, reason, partial_success=False):
@@ -638,10 +635,6 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "recommendation": "Needs Full Analysis",
             "key_strengths": ['Technical proficiency', 'Communication abilities', 'Problem-solving approach', 'Team collaboration', 'Adaptability', 'Attention to detail'],
             "areas_for_improvement": ['Advanced technical skills needed', 'Cloud platform experience required', 'Data analysis capabilities', 'Project management skills', 'Industry-specific knowledge', 'Presentation skills'],
-            "job_title_suggestion": "Technical Professional Role",
-            "years_experience": "Significant professional experience noted",
-            "industry_fit": "Good potential fit with additional analysis",
-            "salary_expectation": "Market competitive range",
             "ai_provider": "groq",
             "ai_status": "Partial",
             "ai_model": GROQ_MODEL,
@@ -657,10 +650,6 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "recommendation": "Service Warming Up - Please Retry",
             "key_strengths": ['Fast learning capability', 'Strong work ethic', 'Good communication', 'Technical aptitude', 'Problem-solving mindset', 'Team player attitude'],
             "areas_for_improvement": ['Service initialization required', 'Complete analysis pending', 'Detailed assessment needed', 'Full skill evaluation', 'Experience verification', 'Industry fit analysis'],
-            "job_title_suggestion": "Professional Role",
-            "years_experience": "Experience assessment pending",
-            "industry_fit": "Analysis required",
-            "salary_expectation": "To be determined",
             "ai_provider": "groq",
             "ai_status": "Warming up",
             "ai_model": GROQ_MODEL,
@@ -696,9 +685,14 @@ def process_single_resume(args):
         
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        analysis_id = f"batch_{batch_id}_{index}"
-        file_path = os.path.join(UPLOAD_FOLDER, f"{analysis_id}{file_ext}")
+        file_path = os.path.join(UPLOAD_FOLDER, f"batch_{batch_id}_{index}{file_ext}")
+        
+        # Save the file first
         resume_file.save(file_path)
+        
+        # Store resume for preview
+        analysis_id = f"{batch_id}_resume_{index}"
+        preview_filename = store_resume_file(resume_file, resume_file.filename, analysis_id)
         
         if file_ext == '.pdf':
             resume_text = extract_text_from_pdf(file_path)
@@ -729,9 +723,6 @@ def process_single_resume(args):
         key_usage[key_index - 1]['count'] += 1
         key_usage[key_index - 1]['last_used'] = datetime.now()
         
-        # Store resume file permanently
-        stored_filename = store_resume_file(resume_file, resume_file.filename, analysis_id)
-        
         analysis = analyze_resume_with_ai(
             resume_text, 
             job_description, 
@@ -753,12 +744,11 @@ def process_single_resume(args):
         analysis['processing_order'] = index + 1
         analysis['key_used'] = f"Key {key_index}"
         
-        # Add resume storage info
-        if stored_filename:
-            analysis['resume_stored'] = True
-            analysis['resume_filename'] = stored_filename
-        else:
-            analysis['resume_stored'] = False
+        # Add resume preview info
+        analysis['resume_stored'] = preview_filename is not None
+        if preview_filename:
+            analysis['resume_preview_filename'] = preview_filename
+            analysis['resume_original_filename'] = resume_file.filename
         
         try:
             if index < MAX_BATCH_SIZE:
@@ -771,6 +761,7 @@ def process_single_resume(args):
             print(f"⚠️ Failed to create individual report: {str(e)}")
             analysis['individual_excel_filename'] = None
         
+        # Keep the preview file, remove only the temp upload file
         if os.path.exists(file_path):
             os.remove(file_path)
         
@@ -842,7 +833,6 @@ def home():
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
             <p><strong>Processing:</strong> Round-robin with 3 keys, ~10-15s for 10 resumes</p>
             <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/3</p>
-            <p><strong>Resume Storage:</strong> Yes (24-hour retention)</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
             
             <h2>📡 Endpoints</h2>
@@ -853,12 +843,6 @@ def home():
                 <strong>POST /analyze-batch</strong> - Analyze multiple resumes (up to ''' + str(MAX_BATCH_SIZE) + ''')
             </div>
             <div class="endpoint">
-                <strong>GET /view-resume/<analysis_id></strong> - View candidate's resume
-            </div>
-            <div class="endpoint">
-                <strong>GET /download-resume/<analysis_id></strong> - Download candidate's resume
-            </div>
-            <div class="endpoint">
                 <strong>GET /health</strong> - Health check with key status
             </div>
             <div class="endpoint">
@@ -866,6 +850,9 @@ def home():
             </div>
             <div class="endpoint">
                 <strong>GET /quick-check</strong> - Check Groq API availability
+            </div>
+            <div class="endpoint">
+                <strong>GET /resume-preview/&lt;analysis_id&gt;</strong> - Get resume preview
             </div>
         </div>
     </body>
@@ -913,9 +900,12 @@ def analyze_resume():
         
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        analysis_id = f"single_{timestamp}"
-        file_path = os.path.join(UPLOAD_FOLDER, f"{analysis_id}{file_ext}")
+        file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}{file_ext}")
         resume_file.save(file_path)
+        
+        # Store resume for preview
+        analysis_id = f"single_{timestamp}"
+        preview_filename = store_resume_file(resume_file, resume_file.filename, analysis_id)
         
         if file_ext == '.pdf':
             resume_text = extract_text_from_pdf(file_path)
@@ -929,14 +919,12 @@ def analyze_resume():
         if resume_text.startswith('Error'):
             return jsonify({'error': resume_text}), 500
         
-        # Store resume file permanently
-        stored_filename = store_resume_file(resume_file, resume_file.filename, analysis_id)
-        
         analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key, key_index)
         
         excel_filename = f"analysis_{analysis_id}.xlsx"
         excel_path = create_detailed_individual_report(analysis, excel_filename)
         
+        # Keep the preview file, remove only the temp upload file
         if os.path.exists(file_path):
             os.remove(file_path)
         
@@ -948,12 +936,11 @@ def analyze_resume():
         analysis['analysis_id'] = analysis_id
         analysis['key_used'] = f"Key {key_index}"
         
-        # Add resume storage info
-        if stored_filename:
-            analysis['resume_stored'] = True
-            analysis['resume_filename'] = stored_filename
-        else:
-            analysis['resume_stored'] = False
+        # Add resume preview info
+        analysis['resume_stored'] = preview_filename is not None
+        if preview_filename:
+            analysis['resume_preview_filename'] = preview_filename
+            analysis['resume_original_filename'] = resume_file.filename
         
         total_time = time.time() - start_time
         print(f"✅ Request completed in {total_time:.2f} seconds")
@@ -1072,7 +1059,7 @@ def analyze_resume_batch():
             'successfully_analyzed': len(all_analyses),
             'failed_files': len(errors),
             'errors': errors,
-            'batch_excel_filename': os.path.basename(batch_excel_path) if batch_excel_path else None,
+            'batch_excel_filename': os.pathasename(batch_excel_path) if batch_excel_path else None,
             'batch_id': batch_id,
             'analyses': all_analyses,
             'model_used': GROQ_MODEL,
@@ -1096,155 +1083,56 @@ def analyze_resume_batch():
         print(f"❌ Batch analysis error: {traceback.format_exc()}")
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
-@app.route('/view-resume/<analysis_id>', methods=['GET'])
-def view_resume(analysis_id):
-    """View candidate's resume file"""
+@app.route('/resume-preview/<analysis_id>', methods=['GET'])
+def get_resume_preview(analysis_id):
+    """Get resume preview for an analysis"""
     update_activity()
     
     try:
-        print(f"👁️  View resume request for analysis ID: {analysis_id}")
+        print(f"📄 Resume preview request for: {analysis_id}")
         
-        # Get resume file info
-        file_info = get_resume_file(analysis_id)
-        if not file_info:
-            print(f"❌ Resume not found for analysis ID: {analysis_id}")
-            return jsonify({'error': 'Resume not found'}), 404
+        # Get resume info from storage
+        resume_info = get_resume_preview(analysis_id)
+        if not resume_info:
+            return jsonify({'error': 'Resume preview not found'}), 404
         
-        filepath = file_info['path']
-        original_filename = file_info['original_filename']
+        preview_path = resume_info['path']
+        original_filename = resume_info['original_filename']
         
-        if not os.path.exists(filepath):
-            print(f"❌ Resume file not found on disk: {filepath}")
+        if not os.path.exists(preview_path):
             return jsonify({'error': 'Resume file not found'}), 404
         
-        # Determine file type and serve accordingly
+        # Determine file type
         file_ext = os.path.splitext(original_filename)[1].lower()
         
+        # For PDF files, we can serve directly
         if file_ext == '.pdf':
             return send_file(
-                filepath,
-                mimetype='application/pdf',
+                preview_path,
                 as_attachment=False,
-                download_name=original_filename
+                download_name=original_filename,
+                mimetype='application/pdf'
             )
-        elif file_ext in ['.docx', '.doc']:
-            return send_file(
-                filepath,
-                mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                as_attachment=False,
-                download_name=original_filename
-            )
-        elif file_ext == '.txt':
-            return send_file(
-                filepath,
-                mimetype='text/plain',
-                as_attachment=False,
-                download_name=original_filename
-            )
+        # For other files, we'll extract text and return as JSON
         else:
-            # For other file types, force download
-            return send_file(
-                filepath,
-                as_attachment=True,
-                download_name=original_filename
-            )
-        
-    except Exception as e:
-        print(f"❌ Error viewing resume: {traceback.format_exc()}")
-        return jsonify({'error': f'Error viewing resume: {str(e)}'}), 500
-
-@app.route('/download-resume/<analysis_id>', methods=['GET'])
-def download_resume(analysis_id):
-    """Download candidate's resume file"""
-    update_activity()
-    
-    try:
-        print(f"📥 Download resume request for analysis ID: {analysis_id}")
-        
-        # Get resume file info
-        file_info = get_resume_file(analysis_id)
-        if not file_info:
-            print(f"❌ Resume not found for analysis ID: {analysis_id}")
-            return jsonify({'error': 'Resume not found'}), 404
-        
-        filepath = file_info['path']
-        original_filename = file_info['original_filename']
-        
-        if not os.path.exists(filepath):
-            print(f"❌ Resume file not found on disk: {filepath}")
-            return jsonify({'error': 'Resume file not found'}), 404
-        
-        return send_file(
-            filepath,
-            as_attachment=True,
-            download_name=original_filename
-        )
-        
-    except Exception as e:
-        print(f"❌ Error downloading resume: {traceback.format_exc()}")
-        return jsonify({'error': f'Error downloading resume: {str(e)}'}), 500
-
-@app.route('/resume-preview/<analysis_id>', methods=['GET'])
-def resume_preview(analysis_id):
-    """Get resume preview information"""
-    update_activity()
-    
-    try:
-        print(f"📄 Resume preview request for analysis ID: {analysis_id}")
-        
-        # Get resume file info
-        file_info = get_resume_file(analysis_id)
-        if not file_info:
-            return jsonify({'error': 'Resume not found'}), 404
-        
-        # Get file info
-        filepath = file_info['path']
-        original_filename = file_info['original_filename']
-        file_ext = os.path.splitext(original_filename)[1].lower()
-        
-        if not os.path.exists(filepath):
-            return jsonify({'error': 'Resume file not found'}), 404
-        
-        # Get file size
-        file_size = os.path.getsize(filepath)
-        file_size_mb = file_size / (1024 * 1024)
-        
-        # Get file type
-        file_type = {
-            '.pdf': 'PDF Document',
-            '.docx': 'Word Document',
-            '.doc': 'Word Document',
-            '.txt': 'Text File'
-        }.get(file_ext, 'Unknown File Type')
-        
-        # Extract text for preview (first 500 chars)
-        preview_text = ""
-        try:
-            if file_ext == '.pdf':
-                preview_text = extract_text_from_pdf(filepath)[:500]
-            elif file_ext in ['.docx', '.doc']:
-                preview_text = extract_text_from_docx(filepath)[:500]
+            if file_ext in ['.docx', '.doc']:
+                content = extract_text_from_docx(preview_path)
             elif file_ext == '.txt':
-                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                    preview_text = f.read(500)
-        except:
-            preview_text = "Preview not available"
-        
-        return jsonify({
-            'filename': original_filename,
-            'file_type': file_type,
-            'file_size': f"{file_size_mb:.2f} MB",
-            'file_size_bytes': file_size,
-            'analysis_id': analysis_id,
-            'stored_at': file_info['stored_at'],
-            'preview_text': preview_text,
-            'download_url': f"/download-resume/{analysis_id}",
-            'view_url': f"/view-resume/{analysis_id}"
-        })
-        
+                content = extract_text_from_txt(preview_path)
+            else:
+                return jsonify({'error': 'Unsupported file format for preview'}), 400
+            
+            return jsonify({
+                'filename': original_filename,
+                'content': content,
+                'file_type': file_ext[1:],  # Remove dot
+                'analysis_id': analysis_id,
+                'preview_type': 'text'
+            })
+            
     except Exception as e:
-        print(f"❌ Error getting resume preview: {traceback.format_exc()}")
-        return jsonify({'error': f'Error getting resume preview: {str(e)}'}), 500
+        print(f"❌ Resume preview error: {traceback.format_exc()}")
+        return jsonify({'error': f'Failed to get resume preview: {str(e)}'}), 500
 
 def create_detailed_individual_report(analysis_data, filename="resume_analysis_report.xlsx"):
     """Create a detailed Excel report with all analysis data for individual candidate"""
@@ -1298,6 +1186,7 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
             ("File Size", analysis_data.get('file_size', 'N/A')),
             ("Analysis ID", analysis_data.get('analysis_id', 'N/A')),
             ("AI Status", analysis_data.get('ai_status', 'N/A')),
+            ("Resume Stored", "Yes" if analysis_data.get('resume_stored') else "No"),
         ]
         
         for label, value in info_fields:
@@ -1321,10 +1210,6 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
             ("Overall ATS Score", f"{analysis_data.get('overall_score', 0)}/100"),
             ("Recommendation", analysis_data.get('recommendation', 'N/A')),
             ("Score Grade", get_score_grade_text(analysis_data.get('overall_score', 0))),
-            ("Job Title Suggestion", analysis_data.get('job_title_suggestion', 'N/A')),
-            ("Years of Experience", analysis_data.get('years_experience', 'N/A')),
-            ("Industry Fit", analysis_data.get('industry_fit', 'N/A')),
-            ("Salary Expectation", analysis_data.get('salary_expectation', 'N/A')),
         ]
         
         for i in range(0, len(score_info), 2):
@@ -1375,7 +1260,7 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         if skills_missing:
             for i, skill in enumerate(skills_missing, 1):
                 ws[f'A{row}'] = f"{i}."
-                ws[f'A{row}].font = Font(bold=True)
+                ws[f'A{row}'].font = Font(bold=True)
                 ws[f'B{row}'] = skill
                 row += 1
         else:
@@ -1460,31 +1345,6 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
             ws[f'A{row}'] = "No areas for improvement identified"
             row += 1
         
-        # Resume File Information
-        if analysis_data.get('resume_stored'):
-            row += 1
-            ws.merge_cells(f'A{row}:F{row}')
-            cell = ws[f'A{row}']
-            cell.value = "RESUME FILE INFORMATION"
-            cell.font = header_font
-            cell.fill = subheader_fill
-            cell.alignment = Alignment(horizontal='center')
-            row += 1
-            
-            resume_info = [
-                ("Original Filename", analysis_data.get('filename', 'N/A')),
-                ("File Size", analysis_data.get('file_size', 'N/A')),
-                ("Stored", "Yes (Available for viewing)"),
-                ("View URL", f"/view-resume/{analysis_data.get('analysis_id')}"),
-                ("Download URL", f"/download-resume/{analysis_data.get('analysis_id')}")
-            ]
-            
-            for label, value in resume_info:
-                ws[f'A{row}'] = label
-                ws[f'A{row}'].font = Font(bold=True)
-                ws[f'B{row}'] = value
-                row += 1
-        
         # Add borders to all cells with data
         thin_border = Border(
             left=Side(style='thin'),
@@ -1551,12 +1411,10 @@ def create_detailed_batch_report(analyses, job_description, filename="batch_resu
         ws_summary['B8'] = f"{len(job_description)} characters"
         ws_summary['A9'] = "Skills Analysis"
         ws_summary['B9'] = f"5-8 skills per candidate"
-        ws_summary['A10'] = "Resume Storage"
-        ws_summary['B10'] = "Available for all candidates"
         
         # Batch Statistics
-        ws_summary.merge_cells('A12:M12')
-        summary_header = ws_summary['A12']
+        ws_summary.merge_cells('A11:M11')
+        summary_header = ws_summary['A11']
         summary_header.value = "BATCH STATISTICS"
         summary_header.font = header_font
         summary_header.fill = header_fill
@@ -1576,10 +1434,9 @@ def create_detailed_batch_report(analyses, job_description, filename="batch_resu
                 ("Recommended Candidates", sum(1 for a in analyses if a.get('overall_score', 0) >= 70)),
                 ("Needs Improvement", sum(1 for a in analyses if a.get('overall_score', 0) < 70)),
                 ("Total Skills Analyzed", sum(len(a.get('skills_matched', [])) + len(a.get('skills_missing', [])) for a in analyses)),
-                ("Resumes Stored", sum(1 for a in analyses if a.get('resume_stored', False))),
             ]
             
-            row = 13
+            row = 12
             for i in range(0, len(stats_data), 2):
                 if i < len(stats_data):
                     ws_summary[f'A{row}'] = stats_data[i][0]
@@ -1592,10 +1449,9 @@ def create_detailed_batch_report(analyses, job_description, filename="batch_resu
                 row += 1
         
         # Candidates Overview Table
-        row = 22
+        row = 20
         headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "Key Used", 
-                   "Job Title", "Experience", "Skills Matched", "Skills Missing", 
-                   "Strengths", "Improvement Areas", "Industry Fit", "Resume Available"]
+                   "Skills Matched", "Skills Missing", "Strengths", "Improvement Areas", "Resume Stored"]
         
         for col, header in enumerate(headers, start=1):
             cell = ws_summary.cell(row=row, column=col)
@@ -1610,25 +1466,20 @@ def create_detailed_batch_report(analyses, job_description, filename="batch_resu
             ws_summary.cell(row=row, column=3, value=analysis.get('overall_score', 0))
             ws_summary.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
             ws_summary.cell(row=row, column=5, value=analysis.get('key_used', 'N/A'))
-            ws_summary.cell(row=row, column=6, value=analysis.get('job_title_suggestion', 'N/A'))
-            ws_summary.cell(row=row, column=7, value=analysis.get('years_experience', 'N/A'))
             
             strengths = analysis.get('skills_matched', [])
-            ws_summary.cell(row=row, column=8, value=", ".join(strengths[:5]) if strengths else "N/A")
+            ws_summary.cell(row=row, column=6, value=", ".join(strengths[:5]) if strengths else "N/A")
             
             missing = analysis.get('skills_missing', [])
-            ws_summary.cell(row=row, column=9, value=", ".join(missing[:5]) if missing else "All matched")
+            ws_summary.cell(row=row, column=7, value=", ".join(missing[:5]) if missing else "All matched")
             
             key_strengths = analysis.get('key_strengths', [])
-            ws_summary.cell(row=row, column=10, value=", ".join(key_strengths[:3]) if key_strengths else "N/A")
+            ws_summary.cell(row=row, column=8, value=", ".join(key_strengths[:3]) if key_strengths else "N/A")
             
             improvements = analysis.get('areas_for_improvement', [])
-            ws_summary.cell(row=row, column=11, value=", ".join(improvements[:3]) if improvements else "N/A")
+            ws_summary.cell(row=row, column=9, value=", ".join(improvements[:3]) if improvements else "N/A")
             
-            ws_summary.cell(row=row, column=12, value=analysis.get('industry_fit', 'N/A'))
-            
-            resume_available = "Yes" if analysis.get('resume_stored') else "No"
-            ws_summary.cell(row=row, column=13, value=resume_available)
+            ws_summary.cell(row=row, column=10, value="Yes" if analysis.get('resume_stored') else "No")
             
             row += 1
         
@@ -1696,19 +1547,8 @@ def populate_candidate_sheet(ws, analysis, candidate_num):
         ("Filename", analysis.get('filename', 'N/A')),
         ("File Size", analysis.get('file_size', 'N/A')),
         ("Analysis ID", analysis.get('analysis_id', 'N/A')),
-        ("Job Title Suggestion", analysis.get('job_title_suggestion', 'N/A')),
-        ("Years Experience", analysis.get('years_experience', 'N/A')),
-        ("Industry Fit", analysis.get('industry_fit', 'N/A')),
-        ("Salary Expectation", analysis.get('salary_expectation', 'N/A')),
+        ("Resume Stored", "Yes" if analysis.get('resume_stored') else "No"),
     ]
-    
-    # Add resume availability
-    if analysis.get('resume_stored'):
-        info_data.append(("Resume Available", "Yes (Can be viewed/downloaded)"))
-        info_data.append(("View Resume", f"/view-resume/{analysis.get('analysis_id')}"))
-        info_data.append(("Download Resume", f"/download-resume/{analysis.get('analysis_id')}"))
-    else:
-        info_data.append(("Resume Available", "No"))
     
     for label, value in info_data:
         ws[f'A{row}'] = label
@@ -1800,7 +1640,7 @@ def populate_skills_matrix_sheet(ws, analyses):
     ws['A3'] = "Candidate Name"
     ws['B3'] = "Skills Matched (5-8 skills)"
     ws['C3'] = "Skills Missing (5-8 skills)"
-    ws['D3'] = "Match Percentage"
+    ws['D3'] = "Resume Available"
     
     for cell in ['A3', 'B3', 'C3', 'D3']:
         ws[cell].font = header_font
@@ -1816,12 +1656,7 @@ def populate_skills_matrix_sheet(ws, analyses):
         missing = analysis.get('skills_missing', [])
         ws[f'C{row}'] = ", ".join(missing[:8]) if missing else "All matched"
         
-        total_skills = len(matched) + len(missing)
-        if total_skills > 0:
-            match_percentage = (len(matched) / total_skills) * 100
-            ws[f'D{row}'] = f"{match_percentage:.1f}%"
-        else:
-            ws[f'D{row}'] = "N/A"
+        ws[f'D{row}'] = "Yes" if analysis.get('resume_stored') else "No"
         
         row += 1
     
@@ -1986,8 +1821,7 @@ def quick_check():
                             'tested_key': f"Key {i+1}",
                             'max_batch_size': MAX_BATCH_SIZE,
                             'processing_method': 'round_robin_parallel',
-                            'skills_analysis': '5-8 skills per category',
-                            'resume_storage': 'Available (24-hour retention)'
+                            'skills_analysis': '5-8 skills per category'
                         })
                 except:
                     continue
@@ -2029,9 +1863,7 @@ def ping():
         'keep_alive_active': True,
         'max_batch_size': MAX_BATCH_SIZE,
         'processing_method': 'round_robin_parallel',
-        'skills_analysis': '5-8 skills per category',
-        'resume_storage': True,
-        'stored_resumes': len(resume_storage)
+        'skills_analysis': '5-8 skills per category'
     })
 
 @app.route('/health', methods=['GET'])
@@ -2063,8 +1895,8 @@ def health_check():
         'ai_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'reports_folder_exists': os.path.exists(REPORTS_FOLDER),
-        'resume_storage_exists': os.path.exists(RESUME_STORAGE_FOLDER),
-        'stored_resumes': len(resume_storage),
+        'resume_previews_folder_exists': os.path.exists(RESUME_PREVIEW_FOLDER),
+        'resume_previews_stored': len(resume_storage),
         'inactive_minutes': inactive_minutes,
         'version': '2.3.0',
         'key_status': key_status,
@@ -2074,13 +1906,12 @@ def health_check():
             'max_concurrent_requests': MAX_CONCURRENT_REQUESTS,
             'max_retries': MAX_RETRIES,
             'min_skills_to_show': MIN_SKILLS_TO_SHOW,
-            'max_skills_to_show': MAX_SKILLS_TO_SHOW,
-            'resume_storage': True,
-            'resume_retention': '24 hours'
+            'max_skills_to_show': MAX_SKILLS_TO_SHOW
         },
         'processing_method': 'round_robin_parallel',
         'performance_target': '10 resumes in 10-15 seconds',
-        'skills_analysis': '5-8 skills per category'
+        'skills_analysis': '5-8 skills per category',
+        'resume_preview': 'Enabled (1 hour retention)'
     })
 
 def cleanup_on_exit():
@@ -2090,25 +1921,23 @@ def cleanup_on_exit():
     print("\n🛑 Shutting down service...")
     
     try:
-        # Clean up temporary uploads
-        for filename in os.listdir(UPLOAD_FOLDER):
-            file_path = os.path.join(UPLOAD_FOLDER, filename)
-            if os.path.isfile(file_path):
-                os.remove(file_path)
+        # Clean up temporary files
+        for folder in [UPLOAD_FOLDER, RESUME_PREVIEW_FOLDER]:
+            for filename in os.listdir(folder):
+                file_path = os.path.join(folder, filename)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
         print("✅ Cleaned up temporary files")
-        
-        # Clean up old resume files
-        cleanup_old_resumes(0)  # Clean all files on shutdown
     except:
         pass
 
-# Periodic cleanup thread
+# Periodic cleanup
 def periodic_cleanup():
-    """Periodically clean up old resume files"""
+    """Periodically clean up old resume previews"""
     while service_running:
         try:
-            time.sleep(3600)  # Run every hour
-            cleanup_old_resumes()
+            time.sleep(300)  # Run every 5 minutes
+            cleanup_resume_previews()
         except Exception as e:
             print(f"⚠️ Periodic cleanup error: {str(e)}")
 
@@ -2132,12 +1961,12 @@ if __name__ == '__main__':
     
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
-    print(f"📁 Resume Storage folder: {RESUME_STORAGE_FOLDER}")
+    print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
     print(f"✅ Round-robin Parallel Processing: Enabled")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
     print(f"✅ Detailed Summaries: 5-7 sentences each")
-    print(f"✅ Resume Storage: Enabled (24-hour retention)")
+    print(f"✅ Resume Preview: Enabled (1 hour retention)")
     print(f"✅ Performance: ~10 resumes in 10-15 seconds")
     print("="*50 + "\n")
     
