@@ -2998,7 +2998,265 @@ body {
 .footer-content {
   width: 100%;
 }
+/* Key Status Styles */
+.key-stats-container {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+}
 
+.key-stats-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.key-stats-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #ffffff;
+}
+
+.key-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.key-stat-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 1rem;
+  transition: all 0.3s ease;
+}
+
+.key-stat-card:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
+}
+
+.key-stat-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.key-status-indicator {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.key-status-indicator.available {
+  background: rgba(0, 255, 157, 0.2);
+  border: 1px solid rgba(0, 255, 157, 0.4);
+}
+
+.key-status-indicator.cooling {
+  background: rgba(255, 209, 102, 0.2);
+  border: 1px solid rgba(255, 209, 102, 0.4);
+  animation: pulse 1.5s infinite;
+}
+
+.key-name {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.key-stat-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.key-usage, .key-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.usage-label, .status-label {
+  color: #94a3b8;
+  font-size: 0.875rem;
+}
+
+.usage-value {
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.status-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+.status-value.available {
+  background: rgba(0, 255, 157, 0.1);
+  color: #00ff9d;
+}
+
+.status-value.cooling {
+  background: rgba(255, 209, 102, 0.1);
+  color: #ffd166;
+}
+
+/* Performance Info */
+.performance-info {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+}
+
+.performance-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.performance-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #ffffff;
+}
+
+.performance-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.performance-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.performance-label {
+  color: #94a3b8;
+  font-size: 0.875rem;
+}
+
+.performance-value {
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+/* Key Distribution */
+.key-distribution {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.key-distribution h4 {
+  margin: 0 0 1rem 0;
+  color: #ffffff;
+  font-size: 1rem;
+}
+
+.distribution-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.distribution-item {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.distribution-key {
+  color: #00ff9d;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.distribution-resumes {
+  color: #94a3b8;
+  font-size: 0.875rem;
+}
+
+/* Header Key Status */
+.feature.key-status {
+  background: rgba(0, 255, 157, 0.1);
+  border: 1px solid rgba(0, 255, 157, 0.3);
+  color: #00ff9d;
+}
+
+/* Status Badges */
+.status-badge.keys {
+  background: rgba(0, 255, 157, 0.1);
+  border: 1px solid rgba(0, 255, 157, 0.3);
+  color: #00ff9d;
+}
+
+/* Groq Badge */
+.groq-badge {
+  background: linear-gradient(135deg, #00ff9d, #00b3ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 600;
+  animation: gradient 3s ease infinite;
+  background-size: 200% 200%;
+}
+
+@keyframes gradient {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Button Updates */
+.analyze-button .button-subtext {
+  font-size: 0.75rem;
+  opacity: 0.9;
+}
+
+/* Key Info in Candidate Cards */
+.key-used, .key-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: rgba(0, 255, 157, 0.1);
+  color: #00ff9d;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  margin-left: 0.5rem;
+}
+
+/* Performance Optimization */
+@media (max-width: 768px) {
+  .key-stats-grid,
+  .distribution-grid,
+  .performance-content {
+    grid-template-columns: 1fr;
+  }
+  
+  .header-features {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  
+  .feature {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+  }
+}
 /* Ensure no horizontal overflow */
 html, body {
   overflow-x: hidden;
