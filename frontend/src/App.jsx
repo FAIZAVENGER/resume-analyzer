@@ -1360,10 +1360,10 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section with Detailed 5-7 sentences */}
+        {/* Summary Section with Concise 3-5 sentences */}
         <div className="section-title">
-          <h2>Detailed Profile Summary</h2>
-          <p>Comprehensive insights extracted from resume</p>
+          <h2>Profile Summary</h2>
+          <p>Concise insights extracted from resume (3-5 sentences each)</p>
         </div>
         
         <div className="summary-grid">
@@ -1372,7 +1372,7 @@ function App() {
               <div className="summary-icon">
                 <Briefcase size={24} />
               </div>
-              <h3>Experience Summary (5-7 sentences)</h3>
+              <h3>Experience Summary (3-5 sentences)</h3>
             </div>
             <div className="summary-content">
               <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
@@ -1380,7 +1380,7 @@ function App() {
               </p>
               <div className="summary-footer">
                 <span className="summary-tag">Professional Experience</span>
-                <span className="summary-tag">{analysis.years_experience || 'N/A'} experience</span>
+                <span className="summary-tag">Concise Summary</span>
               </div>
             </div>
           </div>
@@ -1390,7 +1390,7 @@ function App() {
               <div className="summary-icon">
                 <BookOpen size={24} />
               </div>
-              <h3>Education Summary (5-7 sentences)</h3>
+              <h3>Education Summary (3-5 sentences)</h3>
             </div>
             <div className="summary-content">
               <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
@@ -1398,50 +1398,17 @@ function App() {
               </p>
               <div className="summary-footer">
                 <span className="summary-tag">Academic Background</span>
-                <span className="summary-tag">Detailed Analysis</span>
+                <span className="summary-tag">Concise Summary</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Additional Candidate Info */}
-        <div className="candidate-info-grid glass">
-          <div className="info-card">
-            <div className="info-header">
-              <Target size={20} />
-              <h4>Job Title Suggestion</h4>
-            </div>
-            <div className="info-value">{analysis.job_title_suggestion || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <Calendar size={20} />
-              <h4>Years Experience</h4>
-            </div>
-            <div className="info-value">{analysis.years_experience || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <Building size={20} />
-              <h4>Industry Fit</h4>
-            </div>
-            <div className="info-value">{analysis.industry_fit || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <DollarSign size={20} />
-              <h4>Salary Expectation</h4>
-            </div>
-            <div className="info-value">{analysis.salary_expectation || 'N/A'}</div>
-          </div>
-        </div>
-
-        {/* Insights Section - Now showing 6 items each */}
+        {/* REMOVED: Additional Candidate Info Section */}
+        
+        {/* Insights Section - Now showing 4 items each */}
         <div className="section-title">
-          <h2>Insights & Recommendations (6 items each)</h2>
+          <h2>Insights & Recommendations (4 items each)</h2>
           <p>Personalized suggestions to improve your match</p>
         </div>
         
@@ -1458,7 +1425,7 @@ function App() {
             </div>
             <div className="insight-content">
               <div className="strengths-list">
-                {analysis.key_strengths?.slice(0, 6).map((strength, index) => (
+                {analysis.key_strengths?.slice(0, 4).map((strength, index) => (
                   <div key={index} className="strength-item">
                     <CheckCircle size={16} className="strength-icon" />
                     <span className="strength-text" style={{ fontSize: '0.95rem' }}>{strength}</span>
@@ -1483,7 +1450,7 @@ function App() {
             </div>
             <div className="insight-content">
               <div className="improvements-list">
-                {analysis.areas_for_improvement?.slice(0, 6).map((area, index) => (
+                {analysis.areas_for_improvement?.slice(0, 4).map((area, index) => (
                   <div key={index} className="improvement-item">
                     <AlertCircle size={16} className="improvement-icon" />
                     <span className="improvement-text" style={{ fontSize: '0.95rem' }}>{area}</span>
@@ -1497,54 +1464,7 @@ function App() {
           </div>
         </div>
 
-        {/* AI Analysis Details */}
-        <div className="ai-details-card glass">
-          <div className="ai-details-header">
-            <Brain size={24} />
-            <div>
-              <h3>AI Analysis Details</h3>
-              <p className="ai-details-subtitle">Technical information about this analysis</p>
-            </div>
-          </div>
-          <div className="ai-details-content">
-            <div className="ai-detail-item">
-              <span className="detail-label">AI Provider:</span>
-              <span className="detail-value">{analysis.ai_provider || 'Groq'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">AI Model:</span>
-              <span className="detail-value">{analysis.ai_model || 'Groq AI'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">API Key Used:</span>
-              <span className="detail-value">{analysis.key_used || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">Response Time:</span>
-              <span className="detail-value">{analysis.response_time || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">Analysis ID:</span>
-              <span className="detail-value">{analysis.analysis_id || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">AI Status:</span>
-              <span className="detail-value" style={{ 
-                color: analysis.ai_status === 'Warmed up' ? '#00ff9d' : '#ffd166' 
-              }}>
-                {analysis.ai_status || 'N/A'}
-              </span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">Filename:</span>
-              <span className="detail-value">{analysis.filename || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">File Size:</span>
-              <span className="detail-value">{analysis.file_size || 'N/A'}</span>
-            </div>
-          </div>
-        </div>
+        {/* REMOVED: AI Analysis Details Section */}
 
         {/* Action Section */}
         <div className="action-section glass">
@@ -1790,21 +1710,6 @@ function App() {
                       <span className="more-skills">+{candidate.skills_missing.length - 4} more</span>
                     )}
                   </div>
-                </div>
-              </div>
-              
-              <div className="additional-info">
-                <div className="info-row">
-                  <span className="info-label">Job Title:</span>
-                  <span className="info-value">{candidate.job_title_suggestion || 'N/A'}</span>
-                </div>
-                <div className="info-row">
-                  <span className="info-label">Experience:</span>
-                  <span className="info-value">{candidate.years_experience || 'N/A'}</span>
-                </div>
-                <div className="info-row">
-                  <span className="info-label">Industry Fit:</span>
-                  <span className="info-value">{candidate.industry_fit || 'N/A'}</span>
                 </div>
               </div>
             </div>
@@ -2056,10 +1961,10 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section with Detailed 5-7 sentences */}
+        {/* Summary Section with Concise 3-5 sentences */}
         <div className="section-title">
-          <h2>Detailed Profile Summary</h2>
-          <p>Comprehensive insights extracted from resume</p>
+          <h2>Profile Summary</h2>
+          <p>Concise insights extracted from resume (3-5 sentences each)</p>
         </div>
         
         <div className="summary-grid">
@@ -2068,7 +1973,7 @@ function App() {
               <div className="summary-icon">
                 <Briefcase size={24} />
               </div>
-              <h3>Experience Summary (5-7 sentences)</h3>
+              <h3>Experience Summary (3-5 sentences)</h3>
             </div>
             <div className="summary-content">
               <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
@@ -2076,7 +1981,7 @@ function App() {
               </p>
               <div className="summary-footer">
                 <span className="summary-tag">Professional Experience</span>
-                <span className="summary-tag">{candidate.years_experience || 'N/A'} experience</span>
+                <span className="summary-tag">Concise Summary</span>
               </div>
             </div>
           </div>
@@ -2086,7 +1991,7 @@ function App() {
               <div className="summary-icon">
                 <BookOpen size={24} />
               </div>
-              <h3>Education Summary (5-7 sentences)</h3>
+              <h3>Education Summary (3-5 sentences)</h3>
             </div>
             <div className="summary-content">
               <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
@@ -2094,50 +1999,15 @@ function App() {
               </p>
               <div className="summary-footer">
                 <span className="summary-tag">Academic Background</span>
-                <span className="summary-tag">Detailed Analysis</span>
+                <span className="summary-tag">Concise Summary</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Additional Candidate Info */}
-        <div className="candidate-info-grid glass">
-          <div className="info-card">
-            <div className="info-header">
-              <Target size={20} />
-              <h4>Job Title Suggestion</h4>
-            </div>
-            <div className="info-value">{candidate.job_title_suggestion || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <Calendar size={20} />
-              <h4>Years Experience</h4>
-            </div>
-            <div className="info-value">{candidate.years_experience || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <Building size={20} />
-              <h4>Industry Fit</h4>
-            </div>
-            <div className="info-value">{candidate.industry_fit || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <DollarSign size={20} />
-              <h4>Salary Expectation</h4>
-            </div>
-            <div className="info-value">{candidate.salary_expectation || 'N/A'}</div>
-          </div>
-        </div>
-
-        {/* Insights Section */}
+        {/* Insights Section - 4 items each */}
         <div className="section-title">
-          <h2>Insights & Recommendations (6 items each)</h2>
+          <h2>Insights & Recommendations (4 items each)</h2>
           <p>Personalized suggestions to improve your match</p>
         </div>
         
@@ -2154,7 +2024,7 @@ function App() {
             </div>
             <div className="insight-content">
               <div className="strengths-list">
-                {candidate.key_strengths?.slice(0, 6).map((strength, index) => (
+                {candidate.key_strengths?.slice(0, 4).map((strength, index) => (
                   <div key={index} className="strength-item">
                     <CheckCircle size={16} className="strength-icon" />
                     <span className="strength-text" style={{ fontSize: '0.95rem' }}>{strength}</span>
@@ -2179,7 +2049,7 @@ function App() {
             </div>
             <div className="insight-content">
               <div className="improvements-list">
-                {candidate.areas_for_improvement?.slice(0, 6).map((area, index) => (
+                {candidate.areas_for_improvement?.slice(0, 4).map((area, index) => (
                   <div key={index} className="improvement-item">
                     <AlertCircle size={16} className="improvement-icon" />
                     <span className="improvement-text" style={{ fontSize: '0.95rem' }}>{area}</span>
