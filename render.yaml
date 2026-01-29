@@ -1,13 +1,28 @@
 services:
+  # Backend: Resume Analyzer API
   - type: web
     name: resume-analyzer-backend
     env: python
     branch: main
     root: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app -b 0.0.0.0:$PORT --workers 1 --timeout 180
+    startCommand: >
+      gunicorn app:app
+      --bind 0.0.0.0:$PORT
+      --workers 1
+      --threads 2
+      --worker-class gthread
+      --timeout 180
+      --max-requests 50
+      --max-requests-jitter 10
     autoDeploy: true
+    envVars:
+      - key: OPENROUTER_API_KEY
+        value: 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
+      - key: PYTHONUNBUFFERED
+        value: true
 
+  # Frontend: React / Vite Static Site
   - type: static_site
     name: resume-analyzer-frontend
     branch: main
@@ -15,3 +30,10 @@ services:
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     autoDeploy: true
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://resume-analyzer-backend.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
