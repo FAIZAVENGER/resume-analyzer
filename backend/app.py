@@ -67,7 +67,7 @@ resume_storage = {}
 
 # Request session with timeout
 requests_session = requests.Session()
-requests_session.timeout = (10, 60)  # 10 seconds connect, 60 seconds read
+requests_session.timeout = (10, 120)  # 10 seconds connect, 120 seconds read (INCREASED)
 
 def update_activity():
     """Update last activity timestamp"""
@@ -119,7 +119,7 @@ def store_resume_file(file_data, filename, analysis_id):
         print(f"❌ Error storing resume for preview: {str(e)}")
         return None
 
-def call_deepseek_api(prompt, max_tokens=1500, temperature=0.1, timeout=60, retry_count=0):
+def call_deepseek_api(prompt, max_tokens=1000, temperature=0.1, timeout=120, retry_count=0):  # UPDATED: timeout=120, max_tokens=1000
     """Call DeepSeek R1 API via OpenRouter (Free & Unlimited) with improved error handling"""
     if not OPENROUTER_API_KEY:
         print(f"❌ No OpenRouter API key provided")
@@ -150,7 +150,7 @@ def call_deepseek_api(prompt, max_tokens=1500, temperature=0.1, timeout=60, retr
     try:
         start_time = time.time()
         
-        # Use session with timeout
+        # Use session with LONGER timeout
         response = requests_session.post(
             OPENROUTER_API_URL,
             headers=headers,
@@ -401,9 +401,10 @@ def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis
     resume_hash = calculate_resume_hash(resume_text, job_description)
     cached_score = get_cached_score(resume_hash)
     
-    prompt = f"""Analyze resume against job description:
+    # SIMPLIFIED PROMPT - shorter for faster response
+    prompt = f"""Analyze this resume against job description.
 
-RESUME:
+RESUME (truncated):
 {resume_text}
 
 JOB DESCRIPTION:
@@ -411,18 +412,18 @@ JOB DESCRIPTION:
 
 Provide analysis in this JSON format:
 {{
-    "candidate_name": "Extracted name or filename",
-    "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6"],
-    "skills_missing": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6"],
-    "experience_summary": "Provide a concise 3-4 sentence summary of the candidate's professional experience.",
-    "education_summary": "Provide a concise 3-4 sentence summary of the candidate's educational background.",
+    "candidate_name": "Extracted name",
+    "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5"],
+    "skills_missing": ["skill1", "skill2", "skill3", "skill4", "skill5"],
+    "experience_summary": "Brief 3-sentence summary.",
+    "education_summary": "Brief 3-sentence summary.",
     "overall_score": 75,
-    "recommendation": "Strongly Recommended/Recommended/Consider/Not Recommended",
-    "key_strengths": ["strength1", "strength2", "strength3"],
-    "areas_for_improvement": ["area1", "area2", "area3"]
+    "recommendation": "Recommended/Consider/Not Recommended",
+    "key_strengths": ["strength1", "strength2"],
+    "areas_for_improvement": ["area1", "area2"]
 }}
 
-Provide 5-6 skills in both arrays and keep summaries concise."""
+Keep responses concise."""
 
     try:
         print(f"⚡ Sending to DeepSeek R1 via OpenRouter...")
@@ -430,9 +431,9 @@ Provide 5-6 skills in both arrays and keep summaries concise."""
         
         response = call_deepseek_api(
             prompt=prompt,
-            max_tokens=1500,
+            max_tokens=1000,  # REDUCED from 1500 for faster response
             temperature=0.1,
-            timeout=60
+            timeout=120  # INCREASED timeout to 120 seconds
         )
         
         if isinstance(response, dict) and 'error' in response:
@@ -499,14 +500,14 @@ def validate_analysis(analysis, filename):
     """Validate analysis data and fill missing fields"""
     required_fields = {
         'candidate_name': 'Professional Candidate',
-        'skills_matched': ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Teamwork'],
-        'skills_missing': ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX', 'Cybersecurity'],
-        'experience_summary': 'The candidate demonstrates professional experience with relevant technical skills. Their background shows progressive responsibility in key areas.',
-        'education_summary': 'The candidate holds relevant educational qualifications that provide strong foundational knowledge for professional work.',
+        'skills_matched': ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving'],
+        'skills_missing': ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX'],
+        'experience_summary': 'The candidate demonstrates professional experience with relevant technical skills.',
+        'education_summary': 'The candidate holds relevant educational qualifications.',
         'overall_score': 70,
         'recommendation': 'Consider for Interview',
-        'key_strengths': ['Technical foundation', 'Communication skills', 'Problem-solving ability'],
-        'areas_for_improvement': ['Advanced certifications needed', 'Cloud platform experience', 'Project management skills']
+        'key_strengths': ['Technical foundation', 'Communication skills'],
+        'areas_for_improvement': ['Advanced certifications', 'Cloud platform experience']
     }
     
     for field, default_value in required_fields.items():
@@ -524,12 +525,12 @@ def validate_analysis(analysis, filename):
     skills_missing = analysis.get('skills_missing', [])
     
     if len(skills_matched) < 5:
-        default_skills = ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Teamwork']
+        default_skills = ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving']
         needed = 5 - len(skills_matched)
         skills_matched.extend(default_skills[:needed])
     
     if len(skills_missing) < 5:
-        default_skills = ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX', 'Cybersecurity']
+        default_skills = ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX']
         needed = 5 - len(skills_missing)
         skills_missing.extend(default_skills[:needed])
     
@@ -538,15 +539,15 @@ def validate_analysis(analysis, filename):
     analysis['skills_missing'] = skills_missing[:MAX_SKILLS_TO_SHOW]
     
     # Ensure strengths and improvements
-    analysis['key_strengths'] = analysis.get('key_strengths', [])[:3]
-    analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:3]
+    analysis['key_strengths'] = analysis.get('key_strengths', [])[:2]
+    analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:2]
     
     # Trim summaries
-    if len(analysis.get('experience_summary', '')) > 500:
-        analysis['experience_summary'] = analysis['experience_summary'][:497] + '...'
+    if len(analysis.get('experience_summary', '')) > 300:
+        analysis['experience_summary'] = analysis['experience_summary'][:297] + '...'
     
-    if len(analysis.get('education_summary', '')) > 500:
-        analysis['education_summary'] = analysis['education_summary'][:497] + '...'
+    if len(analysis.get('education_summary', '')) > 300:
+        analysis['education_summary'] = analysis['education_summary'][:297] + '...'
     
     return analysis
 
@@ -565,14 +566,14 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
     if partial_success:
         return {
             "candidate_name": candidate_name,
-            "skills_matched": ['Python', 'JavaScript', 'Database', 'Communication', 'Problem Solving', 'Teamwork'],
-            "skills_missing": ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX', 'Cybersecurity'],
-            "experience_summary": 'The candidate has professional experience with relevant technical skills. Their background includes working with modern technologies.',
-            "education_summary": 'The candidate possesses educational qualifications that provide a strong foundation for professional work.',
+            "skills_matched": ['Python', 'JavaScript', 'Database', 'Communication', 'Problem Solving'],
+            "skills_missing": ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX'],
+            "experience_summary": 'The candidate has professional experience with relevant technical skills.',
+            "education_summary": 'The candidate possesses educational qualifications.',
             "overall_score": 55,
             "recommendation": "Needs Full Analysis",
-            "key_strengths": ['Technical skills', 'Communication', 'Problem-solving'],
-            "areas_for_improvement": ['Advanced technical skills', 'Cloud experience', 'Project management'],
+            "key_strengths": ['Technical skills', 'Communication'],
+            "areas_for_improvement": ['Advanced technical skills', 'Cloud experience'],
             "ai_provider": "deepseek",
             "ai_model": DEEPSEEK_MODEL,
             "api_provider": "OpenRouter"
@@ -586,8 +587,8 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "education_summary": 'Educational background analysis pending service initialization.',
             "overall_score": 50,
             "recommendation": "Service Initializing",
-            "key_strengths": ['Learning capability', 'Work ethic', 'Communication'],
-            "areas_for_improvement": ['Service initialization needed', 'Complete analysis pending', 'Full evaluation required'],
+            "key_strengths": ['Learning capability', 'Work ethic'],
+            "areas_for_improvement": ['Service initialization needed', 'Complete analysis pending'],
             "ai_provider": "deepseek",
             "ai_model": DEEPSEEK_MODEL,
             "api_provider": "OpenRouter"
@@ -1377,7 +1378,11 @@ if __name__ == '__main__':
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
     print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
-    print(f"⚠️  MAX BATCH SIZE: {MAX_BATCH_SIZE} resumes (Render Free Tier)")
+    print(f"⚠️  CONFIGURED FOR RENDER:")
+    print(f"    • Workers: 1")
+    print(f"    • Threads: 2")
+    print(f"    • Timeout: 180s")
+    print(f"    • Max Batch: {MAX_BATCH_SIZE} resumes")
     print(f"⚠️  TEXT LIMITS: 1200 chars resume, 800 chars job description")
     print("="*50 + "\n")
     
@@ -1401,7 +1406,7 @@ if __name__ == '__main__':
     # For Render deployment
     if os.environ.get('RENDER'):
         print("🚀 Running on Render production environment")
-        # Use gunicorn for production with single worker
+        # Use gunicorn for production with gthread worker
         from gunicorn.app.base import BaseApplication
         
         class FlaskApplication(BaseApplication):
@@ -1420,16 +1425,16 @@ if __name__ == '__main__':
         options = {
             'bind': f'0.0.0.0:{port}',
             'workers': 1,  # CRITICAL: Only 1 worker
-            'threads': 1,  # CRITICAL: Only 1 thread
-            'worker_class': 'sync',
-            'timeout': 120,
+            'threads': 2,  # CRITICAL: 2 threads for concurrency
+            'worker_class': 'gthread',  # Use gthread worker
+            'timeout': 180,  # 180 seconds timeout
             'keepalive': 5,
-            'max_requests': 50,  # Restart worker after 50 requests
-            'max_requests_jitter': 10,  # Randomize restart
+            'max_requests': 1000,  # Restart worker after 1000 requests
+            'max_requests_jitter': 50,  # Randomize restart
             'preload': True,  # Preload app before forking
         }
         
         FlaskApplication(app, options).run()
     else:
         print("🚀 Running in development mode")
-        app.run(host='0.0.0.0', port=port, debug=False, threaded=False)
+        app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
