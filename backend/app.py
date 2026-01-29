@@ -655,21 +655,22 @@ Provide COMPREHENSIVE analysis in this JSON format:
     "candidate_name": "Extracted name or filename",
     "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
     "skills_missing": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
-    "experience_summary": "Provide a detailed 5-7 sentence summary of the candidate's professional experience, highlighting key achievements, duration, roles, industries, projects, technologies used, leadership experience, and specific accomplishments. Focus on relevance to the job description.",
-    "education_summary": "Provide a detailed 5-7 sentence summary of the candidate's educational background, including degrees, institutions, years, specializations, GPA, academic achievements, relevant coursework, certifications, and any notable academic projects.",
+    "experience_summary": "Provide a concise 3-5 sentence summary of the candidate's professional experience. Highlight key achievements, roles, technologies used, and relevance to the job description. Keep it brief but informative.",
+    "education_summary": "Provide a concise 3-5 sentence summary of the candidate's educational background. Include degrees, institutions, specializations, and any notable achievements or certifications. Keep it brief but informative.",
     "overall_score": 75,
     "recommendation": "Strongly Recommended/Recommended/Consider/Not Recommended",
-    "key_strengths": ["strength1", "strength2", "strength3", "strength4", "strength5", "strength6"],
-    "areas_for_improvement": ["area1", "area2", "area3", "area4", "area5", "area6"]
+    "key_strengths": ["strength1", "strength2", "strength3", "strength4"],
+    "areas_for_improvement": ["area1", "area2", "area3", "area4"]
 }}
 
 IMPORTANT: 
 1. Provide 5-8 skills in both skills_matched and skills_missing arrays (minimum 5, maximum 8)
-2. Provide DETAILED 5-7 sentence summaries for both experience_summary and education_summary
-3. Include specific examples, technologies, and achievements
-4. Make key_strengths and areas_for_improvement lists 6 items each
-5. Be thorough and comprehensive in analysis
-6. DO NOT include job_title_suggestion, years_experience, industry_fit, or salary_expectation fields"""
+2. Provide CONCISE 3-5 sentence summaries for both experience_summary and education_summary (10 lines maximum each)
+3. Include specific examples and achievements but be brief
+4. Make key_strengths and areas_for_improvement lists 4 items each (not 6)
+5. Be thorough but concise in analysis
+6. DO NOT include job_title_suggestion, years_experience, industry_fit, or salary_expectation fields
+7. Keep summaries focused and to the point - maximum 10 lines of text"""
 
     try:
         print(f"⚡ Sending to Groq API (Key {key_index})...")
@@ -678,9 +679,9 @@ IMPORTANT:
         response = call_groq_api(
             prompt=prompt,
             api_key=api_key,
-            max_tokens=1800,  # Increased from 1200
+            max_tokens=1500,  # Reduced from 1800 since we want shorter summaries
             temperature=0.1,
-            timeout=60  # Increased from 45
+            timeout=60
         )
         
         if isinstance(response, dict) and 'error' in response:
@@ -754,12 +755,12 @@ def validate_analysis(analysis, filename):
         'candidate_name': 'Professional Candidate',
         'skills_matched': ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Team Collaboration', 'Project Management', 'Agile Methodology'],
         'skills_missing': ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX Design', 'Cybersecurity', 'Mobile Development', 'Database Administration'],
-        'experience_summary': 'The candidate demonstrates solid professional experience with progressive responsibility in their field. They have worked on multiple projects involving various technologies and methodologies. Their background shows expertise in key areas relevant to modern industry demands. They have experience collaborating with cross-functional teams and delivering results under tight deadlines. Their accomplishments include successful project implementations and measurable contributions to organizational goals.',
-        'education_summary': 'The candidate holds relevant educational qualifications from reputable institutions. Their academic background provides strong foundational knowledge in core subjects. They have specialized in areas that align with current industry trends and requirements. Additional certifications and training enhance their professional profile. Their educational journey demonstrates commitment to continuous learning and skill development.',
+        'experience_summary': 'The candidate demonstrates solid professional experience with progressive responsibility. They have worked on projects involving modern technologies and methodologies. Their background shows expertise in key areas relevant to industry demands.',
+        'education_summary': 'The candidate holds relevant educational qualifications from reputable institutions. Their academic background provides strong foundational knowledge. Additional certifications enhance their professional profile.',
         'overall_score': 70,
         'recommendation': 'Consider for Interview',
-        'key_strengths': ['Strong technical foundation', 'Excellent communication skills', 'Proven track record of delivery', 'Leadership capabilities', 'Adaptability to change', 'Attention to detail'],
-        'areas_for_improvement': ['Could benefit from advanced certifications', 'Limited experience in cloud platforms', 'Could enhance project management skills', 'Needs more industry-specific knowledge', 'Should gain experience with newer technologies', 'Could improve presentation skills']
+        'key_strengths': ['Strong technical foundation', 'Excellent communication skills', 'Proven track record of delivery', 'Leadership capabilities'],
+        'areas_for_improvement': ['Could benefit from advanced certifications', 'Limited experience in cloud platforms', 'Could enhance project management skills', 'Needs more industry-specific knowledge']
     }
     
     for field, default_value in required_fields.items():
@@ -791,9 +792,18 @@ def validate_analysis(analysis, filename):
     analysis['skills_matched'] = skills_matched[:MAX_SKILLS_TO_SHOW]
     analysis['skills_missing'] = skills_missing[:MAX_SKILLS_TO_SHOW]
     
-    # Ensure 6 strengths and improvements
-    analysis['key_strengths'] = analysis.get('key_strengths', [])[:6]
-    analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:6]
+    # Ensure 4 strengths and improvements (not 6)
+    analysis['key_strengths'] = analysis.get('key_strengths', [])[:4]
+    analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:4]
+    
+    # Trim summaries to be more concise
+    if len(analysis.get('experience_summary', '').split('. ')) > 5:
+        sentences = analysis['experience_summary'].split('. ')
+        analysis['experience_summary'] = '. '.join(sentences[:5]) + '.'
+    
+    if len(analysis.get('education_summary', '').split('. ')) > 5:
+        sentences = analysis['education_summary'].split('. ')
+        analysis['education_summary'] = '. '.join(sentences[:5]) + '.'
     
     # Remove unwanted fields
     unwanted_fields = ['job_title_suggestion', 'years_experience', 'industry_fit', 'salary_expectation']
@@ -820,12 +830,12 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "candidate_name": candidate_name,
             "skills_matched": ['Python Programming', 'JavaScript Development', 'Database Management', 'Communication Skills', 'Problem Solving', 'Team Collaboration', 'Project Planning', 'Technical Documentation'],
             "skills_missing": ['Machine Learning Algorithms', 'Cloud Platform Expertise', 'Advanced Data Analysis', 'DevOps Practices', 'UI/UX Design Principles', 'Cybersecurity Fundamentals', 'Mobile App Development', 'Database Optimization'],
-            "experience_summary": 'The candidate has demonstrated professional experience in relevant technical roles. Their background includes working with modern technologies and methodologies in development environments. They have contributed to multiple projects with measurable outcomes and success metrics. Their experience shows progressive responsibility and skill development over time. The candidate has experience working in team environments and collaborating with stakeholders.',
-            "education_summary": 'The candidate possesses educational qualifications that provide a strong foundation for professional work. Their academic background includes coursework and projects relevant to technical roles. They have demonstrated commitment to learning and skill development through their educational journey. Additional training and certifications complement their formal education. The candidate shows potential for continued growth and development.',
+            "experience_summary": 'The candidate has demonstrated professional experience in relevant technical roles. Their background includes working with modern technologies and methodologies. They have contributed to projects with measurable outcomes and success metrics.',
+            "education_summary": 'The candidate possesses educational qualifications that provide a strong foundation for professional work. Their academic background includes relevant coursework and projects. Additional training complements their formal education.',
             "overall_score": 55,
             "recommendation": "Needs Full Analysis",
-            "key_strengths": ['Technical proficiency', 'Communication abilities', 'Problem-solving approach', 'Team collaboration', 'Adaptability', 'Attention to detail'],
-            "areas_for_improvement": ['Advanced technical skills needed', 'Cloud platform experience required', 'Data analysis capabilities', 'Project management skills', 'Industry-specific knowledge', 'Presentation skills'],
+            "key_strengths": ['Technical proficiency', 'Communication abilities', 'Problem-solving approach', 'Team collaboration'],
+            "areas_for_improvement": ['Advanced technical skills needed', 'Cloud platform experience required', 'Data analysis capabilities', 'Project management skills'],
             "ai_provider": "groq",
             "ai_status": "Partial",
             "ai_model": GROQ_MODEL,
@@ -835,12 +845,12 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "candidate_name": candidate_name,
             "skills_matched": ['Basic Programming', 'Communication Skills', 'Problem Solving', 'Teamwork', 'Technical Knowledge', 'Learning Ability', 'Adaptability', 'Work Ethic'],
             "skills_missing": ['Advanced Technical Skills', 'Industry Experience', 'Specialized Knowledge', 'Certifications', 'Project Management', 'Leadership Experience', 'Research Skills', 'Analytical Thinking'],
-            "experience_summary": 'Professional experience analysis will be available once the Groq AI service is fully initialized. The candidate appears to have relevant background based on initial file processing. Detailed experience assessment requires complete AI model loading. Service optimization in progress for comprehensive analysis.',
-            "education_summary": 'Educational background analysis will be available shortly upon service initialization. Academic qualifications assessment is pending full AI processing. Complete educational profile analysis requires Groq AI model to be fully loaded and ready for detailed evaluation.',
+            "experience_summary": 'Professional experience analysis will be available once the Groq AI service is fully initialized. The candidate appears to have relevant background based on initial file processing.',
+            "education_summary": 'Educational background analysis will be available shortly upon service initialization. Academic qualifications assessment is pending full AI processing.',
             "overall_score": 50,
             "recommendation": "Service Warming Up - Please Retry",
-            "key_strengths": ['Fast learning capability', 'Strong work ethic', 'Good communication', 'Technical aptitude', 'Problem-solving mindset', 'Team player attitude'],
-            "areas_for_improvement": ['Service initialization required', 'Complete analysis pending', 'Detailed assessment needed', 'Full skill evaluation', 'Experience verification', 'Industry fit analysis'],
+            "key_strengths": ['Fast learning capability', 'Strong work ethic', 'Good communication', 'Technical aptitude'],
+            "areas_for_improvement": ['Service initialization required', 'Complete analysis pending', 'Detailed assessment needed', 'Full skill evaluation'],
             "ai_provider": "groq",
             "ai_status": "Warming up",
             "ai_model": GROQ_MODEL,
@@ -1493,10 +1503,10 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         
         row += 1
         
-        # Experience Summary (Detailed 5-7 sentences)
+        # Experience Summary (Concise 3-5 sentences)
         ws.merge_cells(f'A{row}:F{row}')
         cell = ws[f'A{row}']
-        cell.value = "DETAILED EXPERIENCE SUMMARY"
+        cell.value = "EXPERIENCE SUMMARY"
         cell.font = header_font
         cell.fill = subheader_fill
         cell.alignment = Alignment(horizontal='center')
@@ -1507,13 +1517,13 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         experience_text = analysis_data.get('experience_summary', 'No experience summary available.')
         cell.value = experience_text
         cell.alignment = Alignment(wrap_text=True, vertical='top')
-        ws.row_dimensions[row].height = 150  # Increased height
+        ws.row_dimensions[row].height = 80  # Reduced height for concise summary
         row += 2
         
-        # Education Summary (Detailed 5-7 sentences)
+        # Education Summary (Concise 3-5 sentences)
         ws.merge_cells(f'A{row}:F{row}')
         cell = ws[f'A{row}']
-        cell.value = "DETAILED EDUCATION SUMMARY"
+        cell.value = "EDUCATION SUMMARY"
         cell.font = header_font
         cell.fill = subheader_fill
         cell.alignment = Alignment(horizontal='center')
@@ -1524,13 +1534,13 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         education_text = analysis_data.get('education_summary', 'No education summary available.')
         cell.value = education_text
         cell.alignment = Alignment(wrap_text=True, vertical='top')
-        ws.row_dimensions[row].height = 120  # Increased height
+        ws.row_dimensions[row].height = 80  # Reduced height for concise summary
         row += 2
         
-        # Key Strengths (6 items)
+        # Key Strengths (4 items)
         ws.merge_cells(f'A{row}:F{row}')
         cell = ws[f'A{row}']
-        cell.value = "KEY STRENGTHS"
+        cell.value = "KEY STRENGTHS (4 items)"
         cell.font = header_font
         cell.fill = subheader_fill
         cell.alignment = Alignment(horizontal='center')
@@ -1549,10 +1559,10 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         
         row += 1
         
-        # Areas for Improvement (6 items)
+        # Areas for Improvement (4 items)
         ws.merge_cells(f'A{row}:F{row}')
         cell = ws[f'A{row}']
-        cell.value = "AREAS FOR IMPROVEMENT"
+        cell.value = "AREAS FOR IMPROVEMENT (4 items)"
         cell.font = header_font
         cell.fill = subheader_fill
         cell.alignment = Alignment(horizontal='center')
@@ -1812,7 +1822,7 @@ def populate_candidate_sheet(ws, analysis, candidate_num):
     
     # Experience Summary
     ws.merge_cells(f'A{row}:G{row}')
-    ws[f'A{row}'].value = "DETAILED EXPERIENCE SUMMARY"
+    ws[f'A{row}'].value = "EXPERIENCE SUMMARY"
     ws[f'A{row}'].font = header_font
     ws[f'A{row}'].fill = subheader_fill
     ws[f'A{row}'].alignment = Alignment(horizontal='center')
@@ -1822,12 +1832,12 @@ def populate_candidate_sheet(ws, analysis, candidate_num):
     experience = analysis.get('experience_summary', 'No experience summary available.')
     ws[f'A{row}'].value = experience
     ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[row].height = 150
+    ws.row_dimensions[row].height = 80  # Reduced height
     row += 2
     
     # Education Summary
     ws.merge_cells(f'A{row}:G{row}')
-    ws[f'A{row}'].value = "DETAILED EDUCATION SUMMARY"
+    ws[f'A{row}'].value = "EDUCATION SUMMARY"
     ws[f'A{row}'].font = header_font
     ws[f'A{row}'].fill = subheader_fill
     ws[f'A{row}'].alignment = Alignment(horizontal='center')
@@ -1837,7 +1847,7 @@ def populate_candidate_sheet(ws, analysis, candidate_num):
     education = analysis.get('education_summary', 'No education summary available.')
     ws[f'A{row}'].value = education
     ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[row].height = 120
+    ws.row_dimensions[row].height = 80  # Reduced height
     
     # Set column widths
     ws.column_dimensions['A'].width = 25
@@ -2123,7 +2133,7 @@ def health_check():
         'resume_previews_folder_exists': os.path.exists(RESUME_PREVIEW_FOLDER),
         'resume_previews_stored': len(resume_storage),
         'inactive_minutes': inactive_minutes,
-        'version': '2.4.0',
+        'version': '2.4.1',
         'key_status': key_status,
         'available_keys': available_keys,
         'configuration': {
@@ -2191,7 +2201,8 @@ if __name__ == '__main__':
     print(f"✅ Round-robin Parallel Processing: Enabled")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
-    print(f"✅ Detailed Summaries: 5-7 sentences each")
+    print(f"✅ Concise Summaries: 3-5 sentences each")
+    print(f"✅ Key Strengths/Improvements: 4 items each")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
     print(f"✅ PDF Preview: Automatic conversion for DOC/DOCX/TXT files")
     print(f"✅ Performance: ~10 resumes in 10-15 seconds")
