@@ -18,6 +18,8 @@ import re
 import hashlib
 import random
 import gc
+import signal
+import sys
 
 # Load environment variables
 load_dotenv()
@@ -46,15 +48,15 @@ print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
 score_cache = {}
 cache_lock = threading.Lock()
 
-# Batch processing configuration
-MAX_CONCURRENT_REQUESTS = 3  # Reduced for stability on Render
-MAX_BATCH_SIZE = 8  # Reduced for Render stability
+# Batch processing configuration - REDUCED FOR RENDER FREE TIER
+MAX_CONCURRENT_REQUESTS = 1  # REDUCED: Only 1 concurrent request
+MAX_BATCH_SIZE = 5  # REDUCED: Max 5 resumes for Render free tier
 MIN_SKILLS_TO_SHOW = 5
 MAX_SKILLS_TO_SHOW = 8
 
 # Rate limiting for free API
-MAX_RETRIES = 3  # Reduced retries
-RETRY_DELAY_BASE = 3  # Increased base delay
+MAX_RETRIES = 3
+RETRY_DELAY_BASE = 3
 
 # Track activity
 last_activity_time = datetime.now()
@@ -74,7 +76,8 @@ def update_activity():
 
 def calculate_resume_hash(resume_text, job_description):
     """Calculate a hash for caching consistent scores"""
-    content = f"{resume_text[:500]}{job_description[:500]}".encode('utf-8')
+    # Use smaller chunks for hashing
+    content = f"{resume_text[:300]}{job_description[:300]}".encode('utf-8')
     return hashlib.md5(content).hexdigest()
 
 def get_cached_score(resume_hash):
@@ -272,7 +275,7 @@ def warmup_service():
         return False
 
 def keep_service_alive():
-    """Periodically ping to keep service responsive"""
+    """Periodically ping to keep service responsive - SIMPLIFIED"""
     global service_running
     
     while service_running:
@@ -283,17 +286,13 @@ def keep_service_alive():
                 update_activity()
                 print(f"♨️ Keeping service alive...")
                 
-                # Simple ping to check service
+                # Simple ping
                 try:
-                    response = call_deepseek_api(
-                        prompt="Ping",
-                        max_tokens=10,
-                        timeout=20
-                    )
-                    if isinstance(response, dict) and 'error' in response:
-                        print(f"  ⚠️ Keep-alive failed: {response.get('error')}")
-                    else:
+                    response = requests.get(f"http://localhost:{os.environ.get('PORT', 5002)}/ping", timeout=10)
+                    if response.status_code == 200:
                         print(f"  ✅ Service responsive")
+                    else:
+                        print(f"  ⚠️ Service ping failed: {response.status_code}")
                 except Exception as e:
                     print(f"  ⚠️ Keep-alive error: {str(e)}")
                     
@@ -301,68 +300,64 @@ def keep_service_alive():
             print(f"⚠️ Keep-alive thread error: {str(e)}")
             time.sleep(180)
 
-# Text extraction functions
+# Text extraction functions - HARD LIMITS APPLIED
 def extract_text_from_pdf(file_path):
-    """Extract text from PDF file with error handling"""
+    """Extract text from PDF file with error handling - HARD LIMIT 1200 chars"""
     try:
         text = ""
-        max_attempts = 2
         
-        for attempt in range(max_attempts):
-            try:
-                reader = PdfReader(file_path)
-                text = ""
-                
-                # Limit to first 5 pages for performance
-                for page_num, page in enumerate(reader.pages[:5]):
-                    try:
-                        page_text = page.extract_text()
-                        if page_text:
-                            text += page_text + "\n"
-                    except Exception as e:
-                        print(f"⚠️ PDF page extraction error: {e}")
-                        continue
-                
-                if text.strip():
-                    break
-                    
-            except Exception as e:
-                print(f"❌ PDFReader attempt {attempt + 1} failed: {e}")
-                if attempt == max_attempts - 1:
-                    try:
-                        with open(file_path, 'rb') as f:
-                            content = f.read()
-                            text = content.decode('utf-8', errors='ignore')
-                            if text.strip():
-                                words = text.split()
-                                text = ' '.join(words[:1000])  # Limit text length
-                    except:
-                        text = "Error: Could not extract text from PDF file"
+        try:
+            reader = PdfReader(file_path)
+            
+            # Limit to first 3 pages only
+            for page_num, page in enumerate(reader.pages[:3]):
+                try:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+                except Exception as e:
+                    print(f"⚠️ PDF page extraction error: {e}")
+                    continue
+            
+            if not text.strip():
+                return "Error: PDF appears to be empty"
+            
+        except Exception as e:
+            print(f"❌ PDFReader failed: {e}")
+            return "Error reading PDF"
         
-        if not text.strip():
-            return "Error: PDF appears to be empty or text could not be extracted"
+        # HARD LIMIT: 1200 characters max
+        return text[:1200]
         
-        return text[:3000]  # Limit text size
     except Exception as e:
-        print(f"❌ PDF Error: {traceback.format_exc()}")
+        print(f"❌ PDF Error: {str(e)[:100]}")
         return f"Error reading PDF: {str(e)[:100]}"
 
 def extract_text_from_docx(file_path):
-    """Extract text from DOCX file"""
+    """Extract text from DOCX file - HARD LIMIT 1200 chars"""
     try:
         doc = Document(file_path)
-        text = "\n".join([paragraph.text for paragraph in doc.paragraphs[:100] if paragraph.text.strip()])
+        
+        # Limit to first 50 paragraphs only
+        paragraphs = []
+        for paragraph in doc.paragraphs[:50]:
+            if paragraph.text.strip():
+                paragraphs.append(paragraph.text.strip())
+        
+        text = "\n".join(paragraphs)
         
         if not text.strip():
             return "Error: Document appears to be empty"
         
-        return text[:3000]  # Limit text size
+        # HARD LIMIT: 1200 characters max
+        return text[:1200]
+        
     except Exception as e:
-        print(f"❌ DOCX Error: {traceback.format_exc()}")
-        return f"Error reading DOCX: {str(e)}"
+        print(f"❌ DOCX Error: {str(e)[:100]}")
+        return f"Error reading DOCX: {str(e)[:100]}"
 
 def extract_text_from_txt(file_path):
-    """Extract text from TXT file"""
+    """Extract text from TXT file - HARD LIMIT 1200 chars"""
     try:
         encodings = ['utf-8', 'latin-1', 'windows-1252', 'cp1252']
         
@@ -374,26 +369,34 @@ def extract_text_from_txt(file_path):
                 if not text.strip():
                     return "Error: Text file appears to be empty"
                 
-                return text[:3000]  # Limit text size
+                # HARD LIMIT: 1200 characters max
+                return text[:1200]
+                    
             except UnicodeDecodeError:
                 continue
                 
         return "Error: Could not decode text file with common encodings"
         
     except Exception as e:
-        print(f"❌ TXT Error: {traceback.format_exc()}")
-        return f"Error reading TXT: {str(e)}"
+        print(f"❌ TXT Error: {str(e)[:100]}")
+        return f"Error reading TXT: {str(e)[:100]}"
 
 def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None):
-    """Use DeepSeek R1 API to analyze resume against job description"""
+    """Use DeepSeek R1 API to analyze resume against job description - HARD LIMITS"""
     
     if not OPENROUTER_API_KEY:
         print(f"❌ No OpenRouter API key configured.")
         return generate_fallback_analysis(filename, "No API key configured")
     
-    # Limit text sizes for performance
-    resume_text = resume_text[:2500]
-    job_description = job_description[:1500]
+    # HARD LIMITS - CRITICAL FOR MEMORY
+    resume_text = resume_text[:1200]  # STRICT LIMIT: 1200 characters max
+    job_description = job_description[:800]  # STRICT LIMIT: 800 characters max
+    
+    # Safety check - enforce limits again
+    if len(resume_text) > 1200:
+        resume_text = resume_text[:1200]
+    if len(job_description) > 800:
+        job_description = job_description[:800]
     
     resume_hash = calculate_resume_hash(resume_text, job_description)
     cached_score = get_cached_score(resume_hash)
@@ -458,7 +461,6 @@ Provide 5-6 skills in both arrays and keep summaries concise."""
             print(f"✅ Successfully parsed JSON response")
         except json.JSONDecodeError as e:
             print(f"❌ JSON Parse Error: {e}")
-            print(f"Response preview: {result_text[:100]}")
             return generate_fallback_analysis(filename, "JSON Parse Error", partial_success=True)
         
         analysis = validate_analysis(analysis, filename)
@@ -592,7 +594,7 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
         }
 
 def process_single_resume(args):
-    """Process a single resume with improved error handling"""
+    """Process a single resume with improved error handling and memory cleanup"""
     resume_file, job_description, index, total, batch_id = args
     
     try:
@@ -683,6 +685,9 @@ def process_single_resume(args):
         
         print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
         
+        # CRITICAL: Force garbage collection after each resume
+        gc.collect()
+        
         return {
             'analysis': analysis,
             'status': 'success',
@@ -693,6 +698,10 @@ def process_single_resume(args):
         print(f"❌ Error processing {resume_file.filename}: {str(e)}")
         if 'file_path' in locals() and os.path.exists(file_path):
             os.remove(file_path)
+        
+        # CRITICAL: Force garbage collection on error too
+        gc.collect()
+        
         return {
             'filename': resume_file.filename,
             'error': f"Processing error: {str(e)[:100]}",
@@ -847,10 +856,17 @@ def analyze_resume():
         print(f"✅ Request completed in {total_time:.2f} seconds")
         print("="*50 + "\n")
         
+        # Force garbage collection
+        gc.collect()
+        
         return jsonify(analysis)
         
     except Exception as e:
         print(f"❌ Unexpected error: {traceback.format_exc()}")
+        
+        # Force garbage collection on error
+        gc.collect()
+        
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
 @app.route('/analyze-batch', methods=['POST'])
@@ -960,10 +976,17 @@ def analyze_resume_batch():
         print(f"✅ Batch analysis completed in {total_time:.2f}s")
         print("="*50 + "\n")
         
+        # Force garbage collection
+        gc.collect()
+        
         return jsonify(batch_summary)
         
     except Exception as e:
         print(f"❌ Batch analysis error: {traceback.format_exc()}")
+        
+        # Force garbage collection on error
+        gc.collect()
+        
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
 @app.route('/resume-preview/<analysis_id>', methods=['GET'])
@@ -994,7 +1017,7 @@ def get_resume_preview(analysis_id):
         print(f"❌ Resume preview error: {traceback.format_exc()}")
         return jsonify({'error': f'Failed to get resume preview: {str(e)}'}), 500
 
-# Excel report functions (keep as is but simplified)
+# Excel report functions (simplified)
 def create_detailed_individual_report(analysis_data, filename="resume_analysis_report.xlsx"):
     """Create a detailed Excel report"""
     try:
@@ -1298,6 +1321,15 @@ def health_check():
         'max_batch_size': MAX_BATCH_SIZE
     })
 
+@app.route('/status', methods=['GET'])
+def status():
+    """Ultra-lightweight status check"""
+    return jsonify({
+        'status': 'alive',
+        'memory': 'ok',
+        'timestamp': datetime.now().isoformat()
+    }), 200
+
 def cleanup_on_exit():
     """Cleanup function called on exit"""
     global service_running
@@ -1318,38 +1350,14 @@ def cleanup_on_exit():
     except:
         pass
 
-def periodic_cleanup():
-    """Periodically clean up old files"""
-    while service_running:
-        try:
-            time.sleep(300)
-            now = datetime.now()
-            
-            # Clean uploads folder (older than 1 hour)
-            for filename in os.listdir(UPLOAD_FOLDER):
-                filepath = os.path.join(UPLOAD_FOLDER, filename)
-                if os.path.isfile(filepath):
-                    file_age = now - datetime.fromtimestamp(os.path.getctime(filepath))
-                    if file_age.total_seconds() > 3600:
-                        try:
-                            os.remove(filepath)
-                        except:
-                            pass
-            
-            # Clean resume previews (older than 2 hours)
-            for analysis_id in list(resume_storage.keys()):
-                stored_time = datetime.fromisoformat(resume_storage[analysis_id]['stored_at'])
-                if (now - stored_time).total_seconds() > 7200:
-                    try:
-                        path = resume_storage[analysis_id]['path']
-                        if os.path.exists(path):
-                            os.remove(path)
-                        del resume_storage[analysis_id]
-                    except:
-                        pass
-                        
-        except Exception as e:
-            print(f"⚠️ Periodic cleanup error: {str(e)}")
+# Signal handler for graceful shutdown
+def handle_exit(signum, frame):
+    print(f"\n🛑 Received signal {signum}, shutting down gracefully...")
+    cleanup_on_exit()
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_exit)
+signal.signal(signal.SIGINT, handle_exit)
 
 atexit.register(cleanup_on_exit)
 
@@ -1357,6 +1365,7 @@ if __name__ == '__main__':
     print("\n" + "="*50)
     print("🚀 Resume Analyzer Backend Starting...")
     print("="*50)
+    
     port = int(os.environ.get('PORT', 5002))
     print(f"📍 Server: http://localhost:{port}")
     print(f"⚡ AI Provider: DeepSeek R1")
@@ -1368,33 +1377,31 @@ if __name__ == '__main__':
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
     print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
-    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
+    print(f"⚠️  MAX BATCH SIZE: {MAX_BATCH_SIZE} resumes (Render Free Tier)")
+    print(f"⚠️  TEXT LIMITS: 1200 chars resume, 800 chars job description")
     print("="*50 + "\n")
     
     if not has_api_key:
         print("⚠️  WARNING: No OpenRouter API key found!")
         print("Get FREE API key from: https://openrouter.ai/keys")
     
-    gc.enable()
+    # Force initial garbage collection
+    gc.collect()
     
     if has_api_key:
+        # Only start essential threads
         warmup_thread = threading.Thread(target=warmup_service, daemon=True)
         warmup_thread.start()
         
         keep_alive_thread = threading.Thread(target=keep_service_alive, daemon=True)
         keep_alive_thread.start()
         
-        cleanup_thread = threading.Thread(target=periodic_cleanup, daemon=True)
-        cleanup_thread.start()
-        
         print("✅ Background threads started")
-    
-    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
     
     # For Render deployment
     if os.environ.get('RENDER'):
         print("🚀 Running on Render production environment")
-        # Use gunicorn for production
+        # Use gunicorn for production with single worker
         from gunicorn.app.base import BaseApplication
         
         class FlaskApplication(BaseApplication):
@@ -1412,15 +1419,17 @@ if __name__ == '__main__':
         
         options = {
             'bind': f'0.0.0.0:{port}',
-            'workers': 2,  # Reduced workers for stability
+            'workers': 1,  # CRITICAL: Only 1 worker
+            'threads': 1,  # CRITICAL: Only 1 thread
             'worker_class': 'sync',
-            'timeout': 120,  # Increased timeout
+            'timeout': 120,
             'keepalive': 5,
-            'max_requests': 1000,
-            'max_requests_jitter': 50,
+            'max_requests': 50,  # Restart worker after 50 requests
+            'max_requests_jitter': 10,  # Randomize restart
+            'preload': True,  # Preload app before forking
         }
         
         FlaskApplication(app, options).run()
     else:
         print("🚀 Running in development mode")
-        app.run(host='0.0.0.0', port=port, debug=debug_mode, threaded=True)
+        app.run(host='0.0.0.0', port=port, debug=False, threaded=False)
