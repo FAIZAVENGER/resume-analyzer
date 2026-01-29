@@ -5,23 +5,8 @@ services:
     branch: main
     root: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: |
-      gunicorn app:app \
-        --bind 0.0.0.0:$PORT \
-        --workers 1 \
-        --threads 2 \
-        --worker-class gthread \
-        --timeout 180 \
-        --keep-alive 5 \
-        --max-requests 1000 \
-        --max-requests-jitter 50 \
-        --preload
+    startCommand: gunicorn app:app -b 0.0.0.0:$PORT
     autoDeploy: true
-    envVars:
-      - key: PYTHONUNBUFFERED
-        value: true
-      - key: GUNICORN_CMD_ARGS
-        value: "--workers=1 --threads=2 --timeout=180 --max-requests=1000"
 
   - type: static_site
     name: resume-analyzer-frontend
@@ -30,4 +15,3 @@ services:
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     autoDeploy: true
-    
