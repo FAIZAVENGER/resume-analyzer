@@ -73,11 +73,11 @@ MAX_SKILLS_TO_SHOW = 8  # Maximum skills to show (5-8 range)
 MAX_RETRIES = 3
 RETRY_DELAY_BASE = 3
 
-# Track key usage
+# Track key usage with enhanced rate limiting
 key_usage = {
-    0: {'count': 0, 'last_used': None, 'cooling': False},
-    1: {'count': 0, 'last_used': None, 'cooling': False},
-    2: {'count': 0, 'last_used': None, 'cooling': False}
+    0: {'count': 0, 'last_used': None, 'cooling': False, 'rate_limited': False, 'cooling_until': None},
+    1: {'count': 0, 'last_used': None, 'cooling': False, 'rate_limited': False, 'cooling_until': None},
+    2: {'count': 0, 'last_used': None, 'cooling': False, 'rate_limited': False, 'cooling_until': None}
 }
 
 # Memory optimization
@@ -92,29 +92,57 @@ def update_activity():
     last_activity_time = datetime.now()
 
 def get_available_key(resume_index=None):
-    """Get the next available Groq API key using round-robin strategy"""
+    """Get the next available Groq API key with smart rate limiting"""
     if not any(GROQ_API_KEYS):
         return None, None
     
+    # Check if any key is rate limited and cooling period is over
+    now = datetime.now()
+    for i in range(3):
+        if key_usage[i]['cooling_until'] and now > key_usage[i]['cooling_until']:
+            key_usage[i]['cooling'] = False
+            key_usage[i]['rate_limited'] = False
+            key_usage[i]['cooling_until'] = None
+            print(f"✅ Key {i + 1} cooling period ended")
+    
+    # Round-robin strategy with rate limit awareness
     if resume_index is not None:
         key_index = resume_index % 3
-        if GROQ_API_KEYS[key_index]:
+        if (GROQ_API_KEYS[key_index] and 
+            not key_usage[key_index]['cooling'] and 
+            not key_usage[key_index]['rate_limited']):
             return GROQ_API_KEYS[key_index], key_index + 1
     
+    # Fallback: find any available key
     for i, key in enumerate(GROQ_API_KEYS):
-        if key and not key_usage[i]['cooling']:
+        if (key and 
+            not key_usage[i]['cooling'] and 
+            not key_usage[i]['rate_limited'] and
+            key_usage[i]['count'] < 5):  # Limit per key per batch
+            return key, i + 1
+    
+    # If all keys are busy, try to find one that's not cooling
+    for i, key in enumerate(GROQ_API_KEYS):
+        if key and not key_usage[i]['rate_limited']:
             return key, i + 1
     
     return None, None
 
-def mark_key_cooling(key_index, duration=30):
+def mark_key_cooling(key_index, duration=30, rate_limited=False):
     """Mark a key as cooling down"""
     key_usage[key_index]['cooling'] = True
+    key_usage[key_index]['rate_limited'] = rate_limited
     key_usage[key_index]['last_used'] = datetime.now()
+    key_usage[key_index]['cooling_until'] = datetime.now() + timedelta(seconds=duration)
+    
+    status = "rate limited" if rate_limited else "cooling"
+    print(f"❄️ Key {key_index + 1} marked as {status} for {duration}s")
     
     def reset_cooling():
         time.sleep(duration)
         key_usage[key_index]['cooling'] = False
+        key_usage[key_index]['rate_limited'] = False
+        key_usage[key_index]['cooling_until'] = None
         print(f"✅ Key {key_index + 1} cooling completed")
     
     threading.Thread(target=reset_cooling, daemon=True).start()
@@ -373,8 +401,8 @@ def cleanup_orphaned_files():
     except Exception as e:
         print(f"⚠️ Error cleaning up orphaned files: {str(e)}")
 
-def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45, retry_count=0):
-    """Call Groq API with optimized settings"""
+def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45, retry_count=0, key_index=None):
+    """Call Groq API with optimized settings and better rate limit handling"""
     if not api_key:
         print(f"❌ No Groq API key provided")
         return {'error': 'no_api_key', 'status': 500}
@@ -423,21 +451,25 @@ def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45,
         if response.status_code == 429:
             print(f"❌ Rate limit exceeded for Groq API")
             
+            # Mark key as rate limited if we know which key it is
+            if key_index is not None:
+                mark_key_cooling(key_index, 60, rate_limited=True)
+            
             if retry_count < MAX_RETRIES:
-                wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(5, 10)
+                wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(10, 20)
                 print(f"⏳ Rate limited, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
                 time.sleep(wait_time)
-                return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
+                return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1, key_index)
             return {'error': 'rate_limit', 'status': 429}
         
         elif response.status_code == 503:
             print(f"❌ Service unavailable for Groq API")
             
             if retry_count < 2:
-                wait_time = 15 + random.uniform(5, 10)
+                wait_time = 20 + random.uniform(5, 15)
                 print(f"⏳ Service unavailable, retrying in {wait_time:.1f}s")
                 time.sleep(wait_time)
-                return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
+                return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1, key_index)
             return {'error': 'service_unavailable', 'status': 503}
         
         else:
@@ -448,10 +480,10 @@ def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45,
         print(f"❌ Groq API timeout after {timeout}s")
         
         if retry_count < 2:
-            wait_time = 10 + random.uniform(5, 10)
+            wait_time = 15 + random.uniform(5, 15)
             print(f"⏳ Timeout, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/3)")
             time.sleep(wait_time)
-            return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
+            return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1, key_index)
         return {'error': 'timeout', 'status': 408}
     
     except Exception as e:
@@ -483,11 +515,17 @@ def warmup_groq_service():
                     api_key=api_key,
                     max_tokens=10,
                     temperature=0.1,
-                    timeout=15
+                    timeout=15,
+                    key_index=i
                 )
                 
                 if isinstance(response, dict) and 'error' in response:
-                    print(f"    ⚠️ Key {i+1} failed: {response.get('error')}")
+                    error_type = response.get('error')
+                    if 'rate_limit' in error_type:
+                        print(f"    ⚠️ Key {i+1} is rate limited during warm-up")
+                        mark_key_cooling(i, 90, rate_limited=True)
+                    else:
+                        print(f"    ⚠️ Key {i+1} failed: {error_type}")
                     warmup_results.append(False)
                 elif response and 'ready' in response.lower():
                     elapsed = time.time() - start_time
@@ -498,7 +536,7 @@ def warmup_groq_service():
                     warmup_results.append(False)
                 
                 if i < available_keys - 1:
-                    time.sleep(1)
+                    time.sleep(2)  # Increased delay between key tests
         
         success = any(warmup_results)
         if success:
@@ -520,20 +558,21 @@ def keep_service_warm():
     
     while service_running:
         try:
-            time.sleep(180)
+            time.sleep(180)  # Every 3 minutes
             
             available_keys = sum(1 for key in GROQ_API_KEYS if key)
             if available_keys > 0 and warmup_complete:
                 print(f"♨️ Keeping Groq warm with {available_keys} keys...")
                 
                 for i, api_key in enumerate(GROQ_API_KEYS):
-                    if api_key and not key_usage[i]['cooling']:
+                    if api_key and not key_usage[i]['cooling'] and not key_usage[i]['rate_limited']:
                         try:
                             response = call_groq_api(
                                 prompt="Ping - just say 'pong'",
                                 api_key=api_key,
                                 max_tokens=5,
-                                timeout=20
+                                timeout=20,
+                                key_index=i
                             )
                             if response and 'pong' in str(response).lower():
                                 print(f"  ✅ Key {i+1} keep-alive successful")
@@ -679,18 +718,18 @@ IMPORTANT:
         response = call_groq_api(
             prompt=prompt,
             api_key=api_key,
-            max_tokens=1500,  # Reduced from 1800 since we want shorter summaries
+            max_tokens=1500,
             temperature=0.1,
-            timeout=60
+            timeout=60,
+            key_index=key_index-1 if key_index else None
         )
         
         if isinstance(response, dict) and 'error' in response:
             error_type = response.get('error')
             print(f"❌ Groq API error: {error_type}")
             
-            if 'rate_limit' in error_type or '429' in str(error_type):
-                if key_index:
-                    mark_key_cooling(key_index - 1, 30)
+            # Don't mark as cooling here - let call_groq_api handle it
+            # This prevents double cooling
             
             return generate_fallback_analysis(filename, f"API Error: {error_type}", partial_success=True)
         
@@ -863,15 +902,9 @@ def process_single_resume(args):
     try:
         print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
         
+        # Smart delay based on index
         if index > 0:
-            if index < 3:
-                base_delay = 0.5
-            elif index < 6:
-                base_delay = 1.0
-            else:
-                base_delay = 1.5
-            
-            delay = base_delay + random.uniform(0, 0.3)
+            delay = min(2.0, 0.5 + (index * 0.2)) + random.uniform(0, 0.3)
             print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
             time.sleep(delay)
         
@@ -923,6 +956,11 @@ def process_single_resume(args):
         
         key_usage[key_index - 1]['count'] += 1
         key_usage[key_index - 1]['last_used'] = datetime.now()
+        
+        # Check if key is getting close to rate limit (4 requests per key)
+        if key_usage[key_index - 1]['count'] >= 4:
+            print(f"⚠️ Key {key_index} has processed 4 resumes, marking for cooling")
+            mark_key_cooling(key_index - 1, 30, rate_limited=False)
         
         analysis = analyze_resume_with_ai(
             resume_text, 
@@ -1205,15 +1243,17 @@ def analyze_resume_batch():
         
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         
+        # Reset key usage for this batch
         for i in range(3):
             key_usage[i]['count'] = 0
             key_usage[i]['last_used'] = None
+            key_usage[i]['rate_limited'] = False
         
         all_analyses = []
         errors = []
         
         print(f"🔄 Processing {len(resume_files)} resumes with {available_keys} keys...")
-        print(f"📊 Using round-robin distribution: Key 1→1,4,7,10 | Key 2→2,5,8 | Key 3→3,6,9")
+        print(f"📊 Using round-robin distribution with rate limit protection")
         
         for index, resume_file in enumerate(resume_files):
             if resume_file.filename == '':
@@ -1237,10 +1277,6 @@ def analyze_resume_batch():
                     'error': result.get('error', 'Unknown error'),
                     'index': result.get('index')
                 })
-            
-            for i in range(3):
-                if key_usage[i]['count'] >= 4:
-                    mark_key_cooling(i, 15)
         
         all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
         
@@ -1263,7 +1299,8 @@ def analyze_resume_batch():
                 key_stats.append({
                     'key': f'Key {i+1}',
                     'used': key_usage[i]['count'],
-                    'status': 'cooling' if key_usage[i]['cooling'] else 'available'
+                    'status': 'rate_limited' if key_usage[i]['rate_limited'] else ('cooling' if key_usage[i]['cooling'] else 'available'),
+                    'cooling_until': key_usage[i]['cooling_until'].isoformat() if key_usage[i]['cooling_until'] else None
                 })
         
         total_time = time.time() - start_time
@@ -2038,7 +2075,8 @@ def quick_check():
                         prompt="Say 'ready'",
                         api_key=api_key,
                         max_tokens=10,
-                        timeout=15
+                        timeout=15,
+                        key_index=i
                     )
                     
                     response_time = time.time() - start_time
@@ -2116,7 +2154,9 @@ def health_check():
             'configured': bool(api_key),
             'usage': key_usage[i]['count'],
             'cooling': key_usage[i]['cooling'],
-            'last_used': key_usage[i]['last_used'].isoformat() if key_usage[i]['last_used'] else None
+            'rate_limited': key_usage[i]['rate_limited'],
+            'last_used': key_usage[i]['last_used'].isoformat() if key_usage[i]['last_used'] else None,
+            'cooling_until': key_usage[i]['cooling_until'].isoformat() if key_usage[i]['cooling_until'] else None
         })
     
     available_keys = sum(1 for key in GROQ_API_KEYS if key)
@@ -2133,7 +2173,7 @@ def health_check():
         'resume_previews_folder_exists': os.path.exists(RESUME_PREVIEW_FOLDER),
         'resume_previews_stored': len(resume_storage),
         'inactive_minutes': inactive_minutes,
-        'version': '2.4.1',
+        'version': '2.5.0',
         'key_status': key_status,
         'available_keys': available_keys,
         'configuration': {
@@ -2206,6 +2246,7 @@ if __name__ == '__main__':
     print(f"✅ Resume Preview: Enabled with PDF conversion")
     print(f"✅ PDF Preview: Automatic conversion for DOC/DOCX/TXT files")
     print(f"✅ Performance: ~10 resumes in 10-15 seconds")
+    print(f"✅ Rate Limit Protection: Automatic key cooling after 4 requests")
     print("="*50 + "\n")
     
     # Check for required dependencies
