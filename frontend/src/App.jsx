@@ -452,7 +452,7 @@ function App() {
       }, 500);
 
       if (aiStatus === 'available' && groqWarmup) {
-        setLoadingMessage('Groq AI analysis...');
+        setLoadingMessage('Groq AI analysis with strict scoring...');
       } else {
         setLoadingMessage('Enhanced analysis (Warming up Groq)...');
       }
@@ -633,17 +633,30 @@ function App() {
   };
 
   const getScoreColor = (score) => {
+    score = parseFloat(score);
     if (score >= 80) return '#00ff9d';
     if (score >= 60) return '#ffd166';
     return '#ff6b6b';
   };
 
   const getScoreGrade = (score) => {
-    if (score >= 90) return 'Excellent Match 🎯';
-    if (score >= 80) return 'Great Match ✨';
-    if (score >= 70) return 'Good Match 👍';
-    if (score >= 60) return 'Fair Match 📊';
-    return 'Needs Improvement 📈';
+    score = parseFloat(score);
+    if (score >= 90) return `Excellent Match 🎯 (${score.toFixed(1)})`;
+    if (score >= 80) return `Great Match ✨ (${score.toFixed(1)})`;
+    if (score >= 70) return `Good Match 👍 (${score.toFixed(1)})`;
+    if (score >= 60) return `Fair Match 📊 (${score.toFixed(1)})`;
+    return `Needs Improvement 📈 (${score.toFixed(1)})`;
+  };
+
+  const formatScore = (score) => {
+    if (typeof score === 'number') {
+      return score.toFixed(1);
+    }
+    if (typeof score === 'string') {
+      const num = parseFloat(score);
+      return !isNaN(num) ? num.toFixed(1) : 'N/A';
+    }
+    return 'N/A';
   };
 
   const getBackendStatusMessage = () => {
@@ -752,7 +765,7 @@ function App() {
     <div className="upload-section">
       <div className="section-header">
         <h2>Start Your Analysis</h2>
-        <p>Upload resume(s) and job description to get detailed insights</p>
+        <p>Upload resume(s) and job description to get detailed insights with strict ATS scoring</p>
         <div className="service-status">
           <span className="status-badge backend">
             {backendStatusInfo.icon} {backendStatusInfo.text}
@@ -771,6 +784,9 @@ function App() {
               <Cpu size={14} /> {getModelDisplayName(modelInfo)}
             </span>
           )}
+          <span className="status-badge scoring">
+            <Target size={14} /> Strict 5D ATS
+          </span>
         </div>
         
         {/* Batch Mode Toggle */}
@@ -986,9 +1002,9 @@ function App() {
             </div>
             <div className="stat">
               <div className="stat-icon">
-                <Users size={14} />
+                <Target size={14} />
               </div>
-              <span>Up to 10 resumes</span>
+              <span>Strict 5D ATS Scoring</span>
             </div>
           </div>
         </div>
@@ -1059,7 +1075,7 @@ function App() {
               <span className="loading-subtext">
                 {batchMode 
                   ? `Processing ${resumeFiles.length} resume(s) with ${getAvailableKeysCount()} keys...` 
-                  : `Using ${getModelDisplayName(modelInfo)}...`}
+                  : `Using ${getModelDisplayName(modelInfo)} with strict scoring...`}
               </span>
             </div>
             
@@ -1083,11 +1099,13 @@ function App() {
                   <span>Batch Size: {resumeFiles.length}</span>
                 </>
               )}
+              <span>•</span>
+              <span>Scoring: Strict 5D ATS</span>
             </div>
             
             <div className="loading-note info">
               <Info size={14} />
-              <span>Groq AI offers 128K context length for comprehensive resume analysis</span>
+              <span>Using 5-dimension ATS scoring with decimal precision (e.g., 78.3, 81.7)</span>
             </div>
           </div>
         </div>
@@ -1119,8 +1137,8 @@ function App() {
                 <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                 <span className="button-subtext">
                   {batchMode 
-                    ? `${resumeFiles.length} resume(s) • ${getAvailableKeysCount()} keys • ~${Math.ceil(resumeFiles.length/3)}s` 
-                    : `${getModelDisplayName(modelInfo)} • Single`}
+                    ? `${resumeFiles.length} resume(s) • ${getAvailableKeysCount()} keys • ~${Math.ceil(resumeFiles.length/3)}s • Strict Scoring` 
+                    : `${getModelDisplayName(modelInfo)} • Single • Strict 5D ATS`}
                 </span>
               </div>
             </div>
@@ -1137,16 +1155,16 @@ function App() {
               <span>Groq AI with 128K context length for comprehensive analysis</span>
             </div>
             <div className="tip">
+              <Target size={16} />
+              <span>Strict 5-dimension ATS scoring with decimal precision (e.g., 78.3, 81.7)</span>
+            </div>
+            <div className="tip">
               <Activity size={16} />
               <span>Process up to 10 resumes in parallel with {getAvailableKeysCount()} API keys</span>
             </div>
             <div className="tip">
               <Zap size={16} />
               <span>~10-15 seconds for 10 resumes (Round-robin parallel processing)</span>
-            </div>
-            <div className="tip">
-              <Download size={16} />
-              <span>Download comprehensive Excel report with all candidate data</span>
             </div>
           </>
         ) : (
@@ -1156,16 +1174,16 @@ function App() {
               <span>Groq AI offers ultra-fast resume analysis</span>
             </div>
             <div className="tip">
+              <Target size={16} />
+              <span>Strict 5-dimension scoring: Skills (30), Experience (25), Role (20), Projects (15), Resume (10)</span>
+            </div>
+            <div className="tip">
               <Thermometer size={16} />
               <span>Groq API automatically warms up when idle</span>
             </div>
             <div className="tip">
               <Activity size={16} />
               <span>Backend stays awake with automatic pings every 3 minutes</span>
-            </div>
-            <div className="tip">
-              <Cpu size={16} />
-              <span>Using: {getModelDisplayName(modelInfo)}</span>
             </div>
           </>
         )}
@@ -1185,8 +1203,8 @@ function App() {
             <span>New Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>⚡ Resume Analysis Results (Groq)</h2>
-            <p>{analysis.candidate_name}</p>
+            <h2>⚡ Resume Analysis Results (Strict 5D ATS Scoring)</h2>
+            <p>{analysis.candidate_name} • Score: {formatScore(analysis.overall_score)}</p>
           </div>
           <div className="navigation-actions">
             <button className="download-report-btn" onClick={handleDownload}>
@@ -1218,6 +1236,10 @@ function App() {
                   <Cpu size={14} />
                   Model: {analysis.ai_model || 'Groq AI'}
                 </span>
+                <span className="scoring-method">
+                  <Target size={14} />
+                  {analysis.scoring_method || 'Strict 5D ATS'}
+                </span>
               </div>
             </div>
           </div>
@@ -1236,7 +1258,7 @@ function App() {
               >
                 <div className="score-inner">
                   <div className="score-value" style={{ color: getScoreColor(analysis.overall_score) }}>
-                    {analysis.overall_score}
+                    {formatScore(analysis.overall_score)}
                   </div>
                   <div className="score-label">ATS Score</div>
                 </div>
@@ -1245,7 +1267,7 @@ function App() {
             <div className="score-info">
               <h3 className="score-grade">{getScoreGrade(analysis.overall_score)}</h3>
               <p className="score-description">
-                Based on skill matching, experience relevance, and qualifications
+                Based on strict 5-dimension scoring with decimal precision
               </p>
               <div className="score-meta">
                 <span className="meta-item">
@@ -1257,16 +1279,68 @@ function App() {
                   {analysis.key_used || 'Groq API'}
                 </span>
                 <span className="meta-item">
+                  <Target size={12} />
+                  Scoring: {analysis.scoring_method || '5-Dimension ATS'}
+                </span>
+                <span className="meta-item">
                   <CheckCircle size={12} />
                   {analysis.skills_matched?.length || 0} skills matched
                 </span>
-                <span className="meta-item">
-                  <XCircle size={12} />
-                  {analysis.skills_missing?.length || 0} skills missing
-                </span>
               </div>
             </div>
+          </div>
         </div>
+
+        {/* Score Breakdown Section */}
+        <div className="section-title">
+          <h2>Score Breakdown (5 Dimensions)</h2>
+          <p>Detailed scoring across all evaluation dimensions</p>
+        </div>
+        
+        <div className="score-breakdown-grid">
+          {analysis.score_breakdown && Object.entries(analysis.score_breakdown).map(([dimension, score], index) => {
+            const dimensionNames = {
+              skills_match: { name: 'Skills Match', max: 30, icon: <CheckCircle size={20} /> },
+              experience_relevance: { name: 'Experience Relevance', max: 25, icon: <Briefcase size={20} /> },
+              role_alignment: { name: 'Role Alignment', max: 20, icon: <Target size={20} /> },
+              projects_impact: { name: 'Projects Impact', max: 15, icon: <GitBranch size={20} /> },
+              resume_quality: { name: 'Resume Quality', max: 10, icon: <FileText size={20} /> }
+            };
+            
+            const dimInfo = dimensionNames[dimension] || { name: dimension, max: 10, icon: <BarChart size={20} /> };
+            const percentage = (parseFloat(score) / dimInfo.max) * 100;
+            
+            return (
+              <div key={index} className="score-dimension-card glass">
+                <div className="dimension-header">
+                  <div className="dimension-icon" style={{ color: getScoreColor(score) }}>
+                    {dimInfo.icon}
+                  </div>
+                  <div className="dimension-info">
+                    <h4>{dimInfo.name}</h4>
+                    <div className="dimension-score">
+                      <span className="current-score" style={{ color: getScoreColor(score) }}>
+                        {formatScore(score)}
+                      </span>
+                      <span className="max-score">/{dimInfo.max}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="dimension-progress">
+                  <div 
+                    className="progress-bar-fill" 
+                    style={{ 
+                      width: `${percentage}%`,
+                      background: getScoreColor(score)
+                    }}
+                  ></div>
+                </div>
+                <div className="dimension-percentage">
+                  {percentage.toFixed(1)}% of maximum
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* Recommendation Card */}
@@ -1279,7 +1353,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {analysis.ai_model || 'Groq AI'} • {analysis.key_used || 'Groq API'}
+                Based on strict 5-dimension ATS scoring • {analysis.ai_model || 'Groq AI'}
               </p>
             </div>
           </div>
@@ -1287,7 +1361,7 @@ function App() {
             <p className="recommendation-text">{analysis.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>Groq AI Analysis</span>
+              <span>Groq AI Analysis with Decimal Precision</span>
             </div>
           </div>
         </div>
@@ -1404,8 +1478,6 @@ function App() {
           </div>
         </div>
 
-        {/* REMOVED: Additional Candidate Info Section */}
-        
         {/* Insights Section - Now showing 4 items each */}
         <div className="section-title">
           <h2>Insights & Recommendations (4 items each)</h2>
@@ -1464,13 +1536,11 @@ function App() {
           </div>
         </div>
 
-        {/* REMOVED: AI Analysis Details Section */}
-
         {/* Action Section */}
         <div className="action-section glass">
           <div className="action-content">
             <h3>Analysis Complete</h3>
-            <p>Download the detailed Excel report or start a new analysis</p>
+            <p>Download the detailed Excel report with full score breakdown or start a new analysis</p>
           </div>
           <div className="action-buttons">
             <button className="download-button" onClick={handleDownload}>
@@ -1496,8 +1566,8 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>⚡ Batch Analysis Results (Groq Parallel)</h2>
-          <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
+          <h2>⚡ Batch Analysis Results (Strict 5D ATS Scoring)</h2>
+          <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed with decimal precision</p>
         </div>
         <div className="navigation-actions">
           <button className="download-report-btn" onClick={handleBatchDownload}>
@@ -1577,24 +1647,28 @@ function App() {
         
         <div className="stat-card">
           <div className="stat-icon primary">
-            <Cpu size={24} />
+            <Target size={24} />
           </div>
           <div className="stat-content">
-            <div className="stat-value">{batchAnalysis?.model_used || 'Groq AI'}</div>
-            <div className="stat-label">AI Model</div>
+            <div className="stat-value">5D ATS</div>
+            <div className="stat-label">Scoring</div>
           </div>
         </div>
         
-        <div className="stat-card">
-          <div className="stat-icon warning">
-            <Brain size={24} />
+        {batchAnalysis?.analyses?.length > 0 && (
+          <div className="stat-card">
+            <div className="stat-icon warning">
+              <BarChart size={24} />
+            </div>
+            <div className="stat-content">
+              <div className="stat-value">
+                {batchAnalysis.analyses.reduce((sum, a) => sum + parseFloat(a.overall_score || 0), 0) / batchAnalysis.analyses.length || 0}
+              </div>
+              <div className="stat-label">Avg Score</div>
+            </div>
           </div>
-          <div className="stat-content">
-            <div className="stat-value">Groq</div>
-            <div className="stat-label">AI Provider</div>
-          </div>
-        </div>
-
+        )}
+        
         <div className="stat-card">
           <div className="stat-icon success">
             <Zap size={24} />
@@ -1619,8 +1693,12 @@ function App() {
               <span className="performance-value">{batchAnalysis.processing_time}</span>
             </div>
             <div className="performance-item">
-              <span className="performance-label">Processing Method:</span>
-              <span className="performance-value">{batchAnalysis.processing_method === 'round_robin_parallel' ? 'Round-robin Parallel' : batchAnalysis.processing_method}</span>
+              <span className="performance-label">Scoring Method:</span>
+              <span className="performance-value">Strict 5-Dimension ATS</span>
+            </div>
+            <div className="performance-item">
+              <span className="performance-label">Score Precision:</span>
+              <span className="performance-value">Decimal (e.g., 78.3, 81.7)</span>
             </div>
             {batchAnalysis.performance && (
               <div className="performance-item">
@@ -1638,10 +1716,44 @@ function App() {
         </div>
       )}
 
+      {/* Score Distribution */}
+      {batchAnalysis?.analyses && batchAnalysis.analyses.length > 0 && (
+        <div className="score-distribution-container glass">
+          <div className="score-distribution-header">
+            <BarChart size={20} />
+            <h3>Score Distribution (Decimal Precision)</h3>
+          </div>
+          <div className="score-distribution-content">
+            {batchAnalysis.analyses.map((candidate, index) => (
+              <div key={index} className="score-distribution-item">
+                <div className="distribution-candidate">
+                  <span className="candidate-rank">#{candidate.rank}</span>
+                  <span className="candidate-name">{candidate.candidate_name}</span>
+                </div>
+                <div className="distribution-score">
+                  <div className="score-bar-container">
+                    <div 
+                      className="score-bar" 
+                      style={{ 
+                        width: `${parseFloat(candidate.overall_score) || 0}%`,
+                        background: getScoreColor(candidate.overall_score)
+                      }}
+                    ></div>
+                  </div>
+                  <span className="score-value" style={{ color: getScoreColor(candidate.overall_score) }}>
+                    {formatScore(candidate.overall_score)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Candidates Ranking */}
       <div className="section-title">
-        <h2>Candidate Rankings (5-8 skills analysis each)</h2>
-        <p>Sorted by ATS Score (Highest to Lowest) • Groq Parallel Processing</p>
+        <h2>Candidate Rankings (Strict 5D ATS Scoring)</h2>
+        <p>Sorted by ATS Score (Highest to Lowest) • Decimal Precision • Groq Parallel Processing</p>
       </div>
       
       <div className="batch-results-grid">
@@ -1666,7 +1778,7 @@ function App() {
               </div>
               <div className="candidate-score-display">
                 <div className="score-large" style={{ color: getScoreColor(candidate.overall_score) }}>
-                  {candidate.overall_score}
+                  {formatScore(candidate.overall_score)}
                 </div>
                 <div className="score-label">ATS Score</div>
               </div>
@@ -1680,6 +1792,20 @@ function App() {
               }}>
                 {candidate.recommendation}
               </div>
+              
+              {/* Score Breakdown Preview */}
+              {candidate.score_breakdown && (
+                <div className="score-breakdown-preview">
+                  <div className="breakdown-row">
+                    <span className="breakdown-label">Skills:</span>
+                    <span className="breakdown-value">{formatScore(candidate.score_breakdown.skills_match || 0)}/30</span>
+                  </div>
+                  <div className="breakdown-row">
+                    <span className="breakdown-label">Experience:</span>
+                    <span className="breakdown-value">{formatScore(candidate.score_breakdown.experience_relevance || 0)}/25</span>
+                  </div>
+                </div>
+              )}
               
               <div className="skills-preview">
                 <div className="skills-section">
@@ -1719,7 +1845,7 @@ function App() {
                 className="view-details-btn"
                 onClick={() => navigateToCandidateDetail(index)}
               >
-                View Full Details (5-8 skills each)
+                View Full Details with Score Breakdown
                 <ChevronRight size={16} />
               </button>
               {candidate.analysis_id && (
@@ -1740,7 +1866,7 @@ function App() {
       <div className="action-section glass">
         <div className="action-content">
           <h3>Batch Analysis Complete</h3>
-          <p>Download comprehensive Excel report with detailed candidate analysis (5-8 skills each)</p>
+          <p>Download comprehensive Excel report with detailed candidate analysis and full score breakdown</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
@@ -1781,8 +1907,8 @@ function App() {
             <span>Back to Rankings</span>
           </button>
           <div className="navigation-title">
-            <h2>Candidate Details (5-8 skills analysis)</h2>
-            <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
+            <h2>Candidate Details (Strict 5D ATS Scoring)</h2>
+            <p>Rank #{candidate.rank} • {candidate.candidate_name} • Score: {formatScore(candidate.overall_score)}</p>
           </div>
           <div className="navigation-actions">
             {candidate.analysis_id && (
@@ -1845,7 +1971,7 @@ function App() {
               >
                 <div className="score-inner">
                   <div className="score-value" style={{ color: getScoreColor(candidate.overall_score) }}>
-                    {candidate.overall_score}
+                    {formatScore(candidate.overall_score)}
                   </div>
                   <div className="score-label">ATS Score</div>
                 </div>
@@ -1854,7 +1980,7 @@ function App() {
             <div className="score-info">
               <h3 className="score-grade">{getScoreGrade(candidate.overall_score)}</h3>
               <p className="score-description">
-                Based on skill matching, experience relevance, and qualifications
+                Based on strict 5-dimension scoring with decimal precision
               </p>
               <div className="score-meta">
                 <span className="meta-item">
@@ -1862,12 +1988,64 @@ function App() {
                   Model: {candidate.ai_model || 'Groq AI'}
                 </span>
                 <span className="meta-item">
-                  <Key size={12} />
-                  {candidate.key_used || 'Groq API'}
+                  <Target size={12} />
+                  Scoring: {candidate.scoring_method || 'Strict 5D ATS'}
                 </span>
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Score Breakdown Section */}
+        <div className="section-title">
+          <h2>Score Breakdown (5 Dimensions)</h2>
+          <p>Detailed scoring across all evaluation dimensions</p>
+        </div>
+        
+        <div className="score-breakdown-grid">
+          {candidate.score_breakdown && Object.entries(candidate.score_breakdown).map(([dimension, score], index) => {
+            const dimensionNames = {
+              skills_match: { name: 'Skills Match', max: 30, icon: <CheckCircle size={20} /> },
+              experience_relevance: { name: 'Experience Relevance', max: 25, icon: <Briefcase size={20} /> },
+              role_alignment: { name: 'Role Alignment', max: 20, icon: <Target size={20} /> },
+              projects_impact: { name: 'Projects Impact', max: 15, icon: <GitBranch size={20} /> },
+              resume_quality: { name: 'Resume Quality', max: 10, icon: <FileText size={20} /> }
+            };
+            
+            const dimInfo = dimensionNames[dimension] || { name: dimension, max: 10, icon: <BarChart size={20} /> };
+            const percentage = (parseFloat(score) / dimInfo.max) * 100;
+            
+            return (
+              <div key={index} className="score-dimension-card glass">
+                <div className="dimension-header">
+                  <div className="dimension-icon" style={{ color: getScoreColor(score) }}>
+                    {dimInfo.icon}
+                  </div>
+                  <div className="dimension-info">
+                    <h4>{dimInfo.name}</h4>
+                    <div className="dimension-score">
+                      <span className="current-score" style={{ color: getScoreColor(score) }}>
+                        {formatScore(score)}
+                      </span>
+                      <span className="max-score">/{dimInfo.max}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="dimension-progress">
+                  <div 
+                    className="progress-bar-fill" 
+                    style={{ 
+                      width: `${percentage}%`,
+                      background: getScoreColor(score)
+                    }}
+                  ></div>
+                </div>
+                <div className="dimension-percentage">
+                  {percentage.toFixed(1)}% of maximum
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* Recommendation Card */}
@@ -1880,7 +2058,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {candidate.ai_model || 'Groq AI'} • Batch Processing • {candidate.key_used || 'Groq API'}
+                Strict 5-dimension ATS scoring • {candidate.ai_model || 'Groq AI'} • {candidate.key_used || 'Groq API'}
               </p>
             </div>
           </div>
@@ -1888,7 +2066,7 @@ function App() {
             <p className="recommendation-text">{candidate.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>Groq AI Analysis</span>
+              <span>Groq AI Analysis with Decimal Precision</span>
             </div>
           </div>
         </div>
@@ -2067,7 +2245,7 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Candidate Analysis Complete</h3>
-            <p>Download individual detailed report or full batch report</p>
+            <p>Download individual detailed report with full score breakdown or full batch report</p>
           </div>
           <div className="action-buttons">
             {candidate.analysis_id && (
@@ -2124,12 +2302,12 @@ function App() {
                 <Brain className="logo-icon" />
               </div>
               <div className="logo-text">
-                <h1>AI Resume Analyzer (Groq)</h1>
+                <h1>AI Resume Analyzer (Strict 5D ATS)</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
                   <span className="groq-badge">⚡ Groq</span>
                   <span className="divider">•</span>
-                  <span className="tagline">5-8 Skills Analysis • Detailed Reports • Always Active</span>
+                  <span className="tagline">5D ATS Scoring • Decimal Precision • Always Active</span>
                 </div>
               </div>
             </div>
@@ -2203,6 +2381,12 @@ function App() {
                 <span>{getModelDisplayName(modelInfo)}</span>
               </div>
             )}
+            
+            {/* Scoring Info */}
+            <div className="feature scoring-info">
+              <Target size={16} />
+              <span>Strict 5D ATS</span>
+            </div>
             
             {/* Navigation Indicator */}
             {currentView !== 'main' && (
@@ -2298,6 +2482,18 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
+                <div className="summary-label">Scoring Method</div>
+                <div className="summary-value success">
+                  🎯 Strict 5D ATS
+                </div>
+              </div>
+              <div className="summary-item">
+                <div className="summary-label">Score Precision</div>
+                <div className="summary-value info">
+                  ⚡ Decimal (e.g., 78.3)
+                </div>
+              </div>
+              <div className="summary-item">
                 <div className="summary-label">Batch Capacity</div>
                 <div className="summary-value success">
                   📊 Up to 10 resumes
@@ -2309,34 +2505,30 @@ function App() {
                   ⚡ 5-8 skills each
                 </div>
               </div>
-              <div className="summary-item">
-                <div className="summary-label">Performance</div>
-                <div className="summary-value success">
-                  🚀 ~10-15s for 10 resumes
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Context Length</div>
-                <div className="summary-value">
-                  🧠 128K tokens
-                </div>
-              </div>
             </div>
             
-            <div className="key-distribution">
-              <h4>Key Distribution Strategy</h4>
-              <div className="distribution-grid">
-                <div className="distribution-item">
-                  <div className="distribution-key">🔑 Key 1</div>
-                  <div className="distribution-resumes">Resumes: 1, 4, 7, 10</div>
+            <div className="scoring-dimensions">
+              <h4>Scoring Dimensions (100 points total)</h4>
+              <div className="dimensions-grid">
+                <div className="dimension-item">
+                  <div className="dimension-name">Skills Match</div>
+                  <div className="dimension-points">30 points</div>
                 </div>
-                <div className="distribution-item">
-                  <div className="distribution-key">🔑 Key 2</div>
-                  <div className="distribution-resumes">Resumes: 2, 5, 8</div>
+                <div className="dimension-item">
+                  <div className="dimension-name">Experience Relevance</div>
+                  <div className="dimension-points">25 points</div>
                 </div>
-                <div className="distribution-item">
-                  <div className="distribution-key">🔑 Key 3</div>
-                  <div className="distribution-resumes">Resumes: 3, 6, 9</div>
+                <div className="dimension-item">
+                  <div className="dimension-name">Role Alignment</div>
+                  <div className="dimension-points">20 points</div>
+                </div>
+                <div className="dimension-item">
+                  <div className="dimension-name">Projects Impact</div>
+                  <div className="dimension-points">15 points</div>
+                </div>
+                <div className="dimension-item">
+                  <div className="dimension-name">Resume Quality</div>
+                  <div className="dimension-points">10 points</div>
                 </div>
               </div>
             </div>
@@ -2388,8 +2580,12 @@ function App() {
                 </div>
               )}
               <div className="status-indicator active">
+                <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
+                <span>Scoring: Strict 5D ATS</span>
+              </div>
+              <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
-                <span>Skills: 5-8 each</span>
+                <span>Precision: Decimal</span>
               </div>
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
@@ -2439,27 +2635,28 @@ function App() {
           <div className="footer-brand">
             <div className="footer-logo">
               <Brain size={20} />
-              <span>AI Resume Analyzer (Groq)</span>
+              <span>AI Resume Analyzer (Strict 5D ATS)</span>
             </div>
             <p className="footer-tagline">
-              Groq AI with 128K context • 3-key parallel processing • 5-8 skills analysis each • Detailed Excel reports
+              Groq AI with 128K context • 3-key parallel processing • Strict 5-dimension ATS scoring • Decimal precision • Detailed Excel reports
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
-              <h4>Features</h4>
-              <a href="#">Groq AI</a>
-              <a href="#">128K Context</a>
-              <a href="#">5-8 Skills Analysis</a>
-              <a href="#">Detailed Reports</a>
+              <h4>Scoring Dimensions</h4>
+              <a href="#">Skills Match (30)</a>
+              <a href="#">Experience (25)</a>
+              <a href="#">Role Alignment (20)</a>
+              <a href="#">Projects (15)</a>
+              <a href="#">Resume Quality (10)</a>
             </div>
             <div className="footer-section">
               <h4>Service</h4>
               <a href="#">3-Key Parallel</a>
-              <a href="#">Auto Warm-up</a>
+              <a href="#">Strict ATS Scoring</a>
+              <a href="#">Decimal Precision</a>
               <a href="#">Health Checks</a>
-              <a href="#">Status Monitor</a>
             </div>
             <div className="footer-section">
               <h4>Navigation</h4>
@@ -2474,7 +2671,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. 5-8 Skills Analysis Mode.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. Strict 5D ATS Scoring with Decimal Precision.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
@@ -2489,8 +2686,8 @@ function App() {
               Keys: {getAvailableKeysCount()}/3
             </span>
             <span className="stat">
-              <Cpu size={12} />
-              Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
+              <Target size={12} />
+              Scoring: Strict 5D ATS
             </span>
             {batchMode && (
               <span className="stat">
@@ -2499,8 +2696,8 @@ function App() {
               </span>
             )}
             <span className="stat">
-              <Target size={12} />
-              Skills: 5-8 each
+              <BarChart size={12} />
+              Precision: Decimal
             </span>
           </div>
         </div>
