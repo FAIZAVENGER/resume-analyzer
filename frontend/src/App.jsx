@@ -1119,7 +1119,7 @@ function App() {
                 <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                 <span className="button-subtext">
                   {batchMode 
-                    ? `${resumeFiles.length} resume(s) • ${getAvailableKeysCount()} keys • ~${Math.ceil(resumeFiles.length * 30)}s` 
+                    ? `${resumeFiles.length} resume(s) • ${getAvailableKeysCount()} keys • ~${Math.ceil(resumeFiles.length/3)}s` 
                     : `${getModelDisplayName(modelInfo)} • Single`}
                 </span>
               </div>
@@ -1142,7 +1142,7 @@ function App() {
             </div>
             <div className="tip">
               <Zap size={16} />
-              <span>~{resumeFiles.length * 30} seconds for {resumeFiles.length} resumes (Sequential processing to avoid rate limits)</span>
+              <span>~10-15 seconds for 10 resumes (Round-robin parallel processing)</span>
             </div>
             <div className="tip">
               <Download size={16} />
