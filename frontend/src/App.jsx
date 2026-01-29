@@ -1142,7 +1142,7 @@ function App() {
             </div>
             <div className="tip">
               <Zap size={16} />
-              <span>~10-15 seconds for 10 resumes (Round-robin parallel processing)</span>
+              <span>~{resumeFiles.length * 30} seconds for {resumeFiles.length} resumes (Sequential processing to avoid rate limits)</span>
             </div>
             <div className="tip">
               <Download size={16} />
