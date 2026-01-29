@@ -26,7 +26,6 @@ import subprocess
 import tempfile
 import shutil
 from pathlib import Path
-import math
 
 # Load environment variables
 load_dotenv()
@@ -631,7 +630,7 @@ def extract_text_from_txt(file_path):
         return f"Error reading TXT: {str(e)}"
 
 def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None, api_key=None, key_index=None):
-    """Use Groq API to analyze resume against job description with STRICT scoring"""
+    """Use Groq API to analyze resume against job description"""
     
     if not api_key:
         print(f"❌ No Groq API key provided for analysis.")
@@ -643,7 +642,7 @@ def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis
     resume_hash = calculate_resume_hash(resume_text, job_description)
     cached_score = get_cached_score(resume_hash)
     
-    prompt = f"""Analyze resume against job description with EXTREMELY STRICT and DIFFERENTIATED scoring:
+    prompt = f"""Analyze resume against job description in DETAIL:
 
 RESUME:
 {resume_text}
@@ -651,88 +650,37 @@ RESUME:
 JOB DESCRIPTION:
 {job_description}
 
-CRITICAL SCORING INSTRUCTIONS:
-You MUST calculate the ATS score using the EXACT following 5 dimensions. Each dimension MUST have a decimal score (not whole numbers). NO two resumes should have identical scores.
-
-SCORING DIMENSIONS (Total: 100 points):
-1. SKILLS MATCH (30 points) - Evaluate ONLY REQUIRED skills from job description:
-   • Full points ONLY if skill is demonstrated with REAL usage, projects, or responsibilities
-   • Partial or indirect usage: 50-75% of points
-   • Skill mention without proof: 10-25% of points
-   • Missing required skill: 0 points for that skill
-   • Score: 0-30 with 1 decimal place (e.g., 24.7, 18.3)
-
-2. EXPERIENCE RELEVANCE (25 points) - Count ONLY RELEVANT experience:
-   • Each relevant year: 3-5 points depending on depth and responsibility
-   • Penalize seniority mismatch: -2 to -5 points
-   • Years without relevance: 0 points (must not increase score)
-   • Score: 0-25 with 1 decimal place (e.g., 19.5, 22.8)
-
-3. ROLE AND DOMAIN ALIGNMENT (20 points) - Compare previous roles with target role:
-   • High overlap (same role/industry): 15-20 points
-   • Medium overlap (similar responsibilities): 8-14 points
-   • Low overlap (different domain): 0-7 points
-   • Score: 0-20 with 1 decimal place (e.g., 16.2, 11.7)
-
-4. PROJECTS AND PRACTICAL IMPACT (15 points) - Evaluate hands-on work:
-   • System design/architecture projects: 12-15 points
-   • Complex implementation projects: 8-11 points
-   • Basic/tool-only projects: 3-7 points
-   • No relevant projects: 0-2 points
-   • Score: 0-15 with 1 decimal place (e.g., 12.4, 8.9)
-
-5. RESUME QUALITY (10 points) - Evaluate clarity and specificity:
-   • Clear, specific achievements with metrics: 8-10 points
-   • Good structure but vague language: 5-7 points
-   • Unclear responsibilities, repetition: 2-4 points
-   • Poor formatting, hard to parse: 0-1 points
-   • Score: 0-10 with 1 decimal place (e.g., 8.3, 6.7)
-
-FINAL SCORE CALCULATION:
-• Sum all 5 dimensions (0-100 total)
-• MUST include 1 decimal place (e.g., 74.3, 81.7, 65.9)
-• NO round numbers (avoid .0, .5 unless truly exact)
-• Add small random variation (±0.1-0.3) if scores are too close
-• Two resumes with identical content should have AT LEAST 0.2 difference
-
-Provide analysis in this JSON format:
+Provide COMPREHENSIVE analysis in this JSON format:
 {{
     "candidate_name": "Extracted name or filename",
     "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
     "skills_missing": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
     "experience_summary": "Provide a concise 3-5 sentence summary of the candidate's professional experience. Highlight key achievements, roles, technologies used, and relevance to the job description. Keep it brief but informative.",
     "education_summary": "Provide a concise 3-5 sentence summary of the candidate's educational background. Include degrees, institutions, specializations, and any notable achievements or certifications. Keep it brief but informative.",
-    "overall_score": 78.3,
-    "score_breakdown": {{
-        "skills_match": 24.7,
-        "experience_relevance": 19.5,
-        "role_alignment": 16.2,
-        "projects_impact": 12.4,
-        "resume_quality": 8.3
-    }},
+    "overall_score": 75,
     "recommendation": "Strongly Recommended/Recommended/Consider/Not Recommended",
     "key_strengths": ["strength1", "strength2", "strength3", "strength4"],
     "areas_for_improvement": ["area1", "area2", "area3", "area4"]
 }}
 
 IMPORTANT: 
-1. Provide 5-8 skills in both skills_matched and skills_missing arrays
-2. Overall_score MUST have 1 decimal place and be between 0-100 (e.g., 74.3, 81.7)
-3. Score_breakdown MUST have all 5 dimensions with 1 decimal place each
-4. Provide CONCISE 3-5 sentence summaries for experience and education
-5. Make key_strengths and areas_for_improvement lists 4 items each
-6. Use STRICT evaluation - most candidates should score 40-80, not 70-90
-7. If two resumes seem similar, add small variations (±0.1-0.3) to differentiate"""
+1. Provide 5-8 skills in both skills_matched and skills_missing arrays (minimum 5, maximum 8)
+2. Provide CONCISE 3-5 sentence summaries for both experience_summary and education_summary (10 lines maximum each)
+3. Include specific examples and achievements but be brief
+4. Make key_strengths and areas_for_improvement lists 4 items each (not 6)
+5. Be thorough but concise in analysis
+6. DO NOT include job_title_suggestion, years_experience, industry_fit, or salary_expectation fields
+7. Keep summaries focused and to the point - maximum 10 lines of text"""
 
     try:
-        print(f"⚡ Sending to Groq API (Key {key_index}) with STRICT scoring...")
+        print(f"⚡ Sending to Groq API (Key {key_index})...")
         start_time = time.time()
         
         response = call_groq_api(
             prompt=prompt,
             api_key=api_key,
-            max_tokens=1800,
-            temperature=0.3,  # Slightly higher for more variation
+            max_tokens=1500,  # Reduced from 1800 since we want shorter summaries
+            temperature=0.1,
             timeout=60
         )
         
@@ -770,51 +718,25 @@ IMPORTANT:
             
             return generate_fallback_analysis(filename, "JSON Parse Error", partial_success=True)
         
-        analysis = validate_strict_analysis(analysis, filename)
+        analysis = validate_analysis(analysis, filename)
         
-        # Ensure overall_score has decimal
         try:
-            overall_score = float(analysis['overall_score'])
-            if overall_score.is_integer():
-                # Add small decimal variation if it's a round number
-                overall_score += random.uniform(0.1, 0.9)
-                analysis['overall_score'] = round(overall_score, 1)
-            else:
-                analysis['overall_score'] = round(overall_score, 1)
-            
-            # Ensure score is within bounds
-            if analysis['overall_score'] < 0:
-                analysis['overall_score'] = 0.1
-            elif analysis['overall_score'] > 100:
-                analysis['overall_score'] = 99.9
-                
+            score = int(analysis['overall_score'])
+            if score < 0 or score > 100:
+                score = 70
+            analysis['overall_score'] = score
+            set_cached_score(resume_hash, score)
         except:
             if cached_score:
-                analysis['overall_score'] = cached_score + random.uniform(0.1, 0.9)
+                analysis['overall_score'] = cached_score
             else:
-                analysis['overall_score'] = 50.0 + random.uniform(0.1, 9.9)
-            analysis['overall_score'] = round(analysis['overall_score'], 1)
-        
-        # Ensure score_breakdown has decimals
-        if 'score_breakdown' in analysis:
-            for key in analysis['score_breakdown']:
-                try:
-                    val = float(analysis['score_breakdown'][key])
-                    if val.is_integer():
-                        analysis['score_breakdown'][key] = round(val + random.uniform(0.1, 0.9), 1)
-                    else:
-                        analysis['score_breakdown'][key] = round(val, 1)
-                except:
-                    analysis['score_breakdown'][key] = round(random.uniform(5.0, 20.0), 1)
-        
-        set_cached_score(resume_hash, analysis['overall_score'])
+                analysis['overall_score'] = 70
         
         analysis['ai_provider'] = "groq"
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['ai_model'] = GROQ_MODEL
         analysis['response_time'] = f"{elapsed_time:.2f}s"
         analysis['key_used'] = f"Key {key_index}"
-        analysis['scoring_method'] = "Strict 5-Dimension ATS"
         
         if analysis_id:
             analysis['analysis_id'] = analysis_id
@@ -827,29 +749,18 @@ IMPORTANT:
         print(f"❌ Groq Analysis Error: {str(e)}")
         return generate_fallback_analysis(filename, f"Analysis Error: {str(e)[:100]}")
     
-def validate_strict_analysis(analysis, filename):
-    """Validate analysis data and fill missing fields with strict scoring"""
-    # Generate unique decimal scores
-    base_score = random.uniform(40.0, 80.0)
-    
-    # Ensure all required fields exist
+def validate_analysis(analysis, filename):
+    """Validate analysis data and fill missing fields"""
     required_fields = {
         'candidate_name': 'Professional Candidate',
         'skills_matched': ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Team Collaboration', 'Project Management', 'Agile Methodology'],
         'skills_missing': ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX Design', 'Cybersecurity', 'Mobile Development', 'Database Administration'],
-        'experience_summary': 'The candidate demonstrates professional experience with varying levels of responsibility. Their background includes work with relevant technologies and methodologies. Specific achievements and project impacts are noted in the resume.',
-        'education_summary': 'The candidate possesses educational qualifications that provide foundational knowledge for the role. Academic background includes relevant coursework and specializations. Additional certifications complement the formal education.',
-        'overall_score': round(base_score, 1),
-        'score_breakdown': {
-            'skills_match': round(random.uniform(15.0, 28.0), 1),
-            'experience_relevance': round(random.uniform(12.0, 23.0), 1),
-            'role_alignment': round(random.uniform(10.0, 19.0), 1),
-            'projects_impact': round(random.uniform(8.0, 14.0), 1),
-            'resume_quality': round(random.uniform(6.0, 9.5), 1)
-        },
+        'experience_summary': 'The candidate demonstrates solid professional experience with progressive responsibility. They have worked on projects involving modern technologies and methodologies. Their background shows expertise in key areas relevant to industry demands.',
+        'education_summary': 'The candidate holds relevant educational qualifications from reputable institutions. Their academic background provides strong foundational knowledge. Additional certifications enhance their professional profile.',
+        'overall_score': 70,
         'recommendation': 'Consider for Interview',
-        'key_strengths': ['Strong technical foundation', 'Effective communication skills', 'Proven ability to deliver results', 'Adaptability to new challenges'],
-        'areas_for_improvement': ['Could benefit from advanced certifications', 'Limited experience in specific platforms', 'Could enhance project documentation skills', 'Needs more industry-specific knowledge']
+        'key_strengths': ['Strong technical foundation', 'Excellent communication skills', 'Proven track record of delivery', 'Leadership capabilities'],
+        'areas_for_improvement': ['Could benefit from advanced certifications', 'Limited experience in cloud platforms', 'Could enhance project management skills', 'Needs more industry-specific knowledge']
     }
     
     for field, default_value in required_fields.items():
@@ -862,23 +773,11 @@ def validate_strict_analysis(analysis, filename):
         if len(clean_name.split()) <= 4:
             analysis['candidate_name'] = clean_name
     
-    # Ensure score_breakdown exists and has all dimensions
-    if 'score_breakdown' not in analysis:
-        analysis['score_breakdown'] = required_fields['score_breakdown']
-    else:
-        for dim in ['skills_match', 'experience_relevance', 'role_alignment', 'projects_impact', 'resume_quality']:
-            if dim not in analysis['score_breakdown']:
-                analysis['score_breakdown'][dim] = round(random.uniform(5.0, 20.0), 1)
-    
-    # Ensure overall_score matches breakdown sum (approximately)
-    breakdown_sum = sum(analysis['score_breakdown'].values())
-    if abs(analysis.get('overall_score', 0) - breakdown_sum) > 5:
-        analysis['overall_score'] = round(breakdown_sum, 1)
-    
     # Ensure 5-8 skills in each category
     skills_matched = analysis.get('skills_matched', [])
     skills_missing = analysis.get('skills_missing', [])
     
+    # If we have fewer than 5 skills, pad with defaults
     if len(skills_matched) < MIN_SKILLS_TO_SHOW:
         default_skills = ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Teamwork', 'Project Management', 'Agile']
         needed = MIN_SKILLS_TO_SHOW - len(skills_matched)
@@ -889,14 +788,15 @@ def validate_strict_analysis(analysis, filename):
         needed = MIN_SKILLS_TO_SHOW - len(skills_missing)
         skills_missing.extend(default_skills[:needed])
     
+    # Limit to maximum
     analysis['skills_matched'] = skills_matched[:MAX_SKILLS_TO_SHOW]
     analysis['skills_missing'] = skills_missing[:MAX_SKILLS_TO_SHOW]
     
-    # Ensure 4 strengths and improvements
+    # Ensure 4 strengths and improvements (not 6)
     analysis['key_strengths'] = analysis.get('key_strengths', [])[:4]
     analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:4]
     
-    # Trim summaries to be concise
+    # Trim summaries to be more concise
     if len(analysis.get('experience_summary', '').split('. ')) > 5:
         sentences = analysis['experience_summary'].split('. ')
         analysis['experience_summary'] = '. '.join(sentences[:5]) + '.'
@@ -914,7 +814,7 @@ def validate_strict_analysis(analysis, filename):
     return analysis
 
 def generate_fallback_analysis(filename, reason, partial_success=False):
-    """Generate a fallback analysis with decimal scoring"""
+    """Generate a fallback analysis"""
     candidate_name = "Professional Candidate"
     
     if filename:
@@ -925,9 +825,6 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             if len(parts) >= 2 and len(parts) <= 4:
                 candidate_name = ' '.join(part.title() for part in parts)
     
-    # Generate unique decimal score
-    base_score = random.uniform(45.0, 65.0)
-    
     if partial_success:
         return {
             "candidate_name": candidate_name,
@@ -935,21 +832,13 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "skills_missing": ['Machine Learning Algorithms', 'Cloud Platform Expertise', 'Advanced Data Analysis', 'DevOps Practices', 'UI/UX Design Principles', 'Cybersecurity Fundamentals', 'Mobile App Development', 'Database Optimization'],
             "experience_summary": 'The candidate has demonstrated professional experience in relevant technical roles. Their background includes working with modern technologies and methodologies. They have contributed to projects with measurable outcomes and success metrics.',
             "education_summary": 'The candidate possesses educational qualifications that provide a strong foundation for professional work. Their academic background includes relevant coursework and projects. Additional training complements their formal education.',
-            "overall_score": round(base_score, 1),
-            "score_breakdown": {
-                "skills_match": round(random.uniform(18.0, 25.0), 1),
-                "experience_relevance": round(random.uniform(15.0, 22.0), 1),
-                "role_alignment": round(random.uniform(12.0, 18.0), 1),
-                "projects_impact": round(random.uniform(8.0, 14.0), 1),
-                "resume_quality": round(random.uniform(6.0, 9.0), 1)
-            },
+            "overall_score": 55,
             "recommendation": "Needs Full Analysis",
             "key_strengths": ['Technical proficiency', 'Communication abilities', 'Problem-solving approach', 'Team collaboration'],
             "areas_for_improvement": ['Advanced technical skills needed', 'Cloud platform experience required', 'Data analysis capabilities', 'Project management skills'],
             "ai_provider": "groq",
             "ai_status": "Partial",
             "ai_model": GROQ_MODEL,
-            "scoring_method": "Enhanced Fallback"
         }
     else:
         return {
@@ -958,21 +847,13 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "skills_missing": ['Advanced Technical Skills', 'Industry Experience', 'Specialized Knowledge', 'Certifications', 'Project Management', 'Leadership Experience', 'Research Skills', 'Analytical Thinking'],
             "experience_summary": 'Professional experience analysis will be available once the Groq AI service is fully initialized. The candidate appears to have relevant background based on initial file processing.',
             "education_summary": 'Educational background analysis will be available shortly upon service initialization. Academic qualifications assessment is pending full AI processing.',
-            "overall_score": round(base_score, 1),
-            "score_breakdown": {
-                "skills_match": round(random.uniform(12.0, 20.0), 1),
-                "experience_relevance": round(random.uniform(10.0, 18.0), 1),
-                "role_alignment": round(random.uniform(8.0, 15.0), 1),
-                "projects_impact": round(random.uniform(5.0, 12.0), 1),
-                "resume_quality": round(random.uniform(4.0, 8.0), 1)
-            },
+            "overall_score": 50,
             "recommendation": "Service Warming Up - Please Retry",
             "key_strengths": ['Fast learning capability', 'Strong work ethic', 'Good communication', 'Technical aptitude'],
             "areas_for_improvement": ['Service initialization required', 'Complete analysis pending', 'Detailed assessment needed', 'Full skill evaluation'],
             "ai_provider": "groq",
             "ai_status": "Warming up",
             "ai_model": GROQ_MODEL,
-            "scoring_method": "Basic Fallback"
         }
 
 def process_single_resume(args):
@@ -1361,7 +1242,6 @@ def analyze_resume_batch():
                 if key_usage[i]['count'] >= 4:
                     mark_key_cooling(i, 15)
         
-        # Sort by score (descending) with decimal precision
         all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
         
         for rank, analysis in enumerate(all_analyses, 1):
@@ -1404,8 +1284,7 @@ def analyze_resume_batch():
             'key_statistics': key_stats,
             'available_keys': available_keys,
             'success_rate': f"{(len(all_analyses) / len(resume_files)) * 100:.1f}%" if resume_files else "0%",
-            'performance': f"{len(all_analyses)/total_time:.2f} resumes/second" if total_time > 0 else "N/A",
-            'scoring_method': 'Strict 5-Dimension ATS with decimal precision'
+            'performance': f"{len(all_analyses)/total_time:.2f} resumes/second" if total_time > 0 else "N/A"
         }
         
         print(f"✅ Batch analysis completed in {total_time:.2f}s")
@@ -1501,11 +1380,10 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         title_font = Font(bold=True, size=14, color="FFFFFF")
         subheader_fill = PatternFill(start_color="8EA9DB", end_color="8EA9DB", fill_type="solid")
         subheader_font = Font(bold=True, color="FFFFFF", size=10)
-        decimal_font = Font(bold=True, color="000000", size=11)
         
         # Set column widths
         column_widths = {
-            'A': 25, 'B': 35, 'C': 25, 'D': 25, 'E': 25, 'F': 25
+            'A': 25, 'B': 60, 'C': 25, 'D': 25, 'E': 25, 'F': 25
         }
         for col, width in column_widths.items():
             ws.column_dimensions[col].width = width
@@ -1515,7 +1393,7 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         # Title
         ws.merge_cells(f'A{row}:F{row}')
         cell = ws[f'A{row}']
-        cell.value = "COMPREHENSIVE RESUME ANALYSIS REPORT (Groq AI - Strict Scoring)"
+        cell.value = "COMPREHENSIVE RESUME ANALYSIS REPORT (Groq AI)"
         cell.font = title_font
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -1535,7 +1413,6 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
             ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             ("AI Model", analysis_data.get('ai_model', 'Groq AI')),
             ("AI Provider", analysis_data.get('ai_provider', 'Groq')),
-            ("Scoring Method", analysis_data.get('scoring_method', 'Strict 5-Dimension ATS')),
             ("API Key Used", analysis_data.get('key_used', 'N/A')),
             ("Response Time", analysis_data.get('response_time', 'N/A')),
             ("Original Filename", analysis_data.get('filename', 'N/A')),
@@ -1554,55 +1431,33 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         
         row += 1
         
-        # Score and Recommendation with Breakdown
+        # Score and Recommendation
         ws.merge_cells(f'A{row}:F{row}')
         cell = ws[f'A{row}']
-        cell.value = "SCORE BREAKDOWN & RECOMMENDATION"
+        cell.value = "SCORE & RECOMMENDATION"
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal='center')
         row += 1
         
-        # Overall Score
-        ws[f'A{row}'] = "Overall ATS Score"
-        ws[f'A{row}'].font = Font(bold=True, size=12)
-        ws[f'B{row}'] = f"{analysis_data.get('overall_score', 0):.1f}/100"
-        ws[f'B{row}'].font = decimal_font
-        row += 1
+        score_info = [
+            ("Overall ATS Score", f"{analysis_data.get('overall_score', 0)}/100"),
+            ("Recommendation", analysis_data.get('recommendation', 'N/A')),
+            ("Score Grade", get_score_grade_text(analysis_data.get('overall_score', 0))),
+        ]
         
-        # Score Breakdown
-        if 'score_breakdown' in analysis_data:
-            ws[f'A{row}'] = "Score Breakdown:"
-            ws[f'A{row}'].font = Font(bold=True)
+        for i in range(0, len(score_info), 2):
+            if i < len(score_info):
+                ws[f'A{row}'] = score_info[i][0]
+                ws[f'A{row}'].font = Font(bold=True)
+                ws[f'B{row}'] = score_info[i][1]
+            if i + 1 < len(score_info):
+                ws[f'D{row}'] = score_info[i+1][0]
+                ws[f'D{row}'].font = Font(bold=True)
+                ws[f'E{row}'] = score_info[i+1][1]
             row += 1
-            
-            breakdown = analysis_data['score_breakdown']
-            breakdown_items = [
-                ("1. Skills Match (30 points)", breakdown.get('skills_match', 0)),
-                ("2. Experience Relevance (25 points)", breakdown.get('experience_relevance', 0)),
-                ("3. Role Alignment (20 points)", breakdown.get('role_alignment', 0)),
-                ("4. Projects Impact (15 points)", breakdown.get('projects_impact', 0)),
-                ("5. Resume Quality (10 points)", breakdown.get('resume_quality', 0))
-            ]
-            
-            for label, score in breakdown_items:
-                ws[f'A{row}'] = label
-                ws[f'B{row}'] = f"{score:.1f}"
-                ws[f'B{row}'].font = decimal_font
-                row += 1
         
         row += 1
-        
-        # Recommendation
-        ws[f'A{row}'] = "Recommendation"
-        ws[f'A{row}'].font = Font(bold=True)
-        ws[f'B{row}'] = analysis_data.get('recommendation', 'N/A')
-        row += 1
-        
-        ws[f'A{row}'] = "Score Grade"
-        ws[f'A{row}'].font = Font(bold=True)
-        ws[f'B{row}'] = get_score_grade_text(analysis_data.get('overall_score', 0))
-        row += 2
         
         # Skills Matched (5-8 skills)
         skills_matched = analysis_data.get('skills_matched', [])
@@ -1662,7 +1517,7 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         experience_text = analysis_data.get('experience_summary', 'No experience summary available.')
         cell.value = experience_text
         cell.alignment = Alignment(wrap_text=True, vertical='top')
-        ws.row_dimensions[row].height = 80
+        ws.row_dimensions[row].height = 80  # Reduced height for concise summary
         row += 2
         
         # Education Summary (Concise 3-5 sentences)
@@ -1679,7 +1534,7 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         education_text = analysis_data.get('education_summary', 'No education summary available.')
         cell.value = education_text
         cell.alignment = Alignment(wrap_text=True, vertical='top')
-        ws.row_dimensions[row].height = 80
+        ws.row_dimensions[row].height = 80  # Reduced height for concise summary
         row += 2
         
         # Key Strengths (4 items)
@@ -1766,12 +1621,11 @@ def create_detailed_batch_report(analyses, job_description, filename="batch_resu
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         header_font = Font(bold=True, color="FFFFFF", size=11)
         title_font = Font(bold=True, size=16, color="FFFFFF")
-        decimal_font = Font(bold=True, color="000000", size=11)
         
         # Title
         ws_summary.merge_cells('A1:M1')
         title_cell = ws_summary['A1']
-        title_cell.value = "COMPREHENSIVE BATCH RESUME ANALYSIS REPORT (Groq Parallel - Strict Scoring)"
+        title_cell.value = "COMPREHENSIVE BATCH RESUME ANALYSIS REPORT (Groq Parallel)"
         title_cell.font = title_font
         title_cell.fill = header_fill
         title_cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -1787,60 +1641,51 @@ def create_detailed_batch_report(analyses, job_description, filename="batch_resu
         ws_summary['B6'] = "Groq " + GROQ_MODEL
         ws_summary['A7'] = "Processing Method"
         ws_summary['B7'] = "Round-robin Parallel with 3 keys"
-        ws_summary['A8'] = "Scoring Method"
-        ws_summary['B8'] = "Strict 5-Dimension ATS with decimal precision"
-        ws_summary['A9'] = "Job Description Length"
-        ws_summary['B9'] = f"{len(job_description)} characters"
-        ws_summary['A10'] = "Skills Analysis"
-        ws_summary['B10'] = f"5-8 skills per candidate"
+        ws_summary['A8'] = "Job Description Length"
+        ws_summary['B8'] = f"{len(job_description)} characters"
+        ws_summary['A9'] = "Skills Analysis"
+        ws_summary['B9'] = f"5-8 skills per candidate"
         
         # Batch Statistics
-        ws_summary.merge_cells('A12:M12')
-        summary_header = ws_summary['A12']
-        summary_header.value = "BATCH STATISTICS (Decimal Scoring)"
+        ws_summary.merge_cells('A11:M11')
+        summary_header = ws_summary['A11']
+        summary_header.value = "BATCH STATISTICS"
         summary_header.font = header_font
         summary_header.fill = header_fill
         summary_header.alignment = Alignment(horizontal='center')
         
-        # Calculate statistics with decimal precision
+        # Calculate statistics
         if analyses:
             scores = [a.get('overall_score', 0) for a in analyses]
             avg_score = sum(scores) / len(scores)
             max_score = max(scores)
             min_score = min(scores)
-            std_dev = (sum((s - avg_score) ** 2 for s in scores) / len(scores)) ** 0.5 if len(scores) > 1 else 0
             
             stats_data = [
                 ("Average Score", f"{avg_score:.1f}/100"),
-                ("Highest Score", f"{max_score:.1f}/100"),
-                ("Lowest Score", f"{min_score:.1f}/100"),
-                ("Score Range", f"{(max_score - min_score):.1f}"),
-                ("Standard Deviation", f"{std_dev:.1f}"),
+                ("Highest Score", f"{max_score}/100"),
+                ("Lowest Score", f"{min_score}/100"),
                 ("Recommended Candidates", sum(1 for a in analyses if a.get('overall_score', 0) >= 70)),
                 ("Needs Improvement", sum(1 for a in analyses if a.get('overall_score', 0) < 70)),
                 ("Total Skills Analyzed", sum(len(a.get('skills_matched', [])) + len(a.get('skills_missing', [])) for a in analyses)),
             ]
             
-            row = 13
+            row = 12
             for i in range(0, len(stats_data), 2):
                 if i < len(stats_data):
                     ws_summary[f'A{row}'] = stats_data[i][0]
                     ws_summary[f'A{row}'].font = Font(bold=True)
                     ws_summary[f'B{row}'] = stats_data[i][1]
-                    if 'Score' in stats_data[i][0]:
-                        ws_summary[f'B{row}'].font = decimal_font
                 if i + 1 < len(stats_data):
                     ws_summary[f'D{row}'] = stats_data[i+1][0]
                     ws_summary[f'D{row}'].font = Font(bold=True)
                     ws_summary[f'E{row}'] = stats_data[i+1][1]
-                    if 'Score' in stats_data[i+1][0]:
-                        ws_summary[f'E{row}'].font = decimal_font
                 row += 1
         
-        # Candidates Overview Table with Decimal Scores
-        row = 22
-        headers = ["Rank", "Candidate Name", "ATS Score", "Skills Match", "Experience", "Role Align", 
-                   "Projects", "Resume Quality", "Recommendation", "Key Used"]
+        # Candidates Overview Table
+        row = 20
+        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "Key Used", 
+                   "Skills Matched", "Skills Missing", "Resume Stored", "PDF Preview"]
         
         for col, header in enumerate(headers, start=1):
             cell = ws_summary.cell(row=row, column=col)
@@ -1852,30 +1697,18 @@ def create_detailed_batch_report(analyses, job_description, filename="batch_resu
         for analysis in analyses:
             ws_summary.cell(row=row, column=1, value=analysis.get('rank', '-'))
             ws_summary.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
+            ws_summary.cell(row=row, column=3, value=analysis.get('overall_score', 0))
+            ws_summary.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
+            ws_summary.cell(row=row, column=5, value=analysis.get('key_used', 'N/A'))
             
-            # Overall score with decimal
-            ws_summary.cell(row=row, column=3, value=float(analysis.get('overall_score', 0)))
-            ws_summary.cell(row=row, column=3).number_format = '0.0'
+            strengths = analysis.get('skills_matched', [])
+            ws_summary.cell(row=row, column=6, value=", ".join(strengths[:5]) if strengths else "N/A")
             
-            # Score breakdown
-            breakdown = analysis.get('score_breakdown', {})
-            ws_summary.cell(row=row, column=4, value=float(breakdown.get('skills_match', 0)))
-            ws_summary.cell(row=row, column=4).number_format = '0.0'
+            missing = analysis.get('skills_missing', [])
+            ws_summary.cell(row=row, column=7, value=", ".join(missing[:5]) if missing else "All matched")
             
-            ws_summary.cell(row=row, column=5, value=float(breakdown.get('experience_relevance', 0)))
-            ws_summary.cell(row=row, column=5).number_format = '0.0'
-            
-            ws_summary.cell(row=row, column=6, value=float(breakdown.get('role_alignment', 0)))
-            ws_summary.cell(row=row, column=6).number_format = '0.0'
-            
-            ws_summary.cell(row=row, column=7, value=float(breakdown.get('projects_impact', 0)))
-            ws_summary.cell(row=row, column=7).number_format = '0.0'
-            
-            ws_summary.cell(row=row, column=8, value=float(breakdown.get('resume_quality', 0)))
-            ws_summary.cell(row=row, column=8).number_format = '0.0'
-            
-            ws_summary.cell(row=row, column=9, value=analysis.get('recommendation', 'N/A'))
-            ws_summary.cell(row=row, column=10, value=analysis.get('key_used', 'N/A'))
+            ws_summary.cell(row=row, column=8, value="Yes" if analysis.get('resume_stored') else "No")
+            ws_summary.cell(row=row, column=9, value="Yes" if analysis.get('has_pdf_preview') else "No")
             
             row += 1
         
@@ -1902,10 +1735,6 @@ def create_detailed_batch_report(analyses, job_description, filename="batch_resu
         ws_skills = wb.create_sheet(title="Skills Matrix")
         populate_skills_matrix_sheet(ws_skills, analyses)
         
-        # Create Score Distribution Sheet
-        ws_scores = wb.create_sheet(title="Score Distribution")
-        populate_score_distribution_sheet(ws_scores, analyses)
-        
         # Save the file
         filepath = os.path.join(REPORTS_FOLDER, filename)
         wb.save(filepath)
@@ -1927,12 +1756,11 @@ def populate_candidate_sheet(ws, analysis, candidate_num):
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=11)
     subheader_fill = PatternFill(start_color="8EA9DB", end_color="8EA9DB", fill_type="solid")
-    decimal_font = Font(bold=True, color="000000", size=11)
     
     # Title
     ws.merge_cells('A1:G1')
     title_cell = ws['A1']
-    title_cell.value = f"CANDIDATE #{candidate_num}: {analysis.get('candidate_name', 'Unknown')} - Strict ATS Scoring"
+    title_cell.value = f"CANDIDATE #{candidate_num}: {analysis.get('candidate_name', 'Unknown')}"
     title_cell.font = Font(bold=True, size=14, color="FFFFFF")
     title_cell.fill = header_fill
     title_cell.alignment = Alignment(horizontal='center')
@@ -1942,10 +1770,9 @@ def populate_candidate_sheet(ws, analysis, candidate_num):
     # Basic Info
     info_data = [
         ("Rank", analysis.get('rank', 'N/A')),
-        ("Overall Score", f"{analysis.get('overall_score', 0):.1f}/100"),
+        ("Overall Score", f"{analysis.get('overall_score', 0)}/100"),
         ("Recommendation", analysis.get('recommendation', 'N/A')),
         ("Key Used", analysis.get('key_used', 'N/A')),
-        ("Scoring Method", analysis.get('scoring_method', 'Strict 5-Dimension ATS')),
         ("Filename", analysis.get('filename', 'N/A')),
         ("File Size", analysis.get('file_size', 'N/A')),
         ("Analysis ID", analysis.get('analysis_id', 'N/A')),
@@ -1957,38 +1784,9 @@ def populate_candidate_sheet(ws, analysis, candidate_num):
         ws[f'A{row}'] = label
         ws[f'A{row}'].font = Font(bold=True)
         ws[f'B{row}'] = value
-        if 'Score' in label:
-            ws[f'B{row}'].font = decimal_font
         row += 1
     
     row += 1
-    
-    # Score Breakdown
-    if 'score_breakdown' in analysis:
-        ws.merge_cells(f'A{row}:G{row}')
-        ws[f'A{row}'].value = "SCORE BREAKDOWN (5 Dimensions)"
-        ws[f'A{row}'].font = header_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'A{row}'].alignment = Alignment(horizontal='center')
-        row += 1
-        
-        breakdown = analysis['score_breakdown']
-        breakdown_items = [
-            ("1. Skills Match (30 points)", breakdown.get('skills_match', 0)),
-            ("2. Experience Relevance (25 points)", breakdown.get('experience_relevance', 0)),
-            ("3. Role Alignment (20 points)", breakdown.get('role_alignment', 0)),
-            ("4. Projects Impact (15 points)", breakdown.get('projects_impact', 0)),
-            ("5. Resume Quality (10 points)", breakdown.get('resume_quality', 0))
-        ]
-        
-        for label, score in breakdown_items:
-            ws[f'A{row}'] = label
-            ws[f'A{row}'].font = Font(bold=True)
-            ws[f'B{row}'] = f"{score:.1f}"
-            ws[f'B{row}'].font = decimal_font
-            row += 1
-        
-        row += 1
     
     # Skills Matched (5-8 skills)
     skills_matched = analysis.get('skills_matched', [])
@@ -2034,7 +1832,7 @@ def populate_candidate_sheet(ws, analysis, candidate_num):
     experience = analysis.get('experience_summary', 'No experience summary available.')
     ws[f'A{row}'].value = experience
     ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[row].height = 80
+    ws.row_dimensions[row].height = 80  # Reduced height
     row += 2
     
     # Education Summary
@@ -2049,7 +1847,7 @@ def populate_candidate_sheet(ws, analysis, candidate_num):
     education = analysis.get('education_summary', 'No education summary available.')
     ws[f'A{row}'].value = education
     ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[row].height = 80
+    ws.row_dimensions[row].height = 80  # Reduced height
     
     # Set column widths
     ws.column_dimensions['A'].width = 25
@@ -2070,9 +1868,9 @@ def populate_skills_matrix_sheet(ws, analyses):
     
     row = 3
     ws['A3'] = "Candidate Name"
-    ws['B3'] = "ATS Score"
-    ws['C3'] = "Skills Matched (5-8 skills)"
-    ws['D3'] = "Skills Missing (5-8 skills)"
+    ws['B3'] = "Skills Matched (5-8 skills)"
+    ws['C3'] = "Skills Missing (5-8 skills)"
+    ws['D3'] = "Resume Preview"
     
     for cell in ['A3', 'B3', 'C3', 'D3']:
         ws[cell].font = header_font
@@ -2082,127 +1880,39 @@ def populate_skills_matrix_sheet(ws, analyses):
     for analysis in analyses:
         ws[f'A{row}'] = analysis.get('candidate_name', 'Unknown')
         
-        # Score with decimal
-        ws[f'B{row}'] = float(analysis.get('overall_score', 0))
-        ws[f'B{row}'].number_format = '0.0'
-        
         matched = analysis.get('skills_matched', [])
-        ws[f'C{row}'] = ", ".join(matched[:8]) if matched else "N/A"
+        ws[f'B{row}'] = ", ".join(matched[:8]) if matched else "N/A"
         
         missing = analysis.get('skills_missing', [])
-        ws[f'D{row}'] = ", ".join(missing[:8]) if missing else "All matched"
+        ws[f'C{row}'] = ", ".join(missing[:8]) if missing else "All matched"
+        
+        if analysis.get('has_pdf_preview'):
+            ws[f'D{row}'] = "PDF Available"
+        elif analysis.get('resume_stored'):
+            ws[f'D{row}'] = "Original Available"
+        else:
+            ws[f'D{row}'] = "No"
         
         row += 1
     
     # Set column widths
     ws.column_dimensions['A'].width = 25
-    ws.column_dimensions['B'].width = 15
+    ws.column_dimensions['B'].width = 60
     ws.column_dimensions['C'].width = 60
-    ws.column_dimensions['D'].width = 60
-
-def populate_score_distribution_sheet(ws, analyses):
-    """Populate score distribution sheet"""
-    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF", size=11)
-    decimal_font = Font(bold=True, color="000000", size=11)
-    
-    # Title
-    ws.merge_cells('A1:F1')
-    title_cell = ws['A1']
-    title_cell.value = "SCORE DISTRIBUTION ANALYSIS (Decimal Precision)"
-    title_cell.font = Font(bold=True, size=14, color="FFFFFF")
-    title_cell.fill = header_fill
-    title_cell.alignment = Alignment(horizontal='center')
-    
-    row = 3
-    
-    # Score ranges
-    ranges = [
-        ("90-100", "Excellent"),
-        ("80-89", "Great"),
-        ("70-79", "Good"),
-        ("60-69", "Fair"),
-        ("50-59", "Needs Improvement"),
-        ("0-49", "Poor")
-    ]
-    
-    # Calculate distribution
-    scores = [a.get('overall_score', 0) for a in analyses]
-    
-    for range_label, description in ranges:
-        low, high = map(int, range_label.split('-'))
-        count = sum(1 for score in scores if low <= score <= high)
-        percentage = (count / len(scores) * 100) if scores else 0
-        
-        ws[f'A{row}'] = range_label
-        ws[f'B{row}'] = description
-        ws[f'C{row}'] = count
-        ws[f'D{row}'] = f"{percentage:.1f}%"
-        ws[f'D{row}'].font = decimal_font
-        row += 1
-    
-    row += 2
-    
-    # Individual score details
-    ws.merge_cells(f'A{row}:F{row}')
-    ws[f'A{row}'].value = "INDIVIDUAL CANDIDATE SCORES"
-    ws[f'A{row}'].font = header_font
-    ws[f'A{row}'].fill = header_fill
-    ws[f'A{row}'].alignment = Alignment(horizontal='center')
-    row += 1
-    
-    headers = ["Rank", "Candidate", "Overall", "Skills", "Experience", "Role", "Projects", "Quality"]
-    for col, header in enumerate(headers, start=1):
-        cell = ws.cell(row=row, column=col)
-        cell.value = header
-        cell.font = header_font
-        cell.fill = header_fill
-    
-    row += 1
-    for analysis in analyses:
-        ws.cell(row=row, column=1, value=analysis.get('rank', '-'))
-        ws.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
-        
-        # Overall score
-        ws.cell(row=row, column=3, value=float(analysis.get('overall_score', 0)))
-        ws.cell(row=row, column=3).number_format = '0.0'
-        
-        # Breakdown scores
-        breakdown = analysis.get('score_breakdown', {})
-        ws.cell(row=row, column=4, value=float(breakdown.get('skills_match', 0)))
-        ws.cell(row=row, column=4).number_format = '0.0'
-        
-        ws.cell(row=row, column=5, value=float(breakdown.get('experience_relevance', 0)))
-        ws.cell(row=row, column=5).number_format = '0.0'
-        
-        ws.cell(row=row, column=6, value=float(breakdown.get('role_alignment', 0)))
-        ws.cell(row=row, column=6).number_format = '0.0'
-        
-        ws.cell(row=row, column=7, value=float(breakdown.get('projects_impact', 0)))
-        ws.cell(row=row, column=7).number_format = '0.0'
-        
-        ws.cell(row=row, column=8, value=float(breakdown.get('resume_quality', 0)))
-        ws.cell(row=row, column=8).number_format = '0.0'
-        
-        row += 1
-    
-    # Set column widths
-    for col in range(1, 9):
-        ws.column_dimensions[get_column_letter(col)].width = 15
+    ws.column_dimensions['D'].width = 15
 
 def get_score_grade_text(score):
     """Get text description for score"""
-    score = float(score)
     if score >= 90:
-        return f"Excellent Match 🎯 ({score:.1f})"
+        return "Excellent Match 🎯"
     elif score >= 80:
-        return f"Great Match ✨ ({score:.1f})"
+        return "Great Match ✨"
     elif score >= 70:
-        return f"Good Match 👍 ({score:.1f})"
+        return "Good Match 👍"
     elif score >= 60:
-        return f"Fair Match 📊 ({score:.1f})"
+        return "Fair Match 📊"
     else:
-        return f"Needs Improvement 📈 ({score:.1f})"
+        return "Needs Improvement 📈"
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_report(filename):
@@ -2284,7 +1994,6 @@ def force_warmup():
             'ai_provider': 'groq',
             'model': GROQ_MODEL,
             'available_keys': available_keys,
-            'scoring_method': 'Strict 5-Dimension ATS with decimal precision',
             'timestamp': datetime.now().isoformat()
         })
         
@@ -2317,8 +2026,7 @@ def quick_check():
                 'available_keys': available_keys,
                 'warmup_complete': False,
                 'ai_provider': 'groq',
-                'model': GROQ_MODEL,
-                'scoring_method': 'Strict 5-Dimension ATS'
+                'model': GROQ_MODEL
             })
         
         for i, api_key in enumerate(GROQ_API_KEYS):
@@ -2348,8 +2056,7 @@ def quick_check():
                             'tested_key': f"Key {i+1}",
                             'max_batch_size': MAX_BATCH_SIZE,
                             'processing_method': 'round_robin_parallel',
-                            'skills_analysis': '5-8 skills per category',
-                            'scoring_method': 'Strict 5-Dimension ATS with decimal precision'
+                            'skills_analysis': '5-8 skills per category'
                         })
                 except:
                     continue
@@ -2391,8 +2098,7 @@ def ping():
         'keep_alive_active': True,
         'max_batch_size': MAX_BATCH_SIZE,
         'processing_method': 'round_robin_parallel',
-        'skills_analysis': '5-8 skills per category',
-        'scoring_method': 'Strict 5-Dimension ATS with decimal precision'
+        'skills_analysis': '5-8 skills per category'
     })
 
 @app.route('/health', methods=['GET'])
@@ -2427,7 +2133,7 @@ def health_check():
         'resume_previews_folder_exists': os.path.exists(RESUME_PREVIEW_FOLDER),
         'resume_previews_stored': len(resume_storage),
         'inactive_minutes': inactive_minutes,
-        'version': '2.5.0',
+        'version': '2.4.1',
         'key_status': key_status,
         'available_keys': available_keys,
         'configuration': {
@@ -2435,23 +2141,13 @@ def health_check():
             'max_concurrent_requests': MAX_CONCURRENT_REQUESTS,
             'max_retries': MAX_RETRIES,
             'min_skills_to_show': MIN_SKILLS_TO_SHOW,
-            'max_skills_to_show': MAX_SKILLS_TO_SHOW,
-            'scoring_method': 'Strict 5-Dimension ATS'
-        },
-        'scoring_dimensions': {
-            'skills_match': '30 points',
-            'experience_relevance': '25 points',
-            'role_alignment': '20 points',
-            'projects_impact': '15 points',
-            'resume_quality': '10 points'
+            'max_skills_to_show': MAX_SKILLS_TO_SHOW
         },
         'processing_method': 'round_robin_parallel',
         'performance_target': '10 resumes in 10-15 seconds',
         'skills_analysis': '5-8 skills per category',
         'resume_preview': 'Enabled with PDF conversion (1 hour retention)',
-        'pdf_preview_available': any(r.get('has_pdf_preview') for r in resume_storage.values()),
-        'decimal_scoring': True,
-        'score_precision': '1 decimal place'
+        'pdf_preview_available': any(r.get('has_pdf_preview') for r in resume_storage.values())
     })
 
 def cleanup_on_exit():
@@ -2505,17 +2201,10 @@ if __name__ == '__main__':
     print(f"✅ Round-robin Parallel Processing: Enabled")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
-    print(f"✅ STRICT SCORING: 5-Dimension ATS with decimal precision")
-    print(f"✅ Score Dimensions:")
-    print(f"   • Skills Match: 30 points")
-    print(f"   • Experience Relevance: 25 points")
-    print(f"   • Role Alignment: 20 points")
-    print(f"   • Projects Impact: 15 points")
-    print(f"   • Resume Quality: 10 points")
-    print(f"✅ Decimal Precision: Scores like 78.3, 81.7, 65.9 (not 75, 80, 65)")
     print(f"✅ Concise Summaries: 3-5 sentences each")
     print(f"✅ Key Strengths/Improvements: 4 items each")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
+    print(f"✅ PDF Preview: Automatic conversion for DOC/DOCX/TXT files")
     print(f"✅ Performance: ~10 resumes in 10-15 seconds")
     print("="*50 + "\n")
     
