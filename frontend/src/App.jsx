@@ -1191,7 +1191,7 @@ function App() {
           <div className="navigation-actions">
             <button className="download-report-btn" onClick={handleDownload}>
               <DownloadCloud size={18} />
-              <span>Download Detailed Report</span>
+              <span>Download Report</span>
             </button>
           </div>
         </div>
@@ -1213,10 +1213,6 @@ function App() {
                     month: 'long', 
                     day: 'numeric' 
                   })}
-                </span>
-                <span className="file-info">
-                  <Cpu size={14} />
-                  Model: {analysis.ai_model || 'Groq AI'}
                 </span>
               </div>
             </div>
@@ -1249,14 +1245,6 @@ function App() {
               </p>
               <div className="score-meta">
                 <span className="meta-item">
-                  <Brain size={12} />
-                  Response Time: {analysis.response_time || 'N/A'}
-                </span>
-                <span className="meta-item">
-                  <Key size={12} />
-                  {analysis.key_used || 'Groq API'}
-                </span>
-                <span className="meta-item">
                   <CheckCircle size={12} />
                   {analysis.skills_matched?.length || 0} skills matched
                 </span>
@@ -1279,7 +1267,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {analysis.ai_model || 'Groq AI'} • {analysis.key_used || 'Groq API'}
+                Powered by Groq AI
               </p>
             </div>
           </div>
@@ -1292,7 +1280,7 @@ function App() {
           </div>
         </div>
 
-        {/* Skills Analysis - Now showing 5-8 skills each */}
+        {/* Skills Analysis - 5-8 skills each */}
         <div className="section-title">
           <h2>Skills Analysis (5-8 skills each)</h2>
           <p>Detailed breakdown of matched and missing skills</p>
@@ -1360,10 +1348,10 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section with Detailed 5-7 sentences */}
+        {/* Summary Section with Concise 3-5 sentences */}
         <div className="section-title">
-          <h2>Detailed Profile Summary</h2>
-          <p>Comprehensive insights extracted from resume</p>
+          <h2>Profile Summary (Concise)</h2>
+          <p>Key insights extracted from resume (3-5 sentences each)</p>
         </div>
         
         <div className="summary-grid">
@@ -1372,16 +1360,12 @@ function App() {
               <div className="summary-icon">
                 <Briefcase size={24} />
               </div>
-              <h3>Experience Summary (5-7 sentences)</h3>
+              <h3>Experience Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
+              <p className="concise-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
                 {analysis.experience_summary || "No experience summary available."}
               </p>
-              <div className="summary-footer">
-                <span className="summary-tag">Professional Experience</span>
-                <span className="summary-tag">{analysis.years_experience || 'N/A'} experience</span>
-              </div>
             </div>
           </div>
 
@@ -1390,59 +1374,20 @@ function App() {
               <div className="summary-icon">
                 <BookOpen size={24} />
               </div>
-              <h3>Education Summary (5-7 sentences)</h3>
+              <h3>Education Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
+              <p className="concise-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
                 {analysis.education_summary || "No education summary available."}
               </p>
-              <div className="summary-footer">
-                <span className="summary-tag">Academic Background</span>
-                <span className="summary-tag">Detailed Analysis</span>
-              </div>
             </div>
           </div>
         </div>
 
-        {/* Additional Candidate Info */}
-        <div className="candidate-info-grid glass">
-          <div className="info-card">
-            <div className="info-header">
-              <Target size={20} />
-              <h4>Job Title Suggestion</h4>
-            </div>
-            <div className="info-value">{analysis.job_title_suggestion || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <Calendar size={20} />
-              <h4>Years Experience</h4>
-            </div>
-            <div className="info-value">{analysis.years_experience || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <Building size={20} />
-              <h4>Industry Fit</h4>
-            </div>
-            <div className="info-value">{analysis.industry_fit || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <DollarSign size={20} />
-              <h4>Salary Expectation</h4>
-            </div>
-            <div className="info-value">{analysis.salary_expectation || 'N/A'}</div>
-          </div>
-        </div>
-
-        {/* Insights Section - Now showing 6 items each */}
+        {/* Insights Section - Only 3 items each */}
         <div className="section-title">
-          <h2>Insights & Recommendations (6 items each)</h2>
-          <p>Personalized suggestions to improve your match</p>
+          <h2>Insights & Recommendations (3 items each)</h2>
+          <p>Key strengths and areas for improvement</p>
         </div>
         
         <div className="insights-grid">
@@ -1452,13 +1397,13 @@ function App() {
                 <TrendingUp size={24} />
               </div>
               <div>
-                <h3>Key Strengths</h3>
+                <h3>Key Strengths (3)</h3>
                 <p className="insight-subtitle">Areas where candidate excels</p>
               </div>
             </div>
             <div className="insight-content">
               <div className="strengths-list">
-                {analysis.key_strengths?.slice(0, 6).map((strength, index) => (
+                {analysis.key_strengths?.slice(0, 3).map((strength, index) => (
                   <div key={index} className="strength-item">
                     <CheckCircle size={16} className="strength-icon" />
                     <span className="strength-text" style={{ fontSize: '0.95rem' }}>{strength}</span>
@@ -1477,13 +1422,13 @@ function App() {
                 <Target size={24} />
               </div>
               <div>
-                <h3>Areas for Improvement</h3>
+                <h3>Areas for Improvement (3)</h3>
                 <p className="insight-subtitle">Opportunities to grow</p>
               </div>
             </div>
             <div className="insight-content">
               <div className="improvements-list">
-                {analysis.areas_for_improvement?.slice(0, 6).map((area, index) => (
+                {analysis.areas_for_improvement?.slice(0, 3).map((area, index) => (
                   <div key={index} className="improvement-item">
                     <AlertCircle size={16} className="improvement-icon" />
                     <span className="improvement-text" style={{ fontSize: '0.95rem' }}>{area}</span>
@@ -1497,65 +1442,16 @@ function App() {
           </div>
         </div>
 
-        {/* AI Analysis Details */}
-        <div className="ai-details-card glass">
-          <div className="ai-details-header">
-            <Brain size={24} />
-            <div>
-              <h3>AI Analysis Details</h3>
-              <p className="ai-details-subtitle">Technical information about this analysis</p>
-            </div>
-          </div>
-          <div className="ai-details-content">
-            <div className="ai-detail-item">
-              <span className="detail-label">AI Provider:</span>
-              <span className="detail-value">{analysis.ai_provider || 'Groq'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">AI Model:</span>
-              <span className="detail-value">{analysis.ai_model || 'Groq AI'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">API Key Used:</span>
-              <span className="detail-value">{analysis.key_used || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">Response Time:</span>
-              <span className="detail-value">{analysis.response_time || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">Analysis ID:</span>
-              <span className="detail-value">{analysis.analysis_id || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">AI Status:</span>
-              <span className="detail-value" style={{ 
-                color: analysis.ai_status === 'Warmed up' ? '#00ff9d' : '#ffd166' 
-              }}>
-                {analysis.ai_status || 'N/A'}
-              </span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">Filename:</span>
-              <span className="detail-value">{analysis.filename || 'N/A'}</span>
-            </div>
-            <div className="ai-detail-item">
-              <span className="detail-label">File Size:</span>
-              <span className="detail-value">{analysis.file_size || 'N/A'}</span>
-            </div>
-          </div>
-        </div>
-
         {/* Action Section */}
         <div className="action-section glass">
           <div className="action-content">
             <h3>Analysis Complete</h3>
-            <p>Download the detailed Excel report or start a new analysis</p>
+            <p>Download the simplified Excel report or start a new analysis</p>
           </div>
           <div className="action-buttons">
             <button className="download-button" onClick={handleDownload}>
               <DownloadCloud size={20} />
-              <span>Download Detailed Excel Report</span>
+              <span>Download Excel Report</span>
             </button>
             <button className="reset-button" onClick={navigateToMain}>
               <RefreshCw size={20} />
@@ -1582,44 +1478,10 @@ function App() {
         <div className="navigation-actions">
           <button className="download-report-btn" onClick={handleBatchDownload}>
             <DownloadCloud size={18} />
-            <span>Download Full Detailed Report</span>
+            <span>Download Batch Report</span>
           </button>
         </div>
       </div>
-
-      {/* Key Statistics */}
-      {batchAnalysis?.key_statistics && (
-        <div className="key-stats-container glass">
-          <div className="key-stats-header">
-            <Key size={20} />
-            <h3>API Key Usage Statistics</h3>
-          </div>
-          <div className="key-stats-grid">
-            {batchAnalysis.key_statistics.map((keyStat, index) => (
-              <div key={index} className="key-stat-card">
-                <div className="key-stat-header">
-                  <div className={`key-status-indicator ${keyStat.status === 'available' ? 'available' : 'cooling'}`}>
-                    {keyStat.status === 'available' ? '✅' : '🔄'}
-                  </div>
-                  <span className="key-name">{keyStat.key}</span>
-                </div>
-                <div className="key-stat-content">
-                  <div className="key-usage">
-                    <span className="usage-label">Used:</span>
-                    <span className="usage-value">{keyStat.used} resumes</span>
-                  </div>
-                  <div className="key-status">
-                    <span className="status-label">Status:</span>
-                    <span className={`status-value ${keyStat.status}`}>
-                      {keyStat.status === 'available' ? 'Available' : 'Cooling'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Stats */}
       <div className="multi-key-stats-container glass">
@@ -1664,16 +1526,6 @@ function App() {
             <div className="stat-label">AI Model</div>
           </div>
         </div>
-        
-        <div className="stat-card">
-          <div className="stat-icon warning">
-            <Brain size={24} />
-          </div>
-          <div className="stat-content">
-            <div className="stat-value">Groq</div>
-            <div className="stat-label">AI Provider</div>
-          </div>
-        </div>
 
         <div className="stat-card">
           <div className="stat-icon success">
@@ -1684,44 +1536,22 @@ function App() {
             <div className="stat-label">Keys Used</div>
           </div>
         </div>
-      </div>
 
-      {/* Performance Info */}
-      {batchAnalysis?.performance && (
-        <div className="performance-info glass">
-          <div className="performance-header">
-            <Activity size={20} />
-            <h3>Performance Metrics</h3>
+        <div className="stat-card">
+          <div className="stat-icon warning">
+            <Clock size={24} />
           </div>
-          <div className="performance-content">
-            <div className="performance-item">
-              <span className="performance-label">Processing Time:</span>
-              <span className="performance-value">{batchAnalysis.processing_time}</span>
-            </div>
-            <div className="performance-item">
-              <span className="performance-label">Processing Method:</span>
-              <span className="performance-value">{batchAnalysis.processing_method === 'round_robin_parallel' ? 'Round-robin Parallel' : batchAnalysis.processing_method}</span>
-            </div>
-            {batchAnalysis.performance && (
-              <div className="performance-item">
-                <span className="performance-label">Speed:</span>
-                <span className="performance-value">{batchAnalysis.performance}</span>
-              </div>
-            )}
-            {batchAnalysis.success_rate && (
-              <div className="performance-item">
-                <span className="performance-label">Success Rate:</span>
-                <span className="performance-value">{batchAnalysis.success_rate}</span>
-              </div>
-            )}
+          <div className="stat-content">
+            <div className="stat-value">{batchAnalysis?.processing_time || 'N/A'}</div>
+            <div className="stat-label">Time</div>
           </div>
         </div>
-      )}
+      </div>
 
       {/* Candidates Ranking */}
       <div className="section-title">
         <h2>Candidate Rankings (5-8 skills analysis each)</h2>
-        <p>Sorted by ATS Score (Highest to Lowest) • Groq Parallel Processing</p>
+        <p>Sorted by ATS Score (Highest to Lowest)</p>
       </div>
       
       <div className="batch-results-grid">
@@ -1734,13 +1564,6 @@ function App() {
                   <h3 className="candidate-name">{candidate.candidate_name}</h3>
                   <div className="candidate-meta">
                     <span className="file-info">{candidate.filename}</span>
-                    <span className="file-size">{candidate.file_size}</span>
-                    {candidate.key_used && (
-                      <span className="key-used">
-                        <Key size={12} />
-                        {candidate.key_used}
-                      </span>
-                    )}
                   </div>
                 </div>
               </div>
@@ -1759,6 +1582,15 @@ function App() {
                 border: `1px solid ${getScoreColor(candidate.overall_score)}40`
               }}>
                 {candidate.recommendation}
+              </div>
+              
+              <div className="concise-summary-section">
+                <h4>Experience Summary:</h4>
+                <p className="concise-text">
+                  {candidate.experience_summary?.length > 150 
+                    ? candidate.experience_summary.substring(0, 150) + '...' 
+                    : candidate.experience_summary}
+                </p>
               </div>
               
               <div className="skills-preview">
@@ -1792,21 +1624,6 @@ function App() {
                   </div>
                 </div>
               </div>
-              
-              <div className="additional-info">
-                <div className="info-row">
-                  <span className="info-label">Job Title:</span>
-                  <span className="info-value">{candidate.job_title_suggestion || 'N/A'}</span>
-                </div>
-                <div className="info-row">
-                  <span className="info-label">Experience:</span>
-                  <span className="info-value">{candidate.years_experience || 'N/A'}</span>
-                </div>
-                <div className="info-row">
-                  <span className="info-label">Industry Fit:</span>
-                  <span className="info-value">{candidate.industry_fit || 'N/A'}</span>
-                </div>
-              </div>
             </div>
             
             <div className="batch-card-footer">
@@ -1814,14 +1631,14 @@ function App() {
                 className="view-details-btn"
                 onClick={() => navigateToCandidateDetail(index)}
               >
-                View Full Details (5-8 skills each)
+                View Full Details
                 <ChevronRight size={16} />
               </button>
               {candidate.analysis_id && (
                 <button 
                   className="download-individual-btn"
                   onClick={() => handleIndividualDownload(candidate.analysis_id)}
-                  title="Download individual detailed report"
+                  title="Download individual report"
                 >
                   <FileDown size={16} />
                 </button>
@@ -1835,12 +1652,12 @@ function App() {
       <div className="action-section glass">
         <div className="action-content">
           <h3>Batch Analysis Complete</h3>
-          <p>Download comprehensive Excel report with detailed candidate analysis (5-8 skills each)</p>
+          <p>Download simplified Excel report with candidate analysis</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
             <DownloadCloud size={20} />
-            <span>Download Full Detailed Batch Report</span>
+            <span>Download Batch Report</span>
           </button>
           <button className="reset-button" onClick={navigateToMain}>
             <RefreshCw size={20} />
@@ -1876,7 +1693,7 @@ function App() {
             <span>Back to Rankings</span>
           </button>
           <div className="navigation-title">
-            <h2>Candidate Details (5-8 skills analysis)</h2>
+            <h2>Candidate Details</h2>
             <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
           </div>
           <div className="navigation-actions">
@@ -1886,16 +1703,9 @@ function App() {
                 onClick={() => handleIndividualDownload(candidate.analysis_id)}
               >
                 <FileDown size={18} />
-                <span>Download Individual Detailed Report</span>
+                <span>Download Report</span>
               </button>
             )}
-            <button 
-              className="download-report-btn secondary" 
-              onClick={handleBatchDownload}
-            >
-              <DownloadCloud size={18} />
-              <span>Download Full Batch</span>
-            </button>
           </div>
         </div>
 
@@ -1916,12 +1726,6 @@ function App() {
                   <FileText size={14} />
                   {candidate.filename} • {candidate.file_size}
                 </span>
-                {candidate.key_used && (
-                  <span className="key-info">
-                    <Key size={14} />
-                    {candidate.key_used}
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -1949,16 +1753,16 @@ function App() {
             <div className="score-info">
               <h3 className="score-grade">{getScoreGrade(candidate.overall_score)}</h3>
               <p className="score-description">
-                Based on skill matching, experience relevance, and qualifications
+                Based on skill matching and experience relevance
               </p>
               <div className="score-meta">
                 <span className="meta-item">
-                  <Cpu size={12} />
-                  Model: {candidate.ai_model || 'Groq AI'}
+                  <CheckCircle size={12} />
+                  {candidate.skills_matched?.length || 0} skills matched
                 </span>
                 <span className="meta-item">
-                  <Key size={12} />
-                  {candidate.key_used || 'Groq API'}
+                  <XCircle size={12} />
+                  {candidate.skills_missing?.length || 0} skills missing
                 </span>
               </div>
             </div>
@@ -1975,7 +1779,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                {candidate.ai_model || 'Groq AI'} • Batch Processing • {candidate.key_used || 'Groq API'}
+                Powered by Groq AI
               </p>
             </div>
           </div>
@@ -2056,10 +1860,10 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section with Detailed 5-7 sentences */}
+        {/* Summary Section with Concise 3-5 sentences */}
         <div className="section-title">
-          <h2>Detailed Profile Summary</h2>
-          <p>Comprehensive insights extracted from resume</p>
+          <h2>Profile Summary (Concise)</h2>
+          <p>Key insights extracted from resume (3-5 sentences each)</p>
         </div>
         
         <div className="summary-grid">
@@ -2068,16 +1872,12 @@ function App() {
               <div className="summary-icon">
                 <Briefcase size={24} />
               </div>
-              <h3>Experience Summary (5-7 sentences)</h3>
+              <h3>Experience Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
+              <p className="concise-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
                 {candidate.experience_summary || "No experience summary available."}
               </p>
-              <div className="summary-footer">
-                <span className="summary-tag">Professional Experience</span>
-                <span className="summary-tag">{candidate.years_experience || 'N/A'} experience</span>
-              </div>
             </div>
           </div>
 
@@ -2086,59 +1886,20 @@ function App() {
               <div className="summary-icon">
                 <BookOpen size={24} />
               </div>
-              <h3>Education Summary (5-7 sentences)</h3>
+              <h3>Education Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="detailed-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
+              <p className="concise-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
                 {candidate.education_summary || "No education summary available."}
               </p>
-              <div className="summary-footer">
-                <span className="summary-tag">Academic Background</span>
-                <span className="summary-tag">Detailed Analysis</span>
-              </div>
             </div>
           </div>
         </div>
 
-        {/* Additional Candidate Info */}
-        <div className="candidate-info-grid glass">
-          <div className="info-card">
-            <div className="info-header">
-              <Target size={20} />
-              <h4>Job Title Suggestion</h4>
-            </div>
-            <div className="info-value">{candidate.job_title_suggestion || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <Calendar size={20} />
-              <h4>Years Experience</h4>
-            </div>
-            <div className="info-value">{candidate.years_experience || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <Building size={20} />
-              <h4>Industry Fit</h4>
-            </div>
-            <div className="info-value">{candidate.industry_fit || 'N/A'}</div>
-          </div>
-          
-          <div className="info-card">
-            <div className="info-header">
-              <DollarSign size={20} />
-              <h4>Salary Expectation</h4>
-            </div>
-            <div className="info-value">{candidate.salary_expectation || 'N/A'}</div>
-          </div>
-        </div>
-
-        {/* Insights Section */}
+        {/* Insights Section - Only 3 items each */}
         <div className="section-title">
-          <h2>Insights & Recommendations (6 items each)</h2>
-          <p>Personalized suggestions to improve your match</p>
+          <h2>Insights & Recommendations (3 items each)</h2>
+          <p>Key strengths and areas for improvement</p>
         </div>
         
         <div className="insights-grid">
@@ -2148,13 +1909,13 @@ function App() {
                 <TrendingUp size={24} />
               </div>
               <div>
-                <h3>Key Strengths</h3>
+                <h3>Key Strengths (3)</h3>
                 <p className="insight-subtitle">Areas where candidate excels</p>
               </div>
             </div>
             <div className="insight-content">
               <div className="strengths-list">
-                {candidate.key_strengths?.slice(0, 6).map((strength, index) => (
+                {candidate.key_strengths?.slice(0, 3).map((strength, index) => (
                   <div key={index} className="strength-item">
                     <CheckCircle size={16} className="strength-icon" />
                     <span className="strength-text" style={{ fontSize: '0.95rem' }}>{strength}</span>
@@ -2173,13 +1934,13 @@ function App() {
                 <Target size={24} />
               </div>
               <div>
-                <h3>Areas for Improvement</h3>
+                <h3>Areas for Improvement (3)</h3>
                 <p className="insight-subtitle">Opportunities to grow</p>
               </div>
             </div>
             <div className="insight-content">
               <div className="improvements-list">
-                {candidate.areas_for_improvement?.slice(0, 6).map((area, index) => (
+                {candidate.areas_for_improvement?.slice(0, 3).map((area, index) => (
                   <div key={index} className="improvement-item">
                     <AlertCircle size={16} className="improvement-icon" />
                     <span className="improvement-text" style={{ fontSize: '0.95rem' }}>{area}</span>
@@ -2197,7 +1958,7 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Candidate Analysis Complete</h3>
-            <p>Download individual detailed report or full batch report</p>
+            <p>Download individual report or go back to rankings</p>
           </div>
           <div className="action-buttons">
             {candidate.analysis_id && (
@@ -2206,13 +1967,9 @@ function App() {
                 onClick={() => handleIndividualDownload(candidate.analysis_id)}
               >
                 <FileDown size={20} />
-                <span>Download Individual Detailed Report</span>
+                <span>Download Individual Report</span>
               </button>
             )}
-            <button className="download-button secondary" onClick={handleBatchDownload}>
-              <DownloadCloud size={20} />
-              <span>Download Full Batch Report</span>
-            </button>
             <button className="reset-button" onClick={navigateBack}>
               <ArrowLeft size={20} />
               <span>Back to Rankings</span>
@@ -2259,7 +2016,7 @@ function App() {
                   <span className="powered-by">Powered by</span>
                   <span className="groq-badge">⚡ Groq</span>
                   <span className="divider">•</span>
-                  <span className="tagline">5-8 Skills Analysis • Detailed Reports • Always Active</span>
+                  <span className="tagline">5-8 Skills Analysis • Concise Reports</span>
                 </div>
               </div>
             </div>
@@ -2445,12 +2202,6 @@ function App() {
                   🚀 ~10-15s for 10 resumes
                 </div>
               </div>
-              <div className="summary-item">
-                <div className="summary-label">Context Length</div>
-                <div className="summary-value">
-                  🧠 128K tokens
-                </div>
-              </div>
             </div>
             
             <div className="key-distribution">
@@ -2518,14 +2269,14 @@ function App() {
                 </div>
               )}
               <div className="status-indicator active">
-                <div className="indicator-dot" style={{ background: '#00ff9d', animation: 'pulse 1.5s infinite' }}></div>
+                <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
                 <span>Skills: 5-8 each</span>
               </div>
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                <span>Mode: {currentView === 'single-results' ? 'Single Analysis' : 
-                              currentView === 'batch-results' ? 'Batch Analysis' : 
-                              currentView === 'candidate-detail' ? 'Candidate Details' : 
+                <span>Mode: {currentView === 'single-results' ? 'Single' : 
+                              currentView === 'batch-results' ? 'Batch' : 
+                              currentView === 'candidate-detail' ? 'Details' : 
                               batchMode ? 'Batch' : 'Single'}</span>
               </div>
               {batchMode && (
@@ -2553,7 +2304,7 @@ function App() {
             {batchMode && getAvailableKeysCount() > 0 && (
               <div className="multi-key-message">
                 <Zap size={16} />
-                <span>Parallel mode: Processing {resumeFiles.length} resumes with {getAvailableKeysCount()} keys (~{Math.ceil(resumeFiles.length/3)}s)</span>
+                <span>Parallel mode: Processing {resumeFiles.length} resumes with {getAvailableKeysCount()} keys</span>
               </div>
             )}
           </div>
@@ -2572,7 +2323,7 @@ function App() {
               <span>AI Resume Analyzer (Groq)</span>
             </div>
             <p className="footer-tagline">
-              Groq AI with 128K context • 3-key parallel processing • 5-8 skills analysis each • Detailed Excel reports
+              Groq AI • 3-key parallel processing • 5-8 skills analysis • Concise reports
             </p>
           </div>
           
@@ -2580,9 +2331,9 @@ function App() {
             <div className="footer-section">
               <h4>Features</h4>
               <a href="#">Groq AI</a>
-              <a href="#">128K Context</a>
               <a href="#">5-8 Skills Analysis</a>
-              <a href="#">Detailed Reports</a>
+              <a href="#">Concise Reports</a>
+              <a href="#">Parallel Processing</a>
             </div>
             <div className="footer-section">
               <h4>Service</h4>
