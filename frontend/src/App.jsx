@@ -54,7 +54,7 @@ import {
   Potato, Tomato, Pumpkin, Radish,
   HotPepper, Garlic, Basil, Sprout,
   Bone, Skull, Ghost, Smile, Frown,
-  Meh, Laugh, Angry, surprised
+  Meh, Laugh, Angry, Surprised
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -1504,7 +1504,36 @@ function App() {
         </div>
       </div>
 
-      {/* Stats - SIMPLIFIED: Removed detailed stats as requested */}
+      {/* Batch Report Info */}
+      <div className="batch-report-info glass">
+        <div className="batch-info-header">
+          <FileSpreadsheet size={24} />
+          <div>
+            <h3>Comprehensive Excel Report Ready</h3>
+            <p>Download the batch report with detailed candidate analysis</p>
+          </div>
+        </div>
+        <div className="batch-report-features">
+          <div className="feature-item">
+            <CheckCircle size={16} />
+            <span>Multiple Sheets: Summary, Candidate Details, Individual Reports</span>
+          </div>
+          <div className="feature-item">
+            <CheckCircle size={16} />
+            <span>Each candidate gets their own sheet with complete analysis</span>
+          </div>
+          <div className="feature-item">
+            <CheckCircle size={16} />
+            <span>Includes scores, skills, summaries, and recommendations</span>
+          </div>
+          <div className="feature-item">
+            <CheckCircle size={16} />
+            <span>Statistics and score distribution analysis</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats */}
       <div className="multi-key-stats-container glass">
         <div className="stat-card">
           <div className="stat-icon success">
@@ -1525,7 +1554,7 @@ function App() {
               <div className="stat-value">{batchAnalysis?.failed_files || 0}</div>
               <div className="stat-label">Failed</div>
             </div>
-          </div>
+        </div>
         )}
         
         <div className="stat-card">
@@ -1651,7 +1680,7 @@ function App() {
       <div className="action-section glass">
         <div className="action-content">
           <h3>Batch Analysis Complete</h3>
-          <p>Download simplified Excel report with candidate analysis</p>
+          <p>Download comprehensive Excel report with candidate analysis</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
