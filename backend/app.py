@@ -1647,14 +1647,97 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
     try:
         wb = Workbook()
         
+        # ================== SUMMARY SHEET ==================
+        ws_summary = wb.active
+        ws_summary.title = "Batch Summary"
+        
         # Styles
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         header_font = Font(bold=True, color="FFFFFF", size=11)
         title_font = Font(bold=True, size=16, color="FFFFFF")
         
+        # Title
+        ws_summary.merge_cells('A1:H1')
+        title_cell = ws_summary['A1']
+        title_cell.value = "BATCH RESUME ANALYSIS REPORT (Groq Parallel Processing)"
+        title_cell.font = title_font
+        title_cell.fill = header_fill
+        title_cell.alignment = Alignment(horizontal='center')
+        
+        # Summary Information
+        row = 3
+        summary_info = [
+            ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            ("Total Resumes", len(analyses)),
+            ("AI Model", "Groq " + GROQ_MODEL),
+            ("Processing Method", "Round-robin Parallel"),
+            ("Job Description", job_description[:200] + "..." if len(job_description) > 200 else job_description),
+        ]
+        
+        for label, value in summary_info:
+            ws_summary[f'A{row}'] = label
+            ws_summary[f'A{row}'].font = Font(bold=True)
+            ws_summary[f'B{row}'] = value
+            row += 1
+        
+        row += 2
+        
+        # Candidate Rankings Table
+        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "Skills Matched", "Skills Missing", "Key Strengths", "Areas for Improvement"]
+        
+        for col, header in enumerate(headers, start=1):
+            cell = ws_summary.cell(row=row, column=col)
+            cell.value = header
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', wrap_text=True)
+        
+        row += 1
+        
+        # Candidate data
+        for analysis in analyses:
+            ws_summary.cell(row=row, column=1, value=analysis.get('rank', '-')).alignment = Alignment(horizontal='center')
+            ws_summary.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
+            
+            score = analysis.get('overall_score', 0)
+            score_cell = ws_summary.cell(row=row, column=3, value=score)
+            score_cell.alignment = Alignment(horizontal='center')
+            
+            # Color code based on score
+            if score >= 80:
+                score_cell.font = Font(bold=True, color="00FF00")
+            elif score >= 60:
+                score_cell.font = Font(bold=True, color="FFA500")
+            else:
+                score_cell.font = Font(bold=True, color="FF0000")
+            
+            ws_summary.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
+            
+            # Skills Matched
+            skills_matched = analysis.get('skills_matched', [])
+            ws_summary.cell(row=row, column=5, value=", ".join(skills_matched[:8]) if skills_matched else "N/A")
+            
+            # Skills Missing
+            skills_missing = analysis.get('skills_missing', [])
+            ws_summary.cell(row=row, column=6, value=", ".join(skills_missing[:8]) if skills_missing else "All matched")
+            
+            # Key Strengths
+            strengths = analysis.get('key_strengths', [])
+            ws_summary.cell(row=row, column=7, value=", ".join(strengths[:3]) if strengths else "N/A")
+            
+            # Areas for Improvement
+            improvements = analysis.get('areas_for_improvement', [])
+            ws_summary.cell(row=row, column=8, value=", ".join(improvements[:3]) if improvements else "N/A")
+            
+            row += 1
+        
+        # Set column widths
+        column_widths = [8, 25, 12, 20, 30, 30, 25, 25]
+        for i, width in enumerate(column_widths, start=1):
+            ws_summary.column_dimensions[get_column_letter(i)].width = width
+        
         # ================== CANDIDATE DETAILS SHEET ==================
-        ws_details = wb.active
-        ws_details.title = "Candidate Details"
+        ws_details = wb.create_sheet(title="Candidate Details")
         
         # Title
         ws_details.merge_cells('A1:H1')
@@ -1890,6 +1973,63 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ws_candidate.column_dimensions['B'].width = 40
             ws_candidate.column_dimensions['C'].width = 40
             ws_candidate.column_dimensions['D'].width = 40
+        
+        # ================== STATISTICS SHEET ==================
+        ws_stats = wb.create_sheet(title="Statistics")
+        
+        # Title
+        ws_stats.merge_cells('A1:B1')
+        title_cell = ws_stats['A1']
+        title_cell.value = "BATCH ANALYSIS STATISTICS"
+        title_cell.font = title_font
+        title_cell.fill = header_fill
+        title_cell.alignment = Alignment(horizontal='center')
+        
+        row = 3
+        
+        # Basic Statistics
+        stats_data = [
+            ("Total Candidates", len(analyses)),
+            ("Average Score", round(sum(a.get('overall_score', 0) for a in analyses) / len(analyses), 2) if analyses else 0),
+            ("Highest Score", max((a.get('overall_score', 0) for a in analyses), default=0)),
+            ("Lowest Score", min((a.get('overall_score', 0) for a in analyses), default=0)),
+            ("Top Candidate", analyses[0].get('candidate_name', 'N/A') if analyses else 'N/A'),
+            ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            ("AI Model", "Groq " + GROQ_MODEL),
+            ("Processing Method", "Round-robin Parallel"),
+        ]
+        
+        for label, value in stats_data:
+            ws_stats[f'A{row}'] = label
+            ws_stats[f'A{row}'].font = Font(bold=True)
+            ws_stats[f'B{row}'] = value
+            row += 1
+        
+        row += 1
+        
+        # Score Distribution
+        ws_stats[f'A{row}'] = "Score Distribution"
+        ws_stats[f'A{row}'].font = Font(bold=True, size=14, color="4472C4")
+        row += 1
+        
+        score_ranges = [
+            ("90-100 (Excellent)", len([a for a in analyses if 90 <= a.get('overall_score', 0) <= 100])),
+            ("80-89 (Great)", len([a for a in analyses if 80 <= a.get('overall_score', 0) <= 89])),
+            ("70-79 (Good)", len([a for a in analyses if 70 <= a.get('overall_score', 0) <= 79])),
+            ("60-69 (Fair)", len([a for a in analyses if 60 <= a.get('overall_score', 0) <= 69])),
+            ("0-59 (Needs Improvement)", len([a for a in analyses if a.get('overall_score', 0) < 60])),
+        ]
+        
+        for label, count in score_ranges:
+            ws_stats[f'A{row}'] = label
+            ws_stats[f'A{row}'].font = Font(bold=True)
+            ws_stats[f'B{row}'] = count
+            ws_stats[f'B{row}'].alignment = Alignment(horizontal='center')
+            row += 1
+        
+        # Set column widths for stats sheet
+        ws_stats.column_dimensions['A'].width = 35
+        ws_stats.column_dimensions['B'].width = 20
         
         # Add borders to all cells in all sheets (skip merged cells)
         thin_border = Border(
