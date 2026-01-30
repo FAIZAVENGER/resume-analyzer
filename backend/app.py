@@ -643,7 +643,7 @@ def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis
     resume_hash = calculate_resume_hash(resume_text, job_description)
     cached_score = get_cached_score(resume_hash)
     
-    # UPDATED: Request shorter summaries (4-5 sentences max)
+    # Updated: Request complete sentences, not truncated
     prompt = f"""Analyze resume against job description:
 
 RESUME:
@@ -657,8 +657,8 @@ Provide analysis in this JSON format:
     "candidate_name": "Extracted name or filename",
     "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
     "skills_missing": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
-    "experience_summary": "Provide a concise 4-5 sentence summary of candidate's experience. Focus on key roles, achievements, and relevance. Keep it brief.",
-    "education_summary": "Provide a concise 4-5 sentence summary of education. Include degrees, institutions, and relevance. Keep it brief.",
+    "experience_summary": "Provide a concise 4-5 sentence summary of candidate's experience. Focus on key roles, achievements, and relevance. Make sure each sentence is complete and not truncated. Write full sentences.",
+    "education_summary": "Provide a concise 4-5 sentence summary of education. Include degrees, institutions, and relevance. Make sure each sentence is complete and not truncated. Write full sentences.",
     "overall_score": 75,
     "recommendation": "Strongly Recommended/Recommended/Consider/Not Recommended",
     "key_strengths": ["strength1", "strength2", "strength3"],
@@ -667,11 +667,12 @@ Provide analysis in this JSON format:
 
 IMPORTANT: 
 1. Provide 5-8 skills in both skills_matched and skills_missing arrays
-2. Experience summary: MAX 4-5 sentences, keep it medium length
-3. Education summary: MAX 4-5 sentences, keep it medium length
+2. Experience summary: MAX 4-5 COMPLETE sentences (not truncated)
+3. Education summary: MAX 4-5 COMPLETE sentences (not truncated)
 4. Provide EXACTLY 3 key_strengths and 3 areas_for_improvement
 5. DO NOT include job_title_suggestion, years_experience, industry_fit, or salary_expectation
-6. Keep summaries focused and concise, not too lengthy, not too short"""
+6. Write full, complete sentences. Do not cut off sentences mid-way.
+7. Ensure proper sentence endings with periods."""
 
     try:
         print(f"⚡ Sending to Groq API (Key {key_index})...")
@@ -680,7 +681,7 @@ IMPORTANT:
         response = call_groq_api(
             prompt=prompt,
             api_key=api_key,
-            max_tokens=1200,
+            max_tokens=1500,  # Increased to ensure complete sentences
             temperature=0.1,
             timeout=60
         )
@@ -751,7 +752,7 @@ IMPORTANT:
         return generate_fallback_analysis(filename, f"Analysis Error: {str(e)[:100]}")
     
 def validate_analysis(analysis, filename):
-    """Validate analysis data and fill missing fields"""
+    """Validate analysis data and fill missing fields - FIXED to ensure complete sentences"""
     required_fields = {
         'candidate_name': 'Professional Candidate',
         'skills_matched': ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Team Collaboration', 'Project Management', 'Agile Methodology'],
@@ -797,14 +798,36 @@ def validate_analysis(analysis, filename):
     analysis['key_strengths'] = analysis.get('key_strengths', [])[:3]
     analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:3]
     
-    # Truncate summaries if too long (limit to ~400 characters)
+    # FIXED: Ensure complete sentences for summaries (don't truncate)
     for field in ['experience_summary', 'education_summary']:
-        if field in analysis and len(analysis[field]) > 400:
-            # Try to cut at a sentence boundary
+        if field in analysis:
             text = analysis[field]
-            sentences = text.split('. ')
-            if len(sentences) > 5:
-                analysis[field] = '. '.join(sentences[:5]) + '.'
+            # Remove any trailing ellipsis or incomplete sentences
+            if '...' in text:
+                # Find the last complete sentence before ellipsis
+                sentences = text.split('. ')
+                complete_sentences = []
+                for sentence in sentences:
+                    if '...' in sentence:
+                        # Remove the incomplete part
+                        sentence = sentence.split('...')[0]
+                        if sentence.strip():
+                            complete_sentences.append(sentence.strip() + '.')
+                        break
+                    elif sentence.strip():
+                        complete_sentences.append(sentence.strip() + '.')
+                analysis[field] = ' '.join(complete_sentences)
+            
+            # Ensure proper sentence endings
+            if not analysis[field].strip().endswith(('.', '!', '?')):
+                analysis[field] = analysis[field].strip() + '.'
+            
+            # Limit to reasonable length but keep sentences complete
+            if len(analysis[field]) > 800:
+                # Take first 5 sentences instead of truncating
+                sentences = analysis[field].split('. ')
+                if len(sentences) > 5:
+                    analysis[field] = '. '.join(sentences[:5]) + '.'
     
     # Remove unwanted fields
     unwanted_fields = ['job_title_suggestion', 'years_experience', 'industry_fit', 'salary_expectation']
@@ -1519,8 +1542,8 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         
         row += 1
         
-        # Experience Summary (Concise 4-5 sentences)
-        ws[f'A{row}'] = "EXPERIENCE SUMMARY (4-5 sentences)"
+        # Experience Summary (Complete sentences, not truncated)
+        ws[f'A{row}'] = "EXPERIENCE SUMMARY (4-5 complete sentences)"
         ws[f'A{row}'].font = header_font
         ws[f'A{row}'].fill = subheader_fill
         ws[f'A{row}'].alignment = Alignment(horizontal='center')
@@ -1534,15 +1557,15 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         experience_text = analysis_data.get('experience_summary', 'No experience summary available.')
         ws[f'A{row}'] = experience_text
         ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
-        ws.row_dimensions[row].height = 70
+        ws.row_dimensions[row].height = 80
         
         for col in ['B', 'C', 'D']:
             ws[f'{col}{row}'] = ""
         
         row += 2
         
-        # Education Summary (Concise 4-5 sentences)
-        ws[f'A{row}'] = "EDUCATION SUMMARY (4-5 sentences)"
+        # Education Summary (Complete sentences, not truncated)
+        ws[f'A{row}'] = "EDUCATION SUMMARY (4-5 complete sentences)"
         ws[f'A{row}'].font = header_font
         ws[f'A{row}'].fill = subheader_fill
         ws[f'A{row}'].alignment = Alignment(horizontal='center')
@@ -1556,7 +1579,7 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         education_text = analysis_data.get('education_summary', 'No education summary available.')
         ws[f'A{row}'] = education_text
         ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
-        ws.row_dimensions[row].height = 70
+        ws.row_dimensions[row].height = 80
         
         for col in ['B', 'C', 'D']:
             ws[f'{col}{row}'] = ""
@@ -1683,7 +1706,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
         row += 2
         
         # Candidate Rankings Table
-        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "Skills Matched", "Skills Missing", "Key Strengths", "Areas for Improvement"]
+        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "Skills Matched", "Skills Missing", "Experience Summary", "Education Summary"]
         
         for col, header in enumerate(headers, start=1):
             cell = ws_summary.cell(row=row, column=col)
@@ -1721,18 +1744,23 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             skills_missing = analysis.get('skills_missing', [])
             ws_summary.cell(row=row, column=6, value=", ".join(skills_missing[:8]) if skills_missing else "All matched")
             
-            # Key Strengths
-            strengths = analysis.get('key_strengths', [])
-            ws_summary.cell(row=row, column=7, value=", ".join(strengths[:3]) if strengths else "N/A")
+            # Experience Summary (complete sentences)
+            experience_summary = analysis.get('experience_summary', 'No experience summary available.')
+            ws_summary.cell(row=row, column=7, value=experience_summary)
+            ws_summary.cell(row=row, column=7).alignment = Alignment(wrap_text=True, vertical='top')
             
-            # Areas for Improvement
-            improvements = analysis.get('areas_for_improvement', [])
-            ws_summary.cell(row=row, column=8, value=", ".join(improvements[:3]) if improvements else "N/A")
+            # Education Summary (complete sentences)
+            education_summary = analysis.get('education_summary', 'No education summary available.')
+            ws_summary.cell(row=row, column=8, value=education_summary)
+            ws_summary.cell(row=row, column=8).alignment = Alignment(wrap_text=True, vertical='top')
+            
+            # Set row height for summaries
+            ws_summary.row_dimensions[row].height = 80
             
             row += 1
         
         # Set column widths
-        column_widths = [8, 25, 12, 20, 30, 30, 25, 25]
+        column_widths = [8, 25, 12, 20, 30, 30, 40, 40]
         for i, width in enumerate(column_widths, start=1):
             ws_summary.column_dimensions[get_column_letter(i)].width = width
         
@@ -1773,24 +1801,20 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ws_details[f'D{row}'] = analysis.get('file_size', 'N/A')
             row += 1
             
-            # Experience Summary
+            # Experience Summary (complete)
             ws_details[f'A{row}'] = "Experience Summary:"
             ws_details[f'A{row}'].font = Font(bold=True)
             ws_details.merge_cells(f'B{row}:H{row}')
             exp_text = analysis.get('experience_summary', 'No experience summary available.')
-            if len(exp_text) > 500:
-                exp_text = exp_text[:497] + "..."
             ws_details[f'B{row}'] = exp_text
             ws_details[f'B{row}'].alignment = Alignment(wrap_text=True)
             row += 1
             
-            # Education Summary
+            # Education Summary (complete)
             ws_details[f'A{row}'] = "Education Summary:"
             ws_details[f'A{row}'].font = Font(bold=True)
             ws_details.merge_cells(f'B{row}:H{row}')
             edu_text = analysis.get('education_summary', 'No education summary available.')
-            if len(edu_text) > 500:
-                edu_text = edu_text[:497] + "..."
             ws_details[f'B{row}'] = edu_text
             ws_details[f'B{row}'].alignment = Alignment(wrap_text=True)
             row += 1
@@ -1886,7 +1910,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             
             row += 1
             
-            # Experience Summary
+            # Experience Summary (complete)
             ws_candidate[f'A{row}'] = "EXPERIENCE SUMMARY"
             ws_candidate[f'A{row}'].font = Font(bold=True, size=12, color="4472C4")
             ws_candidate.merge_cells(f'A{row}:D{row}')
@@ -1899,7 +1923,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ws_candidate.row_dimensions[row].height = 80
             row += 2
             
-            # Education Summary
+            # Education Summary (complete)
             ws_candidate[f'A{row}'] = "EDUCATION SUMMARY"
             ws_candidate[f'A{row}'].font = Font(bold=True, size=12, color="4472C4")
             ws_candidate.merge_cells(f'A{row}:D{row}')
@@ -2130,18 +2154,18 @@ def create_minimal_batch_report(analyses, job_description, filename):
             skills_missing = analysis.get('skills_missing', [])
             ws.cell(row=row, column=6, value=", ".join(skills_missing[:8]) if skills_missing else "All matched").alignment = Alignment(wrap_text=True)
             
-            # *** FIXED: Experience Summary ***
+            # *** FIXED: Experience Summary (complete sentences) ***
             experience_summary = analysis.get('experience_summary', 'No experience summary available.')
             exp_cell = ws.cell(row=row, column=7, value=experience_summary)
             exp_cell.alignment = Alignment(wrap_text=True, vertical='top')
             
-            # *** FIXED: Education Summary ***
+            # *** FIXED: Education Summary (complete sentences) ***
             education_summary = analysis.get('education_summary', 'No education summary available.')
             edu_cell = ws.cell(row=row, column=8, value=education_summary)
             edu_cell.alignment = Alignment(wrap_text=True, vertical='top')
             
             # Set row height to accommodate wrapped text
-            ws.row_dimensions[row].height = 60
+            ws.row_dimensions[row].height = 80
             
             row += 1
         
@@ -2450,7 +2474,7 @@ def health_check():
         'processing_method': 'round_robin_parallel',
         'performance_target': '10 resumes in 10-15 seconds',
         'skills_analysis': '5-8 skills per category',
-        'summaries': 'Concise 4-5 sentences each',
+        'summaries': 'Complete 4-5 sentences each',
         'insights': '3 strengths & 3 improvements'
     })
 
@@ -2505,7 +2529,7 @@ if __name__ == '__main__':
     print(f"✅ Round-robin Parallel Processing: Enabled")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
-    print(f"✅ Concise Summaries: 4-5 sentences each (medium length)")
+    print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
     print(f"✅ Performance: ~10 resumes in 10-15 seconds")
