@@ -439,7 +439,7 @@ function App() {
 
     const formData = new FormData();
     formData.append('resume', resumeFile);
-    formData.append('jobDescription', jobDescription);
+    formData.append('jobDescription', job_description);
 
     let progressInterval;
 
@@ -745,6 +745,27 @@ function App() {
     if (!modelInfo) return 'Groq AI';
     if (typeof modelInfo === 'string') return modelInfo;
     return modelInfo.name || 'Groq AI';
+  };
+
+  // Format summary to max 5 lines
+  const formatSummary = (text) => {
+    if (!text) return "No summary available.";
+    
+    // Split into sentences
+    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    
+    // Take only 4-5 sentences
+    const limitedSentences = sentences.slice(0, 5);
+    
+    // Join with periods and ensure proper ending
+    let result = limitedSentences.join('. ') + '.';
+    
+    // If still too long, truncate
+    if (result.length > 400) {
+      result = result.substring(0, 397) + '...';
+    }
+    
+    return result;
   };
 
   // Render functions for different views
@@ -1348,10 +1369,10 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section with Concise 3-5 sentences */}
+        {/* Summary Section with Concise 4-5 sentences */}
         <div className="section-title">
-          <h2>Profile Summary (Concise)</h2>
-          <p>Key insights extracted from resume (3-5 sentences each)</p>
+          <h2>Profile Summary (4-5 sentences each)</h2>
+          <p>Key insights extracted from resume (medium length)</p>
         </div>
         
         <div className="summary-grid">
@@ -1363,8 +1384,8 @@ function App() {
               <h3>Experience Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="concise-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
-                {analysis.experience_summary || "No experience summary available."}
+              <p className="concise-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+                {formatSummary(analysis.experience_summary)}
               </p>
             </div>
           </div>
@@ -1377,8 +1398,8 @@ function App() {
               <h3>Education Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="concise-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
-                {analysis.education_summary || "No education summary available."}
+              <p className="concise-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+                {formatSummary(analysis.education_summary)}
               </p>
             </div>
           </div>
@@ -1406,7 +1427,7 @@ function App() {
                 {analysis.key_strengths?.slice(0, 3).map((strength, index) => (
                   <div key={index} className="strength-item">
                     <CheckCircle size={16} className="strength-icon" />
-                    <span className="strength-text" style={{ fontSize: '0.95rem' }}>{strength}</span>
+                    <span className="strength-text" style={{ fontSize: '0.9rem' }}>{strength}</span>
                   </div>
                 ))}
                 {(!analysis.key_strengths || analysis.key_strengths.length === 0) && (
@@ -1431,7 +1452,7 @@ function App() {
                 {analysis.areas_for_improvement?.slice(0, 3).map((area, index) => (
                   <div key={index} className="improvement-item">
                     <AlertCircle size={16} className="improvement-icon" />
-                    <span className="improvement-text" style={{ fontSize: '0.95rem' }}>{area}</span>
+                    <span className="improvement-text" style={{ fontSize: '0.9rem' }}>{area}</span>
                   </div>
                 ))}
                 {(!analysis.areas_for_improvement || analysis.areas_for_improvement.length === 0) && (
@@ -1483,7 +1504,7 @@ function App() {
         </div>
       </div>
 
-      {/* Stats */}
+      {/* Stats - SIMPLIFIED: Removed detailed stats as requested */}
       <div className="multi-key-stats-container glass">
         <div className="stat-card">
           <div className="stat-icon success">
@@ -1504,7 +1525,7 @@ function App() {
               <div className="stat-value">{batchAnalysis?.failed_files || 0}</div>
               <div className="stat-label">Failed</div>
             </div>
-        </div>
+          </div>
         )}
         
         <div className="stat-card">
@@ -1518,32 +1539,12 @@ function App() {
         </div>
         
         <div className="stat-card">
-          <div className="stat-icon primary">
-            <Cpu size={24} />
-          </div>
-          <div className="stat-content">
-            <div className="stat-value">{batchAnalysis?.model_used || 'Groq AI'}</div>
-            <div className="stat-label">AI Model</div>
-          </div>
-        </div>
-
-        <div className="stat-card">
           <div className="stat-icon success">
             <Zap size={24} />
           </div>
           <div className="stat-content">
             <div className="stat-value">{batchAnalysis?.available_keys || 0}</div>
             <div className="stat-label">Keys Used</div>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon warning">
-            <Clock size={24} />
-          </div>
-          <div className="stat-content">
-            <div className="stat-value">{batchAnalysis?.processing_time || 'N/A'}</div>
-            <div className="stat-label">Time</div>
           </div>
         </div>
       </div>
@@ -1586,10 +1587,8 @@ function App() {
               
               <div className="concise-summary-section">
                 <h4>Experience Summary:</h4>
-                <p className="concise-text">
-                  {candidate.experience_summary?.length > 150 
-                    ? candidate.experience_summary.substring(0, 150) + '...' 
-                    : candidate.experience_summary}
+                <p className="concise-text" style={{ fontSize: '0.9rem', lineHeight: '1.4' }}>
+                  {formatSummary(candidate.experience_summary)}
                 </p>
               </div>
               
@@ -1860,10 +1859,10 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section with Concise 3-5 sentences */}
+        {/* Summary Section with Concise 4-5 sentences */}
         <div className="section-title">
-          <h2>Profile Summary (Concise)</h2>
-          <p>Key insights extracted from resume (3-5 sentences each)</p>
+          <h2>Profile Summary (4-5 sentences each)</h2>
+          <p>Key insights extracted from resume (medium length)</p>
         </div>
         
         <div className="summary-grid">
@@ -1875,8 +1874,8 @@ function App() {
               <h3>Experience Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="concise-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
-                {candidate.experience_summary || "No experience summary available."}
+              <p className="concise-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+                {formatSummary(candidate.experience_summary)}
               </p>
             </div>
           </div>
@@ -1889,8 +1888,8 @@ function App() {
               <h3>Education Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="concise-summary" style={{ fontSize: '1rem', lineHeight: '1.6' }}>
-                {candidate.education_summary || "No education summary available."}
+              <p className="concise-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+                {formatSummary(candidate.education_summary)}
               </p>
             </div>
           </div>
@@ -1918,7 +1917,7 @@ function App() {
                 {candidate.key_strengths?.slice(0, 3).map((strength, index) => (
                   <div key={index} className="strength-item">
                     <CheckCircle size={16} className="strength-icon" />
-                    <span className="strength-text" style={{ fontSize: '0.95rem' }}>{strength}</span>
+                    <span className="strength-text" style={{ fontSize: '0.9rem' }}>{strength}</span>
                   </div>
                 ))}
                 {(!candidate.key_strengths || candidate.key_strengths.length === 0) && (
@@ -1943,7 +1942,7 @@ function App() {
                 {candidate.areas_for_improvement?.slice(0, 3).map((area, index) => (
                   <div key={index} className="improvement-item">
                     <AlertCircle size={16} className="improvement-icon" />
-                    <span className="improvement-text" style={{ fontSize: '0.95rem' }}>{area}</span>
+                    <span className="improvement-text" style={{ fontSize: '0.9rem' }}>{area}</span>
                   </div>
                 ))}
                 {(!candidate.areas_for_improvement || candidate.areas_for_improvement.length === 0) && (
@@ -2016,7 +2015,7 @@ function App() {
                   <span className="powered-by">Powered by</span>
                   <span className="groq-badge">⚡ Groq</span>
                   <span className="divider">•</span>
-                  <span className="tagline">5-8 Skills Analysis • Concise Reports</span>
+                  <span className="tagline">5-8 Skills Analysis • 4-5 Sentence Summaries</span>
                 </div>
               </div>
             </div>
@@ -2323,7 +2322,7 @@ function App() {
               <span>AI Resume Analyzer (Groq)</span>
             </div>
             <p className="footer-tagline">
-              Groq AI • 3-key parallel processing • 5-8 skills analysis • Concise reports
+              Groq AI • 3-key parallel processing • 5-8 skills analysis • 4-5 sentence summaries
             </p>
           </div>
           
@@ -2332,7 +2331,7 @@ function App() {
               <h4>Features</h4>
               <a href="#">Groq AI</a>
               <a href="#">5-8 Skills Analysis</a>
-              <a href="#">Concise Reports</a>
+              <a href="#">4-5 Sentence Summaries</a>
               <a href="#">Parallel Processing</a>
             </div>
             <div className="footer-section">
@@ -2382,6 +2381,10 @@ function App() {
             <span className="stat">
               <Target size={12} />
               Skills: 5-8 each
+            </span>
+            <span className="stat">
+              <BookOpen size={12} />
+              Summaries: 4-5 sentences
             </span>
           </div>
         </div>
