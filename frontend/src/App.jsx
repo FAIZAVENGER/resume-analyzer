@@ -439,7 +439,7 @@ function App() {
 
     const formData = new FormData();
     formData.append('resume', resumeFile);
-    formData.append('jobDescription', job_description);
+    formData.append('jobDescription', jobDescription);
 
     let progressInterval;
 
