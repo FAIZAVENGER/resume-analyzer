@@ -642,7 +642,8 @@ def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis
     resume_hash = calculate_resume_hash(resume_text, job_description)
     cached_score = get_cached_score(resume_hash)
     
-    prompt = f"""Analyze resume against job description in DETAIL:
+    # UPDATED: Request shorter summaries (4-5 sentences max)
+    prompt = f"""Analyze resume against job description:
 
 RESUME:
 {resume_text}
@@ -650,13 +651,13 @@ RESUME:
 JOB DESCRIPTION:
 {job_description}
 
-Provide COMPREHENSIVE analysis in this JSON format:
+Provide analysis in this JSON format:
 {{
     "candidate_name": "Extracted name or filename",
     "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
     "skills_missing": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
-    "experience_summary": "Provide a concise 3-5 sentence summary of the candidate's professional experience, highlighting key achievements and relevance to the job description. Keep it brief and focused.",
-    "education_summary": "Provide a concise 3-5 sentence summary of the candidate's educational background, including degrees and relevant coursework. Keep it brief and focused.",
+    "experience_summary": "Provide a concise 4-5 sentence summary of candidate's experience. Focus on key roles, achievements, and relevance. Keep it brief.",
+    "education_summary": "Provide a concise 4-5 sentence summary of education. Include degrees, institutions, and relevance. Keep it brief.",
     "overall_score": 75,
     "recommendation": "Strongly Recommended/Recommended/Consider/Not Recommended",
     "key_strengths": ["strength1", "strength2", "strength3"],
@@ -664,11 +665,12 @@ Provide COMPREHENSIVE analysis in this JSON format:
 }}
 
 IMPORTANT: 
-1. Provide 5-8 skills in both skills_matched and skills_missing arrays (minimum 5, maximum 8)
-2. Provide CONCISE 3-5 sentence summaries for both experience_summary and education_summary (max 6-8 lines each)
-3. Provide EXACTLY 3 key_strengths and 3 areas_for_improvement
-4. DO NOT include job_title_suggestion, years_experience, industry_fit, or salary_expectation fields
-5. Keep summaries brief and focused on key points"""
+1. Provide 5-8 skills in both skills_matched and skills_missing arrays
+2. Experience summary: MAX 4-5 sentences, keep it medium length
+3. Education summary: MAX 4-5 sentences, keep it medium length
+4. Provide EXACTLY 3 key_strengths and 3 areas_for_improvement
+5. DO NOT include job_title_suggestion, years_experience, industry_fit, or salary_expectation
+6. Keep summaries focused and concise, not too lengthy, not too short"""
 
     try:
         print(f"⚡ Sending to Groq API (Key {key_index})...")
@@ -677,7 +679,7 @@ IMPORTANT:
         response = call_groq_api(
             prompt=prompt,
             api_key=api_key,
-            max_tokens=1200,  # Reduced from 1800
+            max_tokens=1200,
             temperature=0.1,
             timeout=60
         )
@@ -753,8 +755,8 @@ def validate_analysis(analysis, filename):
         'candidate_name': 'Professional Candidate',
         'skills_matched': ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Team Collaboration', 'Project Management', 'Agile Methodology'],
         'skills_missing': ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX Design', 'Cybersecurity', 'Mobile Development', 'Database Administration'],
-        'experience_summary': 'The candidate demonstrates relevant professional experience with progressive responsibility. Their background shows expertise in key areas relevant to modern industry demands. They have experience collaborating with teams and delivering measurable results.',
-        'education_summary': 'The candidate holds relevant educational qualifications from reputable institutions. Their academic background provides strong foundational knowledge in core subjects. Additional certifications enhance their professional profile.',
+        'experience_summary': 'The candidate demonstrates relevant professional experience with progressive responsibility. Their background shows expertise in key areas relevant to modern industry demands. They have experience collaborating with teams and delivering measurable results. Additional experience in specific domains enhances their suitability.',
+        'education_summary': 'The candidate holds relevant educational qualifications from reputable institutions. Their academic background provides strong foundational knowledge in core subjects. Additional certifications enhance their professional profile. The education aligns well with industry requirements.',
         'overall_score': 70,
         'recommendation': 'Consider for Interview',
         'key_strengths': ['Strong technical foundation', 'Excellent communication skills', 'Proven track record of delivery'],
@@ -794,6 +796,15 @@ def validate_analysis(analysis, filename):
     analysis['key_strengths'] = analysis.get('key_strengths', [])[:3]
     analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:3]
     
+    # Truncate summaries if too long (limit to ~400 characters)
+    for field in ['experience_summary', 'education_summary']:
+        if field in analysis and len(analysis[field]) > 400:
+            # Try to cut at a sentence boundary
+            text = analysis[field]
+            sentences = text.split('. ')
+            if len(sentences) > 5:
+                analysis[field] = '. '.join(sentences[:5]) + '.'
+    
     # Remove unwanted fields
     unwanted_fields = ['job_title_suggestion', 'years_experience', 'industry_fit', 'salary_expectation']
     for field in unwanted_fields:
@@ -819,8 +830,8 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "candidate_name": candidate_name,
             "skills_matched": ['Python Programming', 'JavaScript Development', 'Database Management', 'Communication Skills', 'Problem Solving', 'Team Collaboration'],
             "skills_missing": ['Machine Learning Algorithms', 'Cloud Platform Expertise', 'Advanced Data Analysis', 'DevOps Practices', 'UI/UX Design Principles'],
-            "experience_summary": 'The candidate has demonstrated professional experience in relevant technical roles. Their background includes working with modern technologies and methodologies. They have contributed to multiple projects with measurable outcomes.',
-            "education_summary": 'The candidate possesses educational qualifications that provide a strong foundation for professional work. Their academic background includes relevant coursework and projects. Additional training complements their formal education.',
+            "experience_summary": 'The candidate has demonstrated professional experience in relevant technical roles. Their background includes working with modern technologies and methodologies. They have contributed to multiple projects with measurable outcomes. Additional experience enhances their suitability for the role.',
+            "education_summary": 'The candidate possesses educational qualifications that provide a strong foundation for professional work. Their academic background includes relevant coursework and projects. Additional training complements their formal education. The educational profile aligns with industry requirements.',
             "overall_score": 55,
             "recommendation": "Needs Full Analysis",
             "key_strengths": ['Technical proficiency', 'Communication abilities', 'Problem-solving approach'],
@@ -834,8 +845,8 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "candidate_name": candidate_name,
             "skills_matched": ['Basic Programming', 'Communication Skills', 'Problem Solving', 'Teamwork', 'Technical Knowledge', 'Learning Ability'],
             "skills_missing": ['Advanced Technical Skills', 'Industry Experience', 'Specialized Knowledge', 'Certifications', 'Project Management'],
-            "experience_summary": 'Professional experience analysis will be available once the Groq AI service is fully initialized. The candidate appears to have relevant background based on initial file processing.',
-            "education_summary": 'Educational background analysis will be available shortly upon service initialization. Academic qualifications assessment is pending full AI processing.',
+            "experience_summary": 'Professional experience analysis will be available once the Groq AI service is fully initialized. The candidate appears to have relevant background based on initial file processing. Additional details will be available with full analysis.',
+            "education_summary": 'Educational background analysis will be available shortly upon service initialization. Academic qualifications assessment is pending full AI processing. Further details will be provided with complete analysis.',
             "overall_score": 50,
             "recommendation": "Service Warming Up - Please Retry",
             "key_strengths": ['Fast learning capability', 'Strong work ethic', 'Good communication'],
@@ -1239,12 +1250,15 @@ def analyze_resume_batch():
         batch_excel_path = None
         if all_analyses:
             try:
-                print("📊 Creating detailed batch Excel report...")
+                print("📊 Creating simplified batch Excel report...")
                 excel_filename = f"batch_analysis_{batch_id}.xlsx"
-                batch_excel_path = create_detailed_batch_report(all_analyses, job_description, excel_filename)
+                batch_excel_path = create_simple_batch_report(all_analyses, job_description, excel_filename)
                 print(f"✅ Excel report created: {batch_excel_path}")
             except Exception as e:
                 print(f"❌ Failed to create Excel report: {str(e)}")
+                traceback.print_exc()
+                # Create a minimal report
+                batch_excel_path = create_minimal_batch_report(all_analyses, job_description, excel_filename)
         
         key_stats = []
         for i in range(3):
@@ -1483,10 +1497,10 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         
         row += 1
         
-        # Experience Summary (Concise 3-5 sentences)
+        # Experience Summary (Concise 4-5 sentences)
         ws.merge_cells(f'A{row}:D{row}')
         cell = ws[f'A{row}']
-        cell.value = "EXPERIENCE SUMMARY"
+        cell.value = "EXPERIENCE SUMMARY (4-5 sentences)"
         cell.font = header_font
         cell.fill = subheader_fill
         cell.alignment = Alignment(horizontal='center')
@@ -1497,13 +1511,13 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         experience_text = analysis_data.get('experience_summary', 'No experience summary available.')
         cell.value = experience_text
         cell.alignment = Alignment(wrap_text=True, vertical='top')
-        ws.row_dimensions[row].height = 80  # Reduced height
+        ws.row_dimensions[row].height = 70  # Reduced height
         row += 2
         
-        # Education Summary (Concise 3-5 sentences)
+        # Education Summary (Concise 4-5 sentences)
         ws.merge_cells(f'A{row}:D{row}')
         cell = ws[f'A{row}']
-        cell.value = "EDUCATION SUMMARY"
+        cell.value = "EDUCATION SUMMARY (4-5 sentences)"
         cell.font = header_font
         cell.fill = subheader_fill
         cell.alignment = Alignment(horizontal='center')
@@ -1514,7 +1528,7 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         education_text = analysis_data.get('education_summary', 'No education summary available.')
         cell.value = education_text
         cell.alignment = Alignment(wrap_text=True, vertical='top')
-        ws.row_dimensions[row].height = 80  # Reduced height
+        ws.row_dimensions[row].height = 70  # Reduced height
         row += 2
         
         # Key Strengths (3 items)
@@ -1567,8 +1581,8 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
             bottom=Side(style='thin')
         )
         
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=4):
-            for cell in row:
+        for row_cells in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=4):
+            for cell in row_cells:
                 if cell.value:
                     cell.border = thin_border
         
@@ -1579,6 +1593,7 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         return filepath
     except Exception as e:
         print(f"❌ Error creating simplified Excel report: {str(e)}")
+        traceback.print_exc()
         filepath = os.path.join(REPORTS_FOLDER, f"simplified_fallback_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
         wb = Workbook()
         ws = wb.active
@@ -1588,8 +1603,8 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         wb.save(filepath)
         return filepath
 
-def create_detailed_batch_report(analyses, job_description, filename="batch_resume_analysis.xlsx"):
-    """Create a simplified batch Excel report"""
+def create_simple_batch_report(analyses, job_description, filename="batch_resume_analysis.xlsx"):
+    """Create a simple batch Excel report without merged cells"""
     try:
         wb = Workbook()
         
@@ -1600,61 +1615,85 @@ def create_detailed_batch_report(analyses, job_description, filename="batch_resu
         # Header styles
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         header_font = Font(bold=True, color="FFFFFF", size=11)
-        title_font = Font(bold=True, size=16, color="FFFFFF")
+        title_font = Font(bold=True, size=14, color="FFFFFF")
         
-        # Title
-        ws_summary.merge_cells('A1:F1')
+        # Title - FIXED: Don't merge cells, just set value
         title_cell = ws_summary['A1']
         title_cell.value = "BATCH RESUME ANALYSIS REPORT (Groq Parallel)"
         title_cell.font = title_font
         title_cell.fill = header_fill
         title_cell.alignment = Alignment(horizontal='center', vertical='center')
         
+        # Set width for first 4 columns
+        ws_summary.column_dimensions['A'].width = 25
+        ws_summary.column_dimensions['B'].width = 20
+        ws_summary.column_dimensions['C'].width = 25
+        ws_summary.column_dimensions['D'].width = 20
+        
         # Summary Information
         ws_summary['A3'] = "Analysis Date"
         ws_summary['B3'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ws_summary['A4'] = "Total Resumes"
         ws_summary['B4'] = len(analyses)
-        ws_summary['A5'] = "Successfully Analyzed"
-        ws_summary['B5'] = len(analyses)
-        ws_summary['A6'] = "AI Model"
-        ws_summary['B6'] = "Groq " + GROQ_MODEL
-        ws_summary['A7'] = "Processing Method"
-        ws_summary['B7'] = "Round-robin Parallel"
+        ws_summary['A5'] = "AI Model"
+        ws_summary['B5'] = "Groq " + GROQ_MODEL
+        ws_summary['A6'] = "Processing Method"
+        ws_summary['B6'] = "Round-robin Parallel"
         
-        # Candidates Overview Table - Simplified
+        # Candidates Overview Table - Simple without merged cells
         row = 10
-        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", 
-                   "Skills Matched", "Skills Missing"]
+        
+        # Headers
+        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation"]
         
         for col, header in enumerate(headers, start=1):
             cell = ws_summary.cell(row=row, column=col)
             cell.value = header
             cell.font = header_font
             cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center')
         
         row += 1
+        
+        # Candidate data
         for analysis in analyses:
-            ws_summary.cell(row=row, column=1, value=analysis.get('rank', '-'))
+            ws_summary.cell(row=row, column=1, value=analysis.get('rank', '-')).alignment = Alignment(horizontal='center')
             ws_summary.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
-            ws_summary.cell(row=row, column=3, value=analysis.get('overall_score', 0))
+            
+            score = analysis.get('overall_score', 0)
+            score_cell = ws_summary.cell(row=row, column=3, value=score)
+            score_cell.alignment = Alignment(horizontal='center')
+            
+            # Color code based on score
+            if score >= 80:
+                score_cell.font = Font(bold=True, color="00FF00")
+            elif score >= 60:
+                score_cell.font = Font(bold=True, color="FFA500")
+            else:
+                score_cell.font = Font(bold=True, color="FF0000")
+            
             ws_summary.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
-            
-            strengths = analysis.get('skills_matched', [])
-            ws_summary.cell(row=row, column=5, value=", ".join(strengths[:5]) if strengths else "N/A")
-            
-            missing = analysis.get('skills_missing', [])
-            ws_summary.cell(row=row, column=6, value=", ".join(missing[:5]) if missing else "All matched")
-            
             row += 1
         
         # Add Candidate Details Sheet
         ws_details = wb.create_sheet(title="Candidate Details")
         
-        # Add headers
-        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", 
-                   "Experience Summary", "Education Summary", 
-                   "Key Strengths (3)", "Areas for Improvement (3)",
+        # Set column widths for details sheet
+        ws_details.column_dimensions['A'].width = 8
+        ws_details.column_dimensions['B'].width = 25
+        ws_details.column_dimensions['C'].width = 12
+        ws_details.column_dimensions['D'].width = 20
+        ws_details.column_dimensions['E'].width = 40
+        ws_details.column_dimensions['F'].width = 40
+        ws_details.column_dimensions['G'].width = 25
+        ws_details.column_dimensions['H'].width = 25
+        ws_details.column_dimensions['I'].width = 30
+        ws_details.column_dimensions['J'].width = 30
+        
+        # Add headers - NO MERGED CELLS
+        headers = ["Rank", "Candidate", "Score", "Recommendation", 
+                   "Experience", "Education", 
+                   "Strengths (3)", "Improvements (3)",
                    "Skills Matched", "Skills Missing"]
         
         for col, header in enumerate(headers, start=1):
@@ -1662,71 +1701,116 @@ def create_detailed_batch_report(analyses, job_description, filename="batch_resu
             cell.value = header
             cell.font = header_font
             cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', wrap_text=True)
         
         # Add candidate details
         row = 2
         for analysis in analyses:
-            ws_details.cell(row=row, column=1, value=analysis.get('rank', '-'))
+            ws_details.cell(row=row, column=1, value=analysis.get('rank', '-')).alignment = Alignment(horizontal='center')
             ws_details.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
-            ws_details.cell(row=row, column=3, value=analysis.get('overall_score', 0))
+            
+            score = analysis.get('overall_score', 0)
+            score_cell = ws_details.cell(row=row, column=3, value=score)
+            score_cell.alignment = Alignment(horizontal='center')
+            
+            if score >= 80:
+                score_cell.font = Font(bold=True, color="00FF00")
+            elif score >= 60:
+                score_cell.font = Font(bold=True, color="FFA500")
+            else:
+                score_cell.font = Font(bold=True, color="FF0000")
+            
             ws_details.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
             
-            # Concise summaries
+            # Concise summaries (4-5 sentences max)
             exp_summary = analysis.get('experience_summary', 'No summary available.')
-            if len(exp_summary) > 300:
-                exp_summary = exp_summary[:300] + "..."
-            ws_details.cell(row=row, column=5, value=exp_summary)
+            # Truncate if too long
+            if len(exp_summary) > 200:
+                exp_summary = exp_summary[:197] + "..."
+            ws_details.cell(row=row, column=5, value=exp_summary).alignment = Alignment(wrap_text=True, vertical='top')
             
             edu_summary = analysis.get('education_summary', 'No summary available.')
-            if len(edu_summary) > 300:
-                edu_summary = edu_summary[:300] + "..."
-            ws_details.cell(row=row, column=6, value=edu_summary)
+            if len(edu_summary) > 200:
+                edu_summary = edu_summary[:197] + "..."
+            ws_details.cell(row=row, column=6, value=edu_summary).alignment = Alignment(wrap_text=True, vertical='top')
             
             # Only 3 strengths and improvements
             strengths = analysis.get('key_strengths', [])[:3]
-            ws_details.cell(row=row, column=7, value=", ".join(strengths) if strengths else "N/A")
+            ws_details.cell(row=row, column=7, value="\n".join(strengths) if strengths else "N/A").alignment = Alignment(wrap_text=True, vertical='top')
             
             improvements = analysis.get('areas_for_improvement', [])[:3]
-            ws_details.cell(row=row, column=8, value=", ".join(improvements) if improvements else "N/A")
+            ws_details.cell(row=row, column=8, value="\n".join(improvements) if improvements else "N/A").alignment = Alignment(wrap_text=True, vertical='top')
             
             # Skills (5-8 each)
-            matched_skills = analysis.get('skills_matched', [])
-            ws_details.cell(row=row, column=9, value=", ".join(matched_skills[:8]) if matched_skills else "N/A")
+            matched_skills = analysis.get('skills_matched', [])[:8]
+            ws_details.cell(row=row, column=9, value=", ".join(matched_skills) if matched_skills else "N/A").alignment = Alignment(wrap_text=True, vertical='top')
             
-            missing_skills = analysis.get('skills_missing', [])
-            ws_details.cell(row=row, column=10, value=", ".join(missing_skills[:8]) if missing_skills else "All matched")
+            missing_skills = analysis.get('skills_missing', [])[:8]
+            ws_details.cell(row=row, column=10, value=", ".join(missing_skills) if missing_skills else "All matched").alignment = Alignment(wrap_text=True, vertical='top')
             
+            # Set row height for better visibility
+            ws_details.row_dimensions[row].height = 80
             row += 1
         
-        # Auto-adjust column widths
-        for ws in [ws_summary, ws_details]:
-            for column in ws.columns:
-                max_length = 0
-                column_letter = column[0].column_letter
-                for cell in column:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = min(max_length + 2, 50)
-                ws.column_dimensions[column_letter].width = adjusted_width
+        # Add borders to all cells
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        for sheet in [ws_summary, ws_details]:
+            for row_cells in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column):
+                for cell in row_cells:
+                    if cell.value:
+                        cell.border = thin_border
         
         # Save the file
         filepath = os.path.join(REPORTS_FOLDER, filename)
         wb.save(filepath)
-        print(f"📊 Simplified batch Excel report saved to: {filepath}")
+        print(f"📊 Simple batch Excel report saved to: {filepath}")
         return filepath
+        
     except Exception as e:
-        print(f"❌ Error creating simplified batch Excel report: {str(e)}")
-        filepath = os.path.join(REPORTS_FOLDER, f"batch_fallback_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
+        print(f"❌ Error creating simple batch Excel report: {str(e)}")
+        traceback.print_exc()
+        # Create a minimal report
+        return create_minimal_batch_report(analyses, job_description, filename)
+
+def create_minimal_batch_report(analyses, job_description, filename):
+    """Create a minimal batch report as fallback"""
+    try:
         wb = Workbook()
         ws = wb.active
-        ws['A1'] = "Batch Analysis Report (Groq)"
+        ws.title = "Batch Analysis"
+        
+        ws['A1'] = "Batch Resume Analysis Report"
         ws['A2'] = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         ws['A3'] = f"Total Candidates: {len(analyses)}"
+        ws['A4'] = f"AI Model: Groq {GROQ_MODEL}"
+        
+        row = 6
+        ws.cell(row=row, column=1, value="Rank").font = Font(bold=True)
+        ws.cell(row=row, column=2, value="Candidate").font = Font(bold=True)
+        ws.cell(row=row, column=3, value="Score").font = Font(bold=True)
+        ws.cell(row=row, column=4, value="Recommendation").font = Font(bold=True)
+        
+        row += 1
+        for analysis in analyses:
+            ws.cell(row=row, column=1, value=analysis.get('rank', '-'))
+            ws.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
+            ws.cell(row=row, column=3, value=analysis.get('overall_score', 0))
+            ws.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
+            row += 1
+        
+        filepath = os.path.join(REPORTS_FOLDER, f"minimal_{filename}")
         wb.save(filepath)
+        print(f"📊 Minimal batch report saved to: {filepath}")
         return filepath
+    except Exception as e:
+        print(f"❌ Error creating minimal report: {str(e)}")
+        return None
 
 def get_score_grade_text(score):
     """Get text description for score"""
@@ -1960,7 +2044,7 @@ def health_check():
         'resume_previews_folder_exists': os.path.exists(RESUME_PREVIEW_FOLDER),
         'resume_previews_stored': len(resume_storage),
         'inactive_minutes': inactive_minutes,
-        'version': '2.5.0',
+        'version': '2.5.1',
         'key_status': key_status,
         'available_keys': available_keys,
         'configuration': {
@@ -1973,7 +2057,7 @@ def health_check():
         'processing_method': 'round_robin_parallel',
         'performance_target': '10 resumes in 10-15 seconds',
         'skills_analysis': '5-8 skills per category',
-        'summaries': 'Concise 3-5 sentences each',
+        'summaries': 'Concise 4-5 sentences each',
         'insights': '3 strengths & 3 improvements'
     })
 
@@ -2028,7 +2112,7 @@ if __name__ == '__main__':
     print(f"✅ Round-robin Parallel Processing: Enabled")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
-    print(f"✅ Concise Summaries: 3-5 sentences each")
+    print(f"✅ Concise Summaries: 4-5 sentences each (medium length)")
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
     print(f"✅ Performance: ~10 resumes in 10-15 seconds")
