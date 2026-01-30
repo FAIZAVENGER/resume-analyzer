@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.cell.cell import MergedCell
 from dotenv import load_dotenv
 import traceback
 import threading
@@ -2038,8 +2039,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             bottom=Side(style='thin')
         )
         
-        from openpyxl.cell.cell import MergedCell
-        
         for sheet in wb.worksheets:
             for row in sheet.iter_rows():
                 for cell in row:
@@ -2062,8 +2061,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
 def create_minimal_batch_report(analyses, job_description, filename):
     """Create a comprehensive batch report with all candidate details including summaries"""
     try:
-        from openpyxl.cell.cell import MergedCell
-        
         wb = Workbook()
         ws = wb.active
         ws.title = "Batch Analysis"
