@@ -221,1240 +221,425 @@ def convert_doc_to_pdf(doc_path, pdf_path):
             return True
             
     except Exception as e:
-        print(f"⚠️ DOC to PDF conversion failed: {str(e)}")
-        # Create a simple PDF from extracted text
-        extract_text_and_create_pdf(doc_path, pdf_path)
-        return True
-    
-    return False
+        print(f"⚠️ PDF conversion failed: {str(e)}")
+        return False
 
 def convert_txt_to_pdf(txt_path, pdf_path):
     """Convert TXT to PDF"""
     try:
-        extract_text_and_create_pdf(txt_path, pdf_path)
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.units import inch
+        
+        c = canvas.Canvas(pdf_path, pagesize=letter)
+        width, height = letter
+        
+        with open(txt_path, 'r', encoding='utf-8', errors='ignore') as f:
+            text_content = f.read()
+        
+        # Simple text wrapping
+        y = height - inch
+        for line in text_content.split('\n'):
+            if y < inch:
+                c.showPage()
+                y = height - inch
+            c.drawString(inch, y, line[:100])  # Limit line length
+            y -= 15
+        
+        c.save()
         return True
     except Exception as e:
         print(f"⚠️ TXT to PDF conversion failed: {str(e)}")
         return False
 
-def extract_text_and_create_pdf(input_path, pdf_path):
-    """Extract text and create a simple PDF"""
+def extract_text_and_create_pdf(doc_path, pdf_path):
+    """Fallback: Extract text from DOC and create a simple PDF"""
     try:
         from reportlab.lib.pagesizes import letter
         from reportlab.pdfgen import canvas
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
-        from reportlab.lib.units import inch
         
-        # Extract text based on file type
-        file_ext = os.path.splitext(input_path)[1].lower()
-        
-        if file_ext == '.pdf':
-            text = extract_text_from_pdf(input_path)
-        elif file_ext in ['.docx', '.doc']:
-            text = extract_text_from_docx(input_path)
-        elif file_ext == '.txt':
-            text = extract_text_from_txt(input_path)
-        else:
-            text = "Cannot preview this file type."
+        # Extract text from DOCX
+        doc = Document(doc_path)
+        text_content = '\n'.join([para.text for para in doc.paragraphs])
         
         # Create PDF
-        doc = SimpleDocTemplate(pdf_path, pagesize=letter,
-                                rightMargin=72, leftMargin=72,
-                                topMargin=72, bottomMargin=72)
+        c = canvas.Canvas(pdf_path, pagesize=letter)
+        width, height = letter
         
-        styles = getSampleStyleSheet()
-        story = []
+        y = height - 50
+        for line in text_content.split('\n')[:50]:  # Limit to first 50 lines
+            if y < 50:
+                break
+            c.drawString(50, y, line[:100])
+            y -= 15
         
-        # Add title
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=16,
-            spaceAfter=30
-        )
-        title = Paragraph("Resume Preview", title_style)
-        story.append(title)
-        
-        # Add file info
-        info_style = ParagraphStyle(
-            'CustomInfo',
-            parent=styles['Normal'],
-            fontSize=10,
-            textColor='gray',
-            spaceAfter=20
-        )
-        info_text = f"Original file: {os.path.basename(input_path)} | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        info = Paragraph(info_text, info_style)
-        story.append(info)
-        
-        story.append(Spacer(1, 20))
-        
-        # Add content
-        content_style = ParagraphStyle(
-            'CustomContent',
-            parent=styles['Normal'],
-            fontSize=11,
-            leading=14,
-            spaceBefore=6,
-            spaceAfter=6
-        )
-        
-        # Split text into paragraphs
-        paragraphs = text.split('\n')
-        for para in paragraphs:
-            if para.strip():
-                story.append(Paragraph(para.replace('\t', '&nbsp;' * 4), content_style))
-        
-        # Build PDF
-        doc.build(story)
+        c.save()
         return True
+    except Exception as e:
+        print(f"⚠️ Fallback PDF creation failed: {str(e)}")
+        return False
+
+def cleanup_resume_previews(max_age_hours=24):
+    """Clean up old resume preview files"""
+    try:
+        cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
         
-    except Exception as e:
-        print(f"⚠️ Failed to create PDF from text: {str(e)}")
-        # Create minimal PDF
-        try:
-            from reportlab.pdfgen import canvas
-            c = canvas.Canvas(pdf_path)
-            c.drawString(100, 750, "Resume Preview")
-            c.drawString(100, 730, f"File: {os.path.basename(input_path)}")
-            c.drawString(100, 710, "Unable to display content. Please download the original file.")
-            c.save()
-            return True
-        except:
-            return False
-
-def get_resume_preview(analysis_id):
-    """Get resume preview data"""
-    if analysis_id in resume_storage:
-        return resume_storage[analysis_id]
-    return None
-
-def cleanup_resume_previews():
-    """Clean up old resume previews"""
-    try:
-        now = datetime.now()
-        for analysis_id in list(resume_storage.keys()):
-            stored_time = datetime.fromisoformat(resume_storage[analysis_id]['stored_at'])
-            if (now - stored_time).total_seconds() > 3600:  # 1 hour retention
+        # Clean from storage dict
+        to_remove = []
+        for analysis_id, info in resume_storage.items():
+            stored_time = datetime.fromisoformat(info['stored_at'])
+            if stored_time < cutoff_time:
+                to_remove.append(analysis_id)
+                # Delete files
                 try:
-                    # Clean up all related files
-                    paths_to_clean = [
-                        resume_storage[analysis_id]['path'],
-                        resume_storage[analysis_id].get('pdf_path')
-                    ]
-                    
-                    for path in paths_to_clean:
-                        if path and os.path.exists(path):
-                            os.remove(path)
-                    
-                    del resume_storage[analysis_id]
-                    print(f"🧹 Cleaned up resume preview for {analysis_id}")
-                except Exception as e:
-                    print(f"⚠️ Error cleaning up files for {analysis_id}: {str(e)}")
-        # Also clean up any orphaned files
-        cleanup_orphaned_files()
+                    if os.path.exists(info['path']):
+                        os.remove(info['path'])
+                    if info.get('pdf_path') and os.path.exists(info['pdf_path']):
+                        os.remove(info['pdf_path'])
+                except:
+                    pass
+        
+        for analysis_id in to_remove:
+            del resume_storage[analysis_id]
+        
+        if to_remove:
+            print(f"🧹 Cleaned up {len(to_remove)} old resume previews")
+            
     except Exception as e:
-        print(f"⚠️ Error cleaning up resume previews: {str(e)}")
+        print(f"⚠️ Cleanup error: {str(e)}")
 
-def cleanup_orphaned_files():
-    """Clean up orphaned files in preview folder"""
+def extract_text_from_pdf(file):
+    """Extract text from PDF using PyPDF2"""
     try:
-        now = datetime.now()
-        for filename in os.listdir(RESUME_PREVIEW_FOLDER):
-            filepath = os.path.join(RESUME_PREVIEW_FOLDER, filename)
-            if os.path.isfile(filepath):
-                file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
-                if (now - file_time).total_seconds() > 7200:  # 2 hours
-                    try:
-                        os.remove(filepath)
-                        print(f"🧹 Cleaned up orphaned file: {filename}")
-                    except:
-                        pass
+        pdf_reader = PdfReader(file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() + "\n"
+        return text.strip()
     except Exception as e:
-        print(f"⚠️ Error cleaning up orphaned files: {str(e)}")
+        print(f"❌ Error extracting text from PDF: {str(e)}")
+        return ""
 
-def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45, retry_count=0):
-    """Call Groq API with optimized settings"""
-    if not api_key:
-        print(f"❌ No Groq API key provided")
-        return {'error': 'no_api_key', 'status': 500}
-    
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json'
-    }
-    
-    payload = {
-        'model': GROQ_MODEL,
-        'messages': [
-            {
-                'role': 'user',
-                'content': prompt
-            }
-        ],
-        'max_tokens': max_tokens,
-        'temperature': temperature,
-        'top_p': 0.9,
-        'stream': False,
-        'stop': None
-    }
-    
+def extract_text_from_docx(file):
+    """Extract text from DOCX file"""
     try:
-        start_time = time.time()
+        doc = Document(file)
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+        return text.strip()
+    except Exception as e:
+        print(f"❌ Error extracting text from DOCX: {str(e)}")
+        return ""
+
+def extract_text_from_txt(file):
+    """Extract text from TXT file"""
+    try:
+        # Try different encodings
+        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+        for encoding in encodings:
+            try:
+                file.seek(0)
+                content = file.read()
+                if isinstance(content, bytes):
+                    text = content.decode(encoding)
+                else:
+                    text = content
+                return text.strip()
+            except (UnicodeDecodeError, AttributeError):
+                continue
+        return ""
+    except Exception as e:
+        print(f"❌ Error extracting text from TXT: {str(e)}")
+        return ""
+
+def call_groq_api(prompt, api_key, max_tokens=2000, timeout=45):
+    """Call Groq API with timeout and error handling"""
+    try:
+        if not api_key:
+            return {"error": "No API key provided"}
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": GROQ_MODEL,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an expert ATS (Applicant Tracking System) resume analyzer. Provide detailed, accurate, and helpful analysis."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "temperature": 0.3,
+            "max_tokens": max_tokens,
+            "top_p": 0.9
+        }
+        
         response = requests.post(
             GROQ_API_URL,
             headers=headers,
-            json=payload,
+            json=data,
             timeout=timeout
         )
         
-        response_time = time.time() - start_time
-        
         if response.status_code == 200:
-            data = response.json()
-            if 'choices' in data and len(data['choices']) > 0:
-                result = data['choices'][0]['message']['content']
-                print(f"✅ Groq API response in {response_time:.2f}s")
-                return result
-            else:
-                print(f"❌ Unexpected Groq API response format")
-                return {'error': 'invalid_response', 'status': response.status_code}
-        
-        if response.status_code == 429:
-            print(f"❌ Rate limit exceeded for Groq API")
-            
-            if retry_count < MAX_RETRIES:
-                wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(5, 10)
-                print(f"⏳ Rate limited, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
-                time.sleep(wait_time)
-                return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
-            return {'error': 'rate_limit', 'status': 429}
-        
-        elif response.status_code == 503:
-            print(f"❌ Service unavailable for Groq API")
-            
-            if retry_count < 2:
-                wait_time = 15 + random.uniform(5, 10)
-                print(f"⏳ Service unavailable, retrying in {wait_time:.1f}s")
-                time.sleep(wait_time)
-                return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
-            return {'error': 'service_unavailable', 'status': 503}
-        
+            result = response.json()
+            return result['choices'][0]['message']['content']
+        elif response.status_code == 429:
+            return {"error": "rate_limit", "message": "Rate limit exceeded"}
+        elif response.status_code == 401:
+            return {"error": "auth", "message": "Invalid API key"}
         else:
-            print(f"❌ Groq API Error {response.status_code}: {response.text[:100]}")
-            return {'error': f'api_error_{response.status_code}', 'status': response.status_code}
+            return {"error": "api_error", "message": f"API error: {response.status_code}"}
             
     except requests.exceptions.Timeout:
-        print(f"❌ Groq API timeout after {timeout}s")
-        
-        if retry_count < 2:
-            wait_time = 10 + random.uniform(5, 10)
-            print(f"⏳ Timeout, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/3)")
-            time.sleep(wait_time)
-            return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
-        return {'error': 'timeout', 'status': 408}
-    
+        return {"error": "timeout", "message": "Request timed out"}
+    except requests.exceptions.ConnectionError:
+        return {"error": "connection", "message": "Connection failed"}
     except Exception as e:
-        print(f"❌ Groq API Exception: {str(e)}")
-        return {'error': str(e), 'status': 500}
+        return {"error": "unknown", "message": str(e)}
 
-def warmup_groq_service():
-    """Warm up Groq service connection"""
-    global warmup_complete
-    
-    available_keys = sum(1 for key in GROQ_API_KEYS if key)
-    if available_keys == 0:
-        print("⚠️ Skipping Groq warm-up: No API keys configured")
-        return False
-    
+def parse_analysis_response(response_text):
+    """Parse the AI response with enhanced error handling and fallbacks"""
     try:
-        print(f"🔥 Warming up Groq connection with {available_keys} keys...")
-        print(f"📊 Using model: {GROQ_MODEL}")
+        # Clean the response
+        cleaned_response = response_text.strip()
         
-        warmup_results = []
-        
-        for i, api_key in enumerate(GROQ_API_KEYS):
-            if api_key:
-                print(f"  Testing key {i+1}...")
-                start_time = time.time()
-                
-                response = call_groq_api(
-                    prompt="Hello, are you ready? Respond with just 'ready'.",
-                    api_key=api_key,
-                    max_tokens=10,
-                    temperature=0.1,
-                    timeout=15
-                )
-                
-                if isinstance(response, dict) and 'error' in response:
-                    print(f"    ⚠️ Key {i+1} failed: {response.get('error')}")
-                    warmup_results.append(False)
-                elif response and 'ready' in response.lower():
-                    elapsed = time.time() - start_time
-                    print(f"    ✅ Key {i+1} warmed up in {elapsed:.2f}s")
-                    warmup_results.append(True)
-                else:
-                    print(f"    ⚠️ Key {i+1} warm-up failed: Unexpected response")
-                    warmup_results.append(False)
-                
-                if i < available_keys - 1:
-                    time.sleep(1)
-        
-        success = any(warmup_results)
-        if success:
-            print(f"✅ Groq service warmed up successfully")
-            warmup_complete = True
+        # Try to find JSON in the response
+        json_match = re.search(r'\{.*\}', cleaned_response, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(0)
+            parsed = json.loads(json_str)
         else:
-            print(f"⚠️ Groq warm-up failed on all keys")
-            
-        return success
+            # If no JSON found, try to parse the entire response
+            parsed = json.loads(cleaned_response)
         
+        # Validate and set defaults for required fields
+        result = {
+            'overall_score': int(parsed.get('overall_score', 0)),
+            'candidate_name': str(parsed.get('candidate_name', 'Unknown Candidate')),
+            'recommendation': str(parsed.get('recommendation', 'Review Required')),
+            'skills_matched': parsed.get('skills_matched', [])[:MAX_SKILLS_TO_SHOW],
+            'skills_missing': parsed.get('skills_missing', [])[:MAX_SKILLS_TO_SHOW],
+            'experience_summary': str(parsed.get('experience_summary', 'No experience summary available.')),
+            'education_summary': str(parsed.get('education_summary', 'No education summary available.')),
+            'key_strengths': parsed.get('key_strengths', [])[:3],
+            'areas_for_improvement': parsed.get('areas_for_improvement', [])[:3]
+        }
+        
+        # Ensure we have at least minimum skills
+        if len(result['skills_matched']) < MIN_SKILLS_TO_SHOW:
+            result['skills_matched'].extend(['N/A'] * (MIN_SKILLS_TO_SHOW - len(result['skills_matched'])))
+        if len(result['skills_missing']) < MIN_SKILLS_TO_SHOW:
+            result['skills_missing'].extend(['N/A'] * (MIN_SKILLS_TO_SHOW - len(result['skills_missing'])))
+        
+        # Ensure we have exactly 3 strengths and improvements
+        if len(result['key_strengths']) < 3:
+            result['key_strengths'].extend(['N/A'] * (3 - len(result['key_strengths'])))
+        if len(result['areas_for_improvement']) < 3:
+            result['areas_for_improvement'].extend(['N/A'] * (3 - len(result['areas_for_improvement'])))
+        
+        return result
+        
+    except json.JSONDecodeError as e:
+        print(f"⚠️ JSON parsing error: {str(e)}")
+        print(f"Response text: {response_text[:200]}...")
+        return create_fallback_analysis(response_text)
     except Exception as e:
-        print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        threading.Timer(30.0, warmup_groq_service).start()
-        return False
+        print(f"⚠️ Parsing error: {str(e)}")
+        return create_fallback_analysis(response_text)
 
-def keep_service_warm():
-    """Periodically send requests to keep Groq service responsive"""
-    global service_running
-    
-    while service_running:
-        try:
-            time.sleep(180)
-            
-            available_keys = sum(1 for key in GROQ_API_KEYS if key)
-            if available_keys > 0 and warmup_complete:
-                print(f"♨️ Keeping Groq warm with {available_keys} keys...")
-                
-                for i, api_key in enumerate(GROQ_API_KEYS):
-                    if api_key and not key_usage[i]['cooling']:
-                        try:
-                            response = call_groq_api(
-                                prompt="Ping - just say 'pong'",
-                                api_key=api_key,
-                                max_tokens=5,
-                                timeout=20
-                            )
-                            if response and 'pong' in str(response).lower():
-                                print(f"  ✅ Key {i+1} keep-alive successful")
-                            else:
-                                print(f"  ⚠️ Key {i+1} keep-alive got unexpected response")
-                        except Exception as e:
-                            print(f"  ⚠️ Key {i+1} keep-alive failed: {str(e)}")
-                        break
-                    
-        except Exception as e:
-            print(f"⚠️ Keep-warm thread error: {str(e)}")
-            time.sleep(180)
+def create_fallback_analysis(response_text=""):
+    """Create a basic fallback analysis when parsing fails"""
+    return {
+        'overall_score': 50,
+        'candidate_name': 'Unknown Candidate',
+        'recommendation': 'Review Required - Analysis Incomplete',
+        'skills_matched': ['Analysis', 'In Progress'] + ['N/A'] * (MIN_SKILLS_TO_SHOW - 2),
+        'skills_missing': ['Complete', 'Review Needed'] + ['N/A'] * (MIN_SKILLS_TO_SHOW - 2),
+        'experience_summary': 'Unable to complete full analysis. Please review manually.',
+        'education_summary': 'Unable to complete full analysis. Please review manually.',
+        'key_strengths': ['Pending detailed review', 'N/A', 'N/A'],
+        'areas_for_improvement': ['Requires manual review', 'N/A', 'N/A']
+    }
 
-# Text extraction functions
-def extract_text_from_pdf(file_path):
-    """Extract text from PDF file with error handling"""
-    try:
-        text = ""
-        max_attempts = 2
-        
-        for attempt in range(max_attempts):
-            try:
-                reader = PdfReader(file_path)
-                text = ""
-                
-                for page_num, page in enumerate(reader.pages[:8]):  # Increased to 8 pages
-                    try:
-                        page_text = page.extract_text()
-                        if page_text:
-                            text += page_text + "\n"
-                    except Exception as e:
-                        print(f"⚠️ PDF page extraction error: {e}")
-                        continue
-                
-                if text.strip():
-                    break
-                    
-            except Exception as e:
-                print(f"❌ PDFReader attempt {attempt + 1} failed: {e}")
-                if attempt == max_attempts - 1:
-                    try:
-                        with open(file_path, 'rb') as f:
-                            content = f.read()
-                            text = content.decode('utf-8', errors='ignore')
-                            if text.strip():
-                                words = text.split()
-                                text = ' '.join(words[:1500])  # Increased word limit
-                    except:
-                        text = "Error: Could not extract text from PDF file"
-        
-        if not text.strip():
-            return "Error: PDF appears to be empty or text could not be extracted"
-        
-        return text
-    except Exception as e:
-        print(f"❌ PDF Error: {traceback.format_exc()}")
-        return f"Error reading PDF: {str(e)[:100]}"
-
-def extract_text_from_docx(file_path):
-    """Extract text from DOCX file"""
-    try:
-        doc = Document(file_path)
-        text = "\n".join([paragraph.text for paragraph in doc.paragraphs[:150] if paragraph.text.strip()])
-        
-        if not text.strip():
-            return "Error: Document appears to be empty"
-        
-        return text
-    except Exception as e:
-        print(f"❌ DOCX Error: {traceback.format_exc()}")
-        return f"Error reading DOCX: {str(e)}"
-
-def extract_text_from_txt(file_path):
-    """Extract text from TXT file"""
-    try:
-        encodings = ['utf-8', 'latin-1', 'windows-1252', 'cp1252']
-        
-        for encoding in encodings:
-            try:
-                with open(file_path, 'r', encoding=encoding) as file:
-                    text = file.read()
-                    
-                if not text.strip():
-                    return "Error: Text file appears to be empty"
-                
-                return text
-            except UnicodeDecodeError:
-                continue
-                
-        return "Error: Could not decode text file with common encodings"
-        
-    except Exception as e:
-        print(f"❌ TXT Error: {traceback.format_exc()}")
-        return f"Error reading TXT: {str(e)}"
-
-def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None, api_key=None, key_index=None):
-    """Use Groq API to analyze resume against job description"""
-    
-    if not api_key:
-        print(f"❌ No Groq API key provided for analysis.")
-        return generate_fallback_analysis(filename, "No API key available")
-    
-    resume_text = resume_text[:3000]  # Increased from 2500
-    job_description = job_description[:1500]  # Increased from 1200
-    
+def analyze_resume_with_retry(resume_text, job_description, filename="", resume_index=0):
+    """Analyze resume with retry logic and consistent scoring"""
+    # Check cache first
     resume_hash = calculate_resume_hash(resume_text, job_description)
-    cached_score = get_cached_score(resume_hash)
+    cached_result = get_cached_score(resume_hash)
     
-    # Updated: Request complete sentences, not truncated
-    prompt = f"""Analyze resume against job description:
-
-RESUME:
-{resume_text}
+    if cached_result:
+        print(f"✅ Using cached score for resume")
+        return cached_result
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            # Get API key using round-robin
+            api_key, key_num = get_available_key(resume_index)
+            
+            if not api_key:
+                print(f"❌ No API keys available")
+                return create_fallback_analysis()
+            
+            print(f"🔑 Using API Key {key_num} for resume {resume_index + 1} (Attempt {attempt + 1})")
+            
+            # Create comprehensive prompt
+            prompt = f"""Analyze this resume against the job description and provide a detailed JSON response.
 
 JOB DESCRIPTION:
 {job_description}
 
-Provide analysis in this JSON format:
+RESUME:
+{resume_text[:4000]}
+
+IMPORTANT INSTRUCTIONS:
+1. Provide EXACTLY {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills for both matched and missing (no more, no less)
+2. For Experience Summary and Education Summary: Write COMPLETE, DETAILED 4-5 sentence paragraphs - DO NOT TRUNCATE
+3. Provide EXACTLY 3 key strengths and 3 areas for improvement
+4. Extract the candidate's name from the resume
+5. Be specific and detailed in all summaries
+
+Return ONLY valid JSON in this exact format (no markdown, no extra text):
 {{
-    "candidate_name": "Extracted name or filename",
-    "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
-    "skills_missing": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
-    "experience_summary": "Provide a concise 4-5 sentence summary of candidate's experience. Focus on key roles, achievements, and relevance. Make sure each sentence is complete and not truncated. Write full sentences.",
-    "education_summary": "Provide a concise 4-5 sentence summary of education. Include degrees, institutions, and relevance. Make sure each sentence is complete and not truncated. Write full sentences.",
-    "overall_score": 75,
-    "recommendation": "Strongly Recommended/Recommended/Consider/Not Recommended",
-    "key_strengths": ["strength1", "strength2", "strength3"],
-    "areas_for_improvement": ["area1", "area2", "area3"]
-}}
-
-IMPORTANT: 
-1. Provide 5-8 skills in both skills_matched and skills_missing arrays
-2. Experience summary: MAX 4-5 COMPLETE sentences (not truncated)
-3. Education summary: MAX 4-5 COMPLETE sentences (not truncated)
-4. Provide EXACTLY 3 key_strengths and 3 areas_for_improvement
-5. DO NOT include job_title_suggestion, years_experience, industry_fit, or salary_expectation
-6. Write full, complete sentences. Do not cut off sentences mid-way.
-7. Ensure proper sentence endings with periods."""
-
-    try:
-        print(f"⚡ Sending to Groq API (Key {key_index})...")
-        start_time = time.time()
-        
-        response = call_groq_api(
-            prompt=prompt,
-            api_key=api_key,
-            max_tokens=1500,  # Increased to ensure complete sentences
-            temperature=0.1,
-            timeout=60
-        )
-        
-        if isinstance(response, dict) and 'error' in response:
-            error_type = response.get('error')
-            print(f"❌ Groq API error: {error_type}")
+  "overall_score": <number 0-100>,
+  "candidate_name": "<extract from resume>",
+  "recommendation": "<Strong Match / Good Match / Potential Match / Not Recommended>",
+  "skills_matched": [<{MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} specific matching skills>],
+  "skills_missing": [<{MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} specific missing skills>],
+  "experience_summary": "<COMPLETE 4-5 sentence detailed summary - DO NOT TRUNCATE>",
+  "education_summary": "<COMPLETE 4-5 sentence detailed summary - DO NOT TRUNCATE>",
+  "key_strengths": [<exactly 3 detailed strengths>],
+  "areas_for_improvement": [<exactly 3 specific improvements>]
+}}"""
             
-            if 'rate_limit' in error_type or '429' in str(error_type):
-                if key_index:
-                    mark_key_cooling(key_index - 1, 30)
+            response = call_groq_api(prompt, api_key, max_tokens=2000, timeout=45)
             
-            return generate_fallback_analysis(filename, f"API Error: {error_type}", partial_success=True)
-        
-        elapsed_time = time.time() - start_time
-        print(f"✅ Groq API response in {elapsed_time:.2f} seconds (Key {key_index})")
-        
-        result_text = response.strip()
-        
-        json_start = result_text.find('{')
-        json_end = result_text.rfind('}') + 1
-        
-        if json_start != -1 and json_end > json_start:
-            json_str = result_text[json_start:json_end]
-        else:
-            json_str = result_text
-        
-        json_str = json_str.replace('```json', '').replace('```', '').strip()
-        
-        try:
-            analysis = json.loads(json_str)
-            print(f"✅ Successfully parsed JSON response")
-        except json.JSONDecodeError as e:
-            print(f"❌ JSON Parse Error: {e}")
-            print(f"Response was: {result_text[:150]}")
+            if isinstance(response, dict) and 'error' in response:
+                if response.get('error') == 'rate_limit':
+                    key_index = key_num - 1
+                    mark_key_cooling(key_index, duration=30)
+                    print(f"⚠️ Key {key_num} hit rate limit, cooling down...")
+                    time.sleep(2)
+                    continue
+                else:
+                    print(f"❌ API Error: {response.get('message', 'Unknown error')}")
+                    time.sleep(RETRY_DELAY_BASE * (attempt + 1))
+                    continue
             
-            return generate_fallback_analysis(filename, "JSON Parse Error", partial_success=True)
-        
-        analysis = validate_analysis(analysis, filename)
-        
-        try:
-            score = int(analysis['overall_score'])
-            if score < 0 or score > 100:
-                score = 70
-            analysis['overall_score'] = score
-            set_cached_score(resume_hash, score)
-        except:
-            if cached_score:
-                analysis['overall_score'] = cached_score
-            else:
-                analysis['overall_score'] = 70
-        
-        analysis['ai_provider'] = "groq"
-        analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
-        analysis['ai_model'] = GROQ_MODEL
-        analysis['response_time'] = f"{elapsed_time:.2f}s"
-        analysis['key_used'] = f"Key {key_index}"
-        
-        if analysis_id:
-            analysis['analysis_id'] = analysis_id
-        
-        print(f"✅ Analysis completed: {analysis['candidate_name']} (Score: {analysis['overall_score']}) (Key {key_index})")
-        
-        return analysis
-        
-    except Exception as e:
-        print(f"❌ Groq Analysis Error: {str(e)}")
-        return generate_fallback_analysis(filename, f"Analysis Error: {str(e)[:100]}")
-    
-def validate_analysis(analysis, filename):
-    """Validate analysis data and fill missing fields - FIXED to ensure complete sentences"""
-    required_fields = {
-        'candidate_name': 'Professional Candidate',
-        'skills_matched': ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Team Collaboration', 'Project Management', 'Agile Methodology'],
-        'skills_missing': ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX Design', 'Cybersecurity', 'Mobile Development', 'Database Administration'],
-        'experience_summary': 'The candidate demonstrates relevant professional experience with progressive responsibility. Their background shows expertise in key areas relevant to modern industry demands. They have experience collaborating with teams and delivering measurable results. Additional experience in specific domains enhances their suitability.',
-        'education_summary': 'The candidate holds relevant educational qualifications from reputable institutions. Their academic background provides strong foundational knowledge in core subjects. Additional certifications enhance their professional profile. The education aligns well with industry requirements.',
-        'overall_score': 70,
-        'recommendation': 'Consider for Interview',
-        'key_strengths': ['Strong technical foundation', 'Excellent communication skills', 'Proven track record of delivery'],
-        'areas_for_improvement': ['Could benefit from advanced certifications', 'Limited experience in cloud platforms', 'Should gain experience with newer technologies']
-    }
-    
-    for field, default_value in required_fields.items():
-        if field not in analysis:
-            analysis[field] = default_value
-    
-    if analysis['candidate_name'] == 'Professional Candidate' and filename:
-        base_name = os.path.splitext(filename)[0]
-        clean_name = base_name.replace('-', ' ').replace('_', ' ').title()
-        if len(clean_name.split()) <= 4:
-            analysis['candidate_name'] = clean_name
-    
-    # Ensure 5-8 skills in each category
-    skills_matched = analysis.get('skills_matched', [])
-    skills_missing = analysis.get('skills_missing', [])
-    
-    # If we have fewer than 5 skills, pad with defaults
-    if len(skills_matched) < MIN_SKILLS_TO_SHOW:
-        default_skills = ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Teamwork', 'Project Management', 'Agile']
-        needed = MIN_SKILLS_TO_SHOW - len(skills_matched)
-        skills_matched.extend(default_skills[:needed])
-    
-    if len(skills_missing) < MIN_SKILLS_TO_SHOW:
-        default_skills = ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX', 'Cybersecurity', 'Mobile Dev', 'Database']
-        needed = MIN_SKILLS_TO_SHOW - len(skills_missing)
-        skills_missing.extend(default_skills[:needed])
-    
-    # Limit to maximum
-    analysis['skills_matched'] = skills_matched[:MAX_SKILLS_TO_SHOW]
-    analysis['skills_missing'] = skills_missing[:MAX_SKILLS_TO_SHOW]
-    
-    # Ensure exactly 3 strengths and improvements
-    analysis['key_strengths'] = analysis.get('key_strengths', [])[:3]
-    analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:3]
-    
-    # FIXED: Ensure complete sentences for summaries (don't truncate)
-    for field in ['experience_summary', 'education_summary']:
-        if field in analysis:
-            text = analysis[field]
-            # Remove any trailing ellipsis or incomplete sentences
-            if '...' in text:
-                # Find the last complete sentence before ellipsis
-                sentences = text.split('. ')
-                complete_sentences = []
-                for sentence in sentences:
-                    if '...' in sentence:
-                        # Remove the incomplete part
-                        sentence = sentence.split('...')[0]
-                        if sentence.strip():
-                            complete_sentences.append(sentence.strip() + '.')
-                        break
-                    elif sentence.strip():
-                        complete_sentences.append(sentence.strip() + '.')
-                analysis[field] = ' '.join(complete_sentences)
+            # Parse the response
+            analysis = parse_analysis_response(response)
+            analysis['filename'] = filename
+            analysis['analysis_id'] = f"resume_{resume_index}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            analysis['key_used'] = f"Key {key_num}"
             
-            # Ensure proper sentence endings
-            if not analysis[field].strip().endswith(('.', '!', '?')):
-                analysis[field] = analysis[field].strip() + '.'
+            # Cache the result
+            set_cached_score(resume_hash, analysis)
             
-            # Limit to reasonable length but keep sentences complete
-            if len(analysis[field]) > 800:
-                # Take first 5 sentences instead of truncating
-                sentences = analysis[field].split('. ')
-                if len(sentences) > 5:
-                    analysis[field] = '. '.join(sentences[:5]) + '.'
-    
-    # Remove unwanted fields
-    unwanted_fields = ['job_title_suggestion', 'years_experience', 'industry_fit', 'salary_expectation']
-    for field in unwanted_fields:
-        if field in analysis:
-            del analysis[field]
-    
-    return analysis
-
-def generate_fallback_analysis(filename, reason, partial_success=False):
-    """Generate a fallback analysis"""
-    candidate_name = "Professional Candidate"
-    
-    if filename:
-        base_name = os.path.splitext(filename)[0]
-        clean_name = base_name.replace('-', ' ').replace('_', ' ').replace('resume', '').replace('cv', '').strip()
-        if clean_name:
-            parts = clean_name.split()
-            if len(parts) >= 2 and len(parts) <= 4:
-                candidate_name = ' '.join(part.title() for part in parts)
-    
-    if partial_success:
-        return {
-            "candidate_name": candidate_name,
-            "skills_matched": ['Python Programming', 'JavaScript Development', 'Database Management', 'Communication Skills', 'Problem Solving', 'Team Collaboration'],
-            "skills_missing": ['Machine Learning Algorithms', 'Cloud Platform Expertise', 'Advanced Data Analysis', 'DevOps Practices', 'UI/UX Design Principles'],
-            "experience_summary": 'The candidate has demonstrated professional experience in relevant technical roles. Their background includes working with modern technologies and methodologies. They have contributed to multiple projects with measurable outcomes. Additional experience enhances their suitability for the role.',
-            "education_summary": 'The candidate possesses educational qualifications that provide a strong foundation for professional work. Their academic background includes relevant coursework and projects. Additional training complements their formal education. The educational profile aligns with industry requirements.',
-            "overall_score": 55,
-            "recommendation": "Needs Full Analysis",
-            "key_strengths": ['Technical proficiency', 'Communication abilities', 'Problem-solving approach'],
-            "areas_for_improvement": ['Advanced technical skills needed', 'Cloud platform experience required', 'Industry-specific knowledge'],
-            "ai_provider": "groq",
-            "ai_status": "Partial",
-            "ai_model": GROQ_MODEL,
-        }
-    else:
-        return {
-            "candidate_name": candidate_name,
-            "skills_matched": ['Basic Programming', 'Communication Skills', 'Problem Solving', 'Teamwork', 'Technical Knowledge', 'Learning Ability'],
-            "skills_missing": ['Advanced Technical Skills', 'Industry Experience', 'Specialized Knowledge', 'Certifications', 'Project Management'],
-            "experience_summary": 'Professional experience analysis will be available once the Groq AI service is fully initialized. The candidate appears to have relevant background based on initial file processing. Additional details will be available with full analysis.',
-            "education_summary": 'Educational background analysis will be available shortly upon service initialization. Academic qualifications assessment is pending full AI processing. Further details will be provided with complete analysis.',
-            "overall_score": 50,
-            "recommendation": "Service Warming Up - Please Retry",
-            "key_strengths": ['Fast learning capability', 'Strong work ethic', 'Good communication'],
-            "areas_for_improvement": ['Service initialization required', 'Complete analysis pending', 'Detailed assessment needed'],
-            "ai_provider": "groq",
-            "ai_status": "Warming up",
-            "ai_model": GROQ_MODEL,
-        }
-
-def process_single_resume(args):
-    """Process a single resume with intelligent error handling"""
-    resume_file, job_description, index, total, batch_id = args
-    
-    try:
-        print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
-        
-        if index > 0:
-            if index < 3:
-                base_delay = 0.5
-            elif index < 6:
-                base_delay = 1.0
-            else:
-                base_delay = 1.5
+            # Update key usage
+            key_usage[key_num - 1]['count'] += 1
+            key_usage[key_num - 1]['last_used'] = datetime.now()
             
-            delay = base_delay + random.uniform(0, 0.3)
-            print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
-            time.sleep(delay)
-        
-        api_key, key_index = get_available_key(index)
-        if not api_key:
-            return {
-                'filename': resume_file.filename,
-                'error': 'No available API key',
-                'status': 'failed',
-                'index': index
-            }
-        
-        file_ext = os.path.splitext(resume_file.filename)[1].lower()
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        file_path = os.path.join(UPLOAD_FOLDER, f"batch_{batch_id}_{index}{file_ext}")
-        
-        # Save the file first
-        resume_file.save(file_path)
-        
-        # Store resume for preview
-        analysis_id = f"{batch_id}_resume_{index}"
-        preview_filename = store_resume_file(resume_file, resume_file.filename, analysis_id)
-        
-        if file_ext == '.pdf':
-            resume_text = extract_text_from_pdf(file_path)
-        elif file_ext in ['.docx', '.doc']:
-            resume_text = extract_text_from_docx(file_path)
-        elif file_ext == '.txt':
-            resume_text = extract_text_from_txt(file_path)
-        else:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            return {
-                'filename': resume_file.filename,
-                'error': f'Unsupported format: {file_ext}',
-                'status': 'failed',
-                'index': index
-            }
-        
-        if resume_text.startswith('Error'):
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            return {
-                'filename': resume_file.filename,
-                'error': resume_text,
-                'status': 'failed',
-                'index': index
-            }
-        
-        key_usage[key_index - 1]['count'] += 1
-        key_usage[key_index - 1]['last_used'] = datetime.now()
-        
-        analysis = analyze_resume_with_ai(
-            resume_text, 
-            job_description, 
-            resume_file.filename, 
-            analysis_id,
-            api_key,
-            key_index
-        )
-        
-        analysis['filename'] = resume_file.filename
-        analysis['original_filename'] = resume_file.filename
-        
-        resume_file.seek(0, 2)
-        file_size = resume_file.tell()
-        resume_file.seek(0)
-        analysis['file_size'] = f"{(file_size / 1024):.1f}KB"
-        
-        analysis['analysis_id'] = analysis_id
-        analysis['processing_order'] = index + 1
-        analysis['key_used'] = f"Key {key_index}"
-        
-        # Add resume preview info
-        analysis['resume_stored'] = preview_filename is not None
-        analysis['has_pdf_preview'] = False
-        
-        if preview_filename:
-            analysis['resume_preview_filename'] = preview_filename
-            analysis['resume_original_filename'] = resume_file.filename
-            # Check if PDF preview is available
-            if analysis_id in resume_storage and resume_storage[analysis_id].get('has_pdf_preview'):
-                analysis['has_pdf_preview'] = True
-        
-        # Create individual Excel report for each candidate
-        try:
-            excel_filename = f"individual_{analysis_id}.xlsx"
-            excel_path = create_detailed_individual_report(analysis, excel_filename)
-            analysis['individual_excel_filename'] = os.path.basename(excel_path)
+            return analysis
+            
         except Exception as e:
-            print(f"⚠️ Failed to create individual report: {str(e)}")
-            analysis['individual_excel_filename'] = None
-        
-        # Keep the preview file, remove only the temp upload file
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        
-        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')} (Key {key_index})")
-        
-        return {
-            'analysis': analysis,
-            'status': 'success',
-            'index': index
-        }
-        
-    except Exception as e:
-        print(f"❌ Error processing {resume_file.filename}: {str(e)}")
-        if 'file_path' in locals() and os.path.exists(file_path):
-            os.remove(file_path)
-        return {
-            'filename': resume_file.filename,
-            'error': f"Processing error: {str(e)[:100]}",
-            'status': 'failed',
-            'index': index
-        }
-
-@app.route('/')
-def home():
-    """Root route - API landing page"""
-    
-    inactive_time = datetime.now() - last_activity_time
-    inactive_minutes = int(inactive_time.total_seconds() / 60)
-    
-    warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
-    
-    available_keys = sum(1 for key in GROQ_API_KEYS if key)
-    
-    return '''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Resume Analyzer API (Groq Parallel)</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 40px; padding: 0; background: #f5f5f5; }
-            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            h1 { color: #333; }
-            .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
-            .ready { background: #d4edda; color: #155724; }
-            .warming { background: #fff3cd; color: #856404; }
-            .endpoint { background: #f8f9fa; padding: 10px; margin: 10px 0; border-left: 4px solid #007bff; }
-            .key-status { display: flex; gap: 10px; margin: 10px 0; }
-            .key { padding: 5px 10px; border-radius: 3px; font-size: 12px; }
-            .key-active { background: #d4edda; color: #155724; }
-            .key-inactive { background: #f8d7da; color: #721c24; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🚀 Resume Analyzer API (Groq Parallel)</h1>
-            <p>AI-powered resume analysis using Groq API with 3-key parallel processing</p>
-            
-            <div class="status ''' + ('ready' if warmup_complete else 'warming') + '''">
-                <strong>Status:</strong> ''' + warmup_status + '''
-            </div>
-            
-            <div class="key-status">
-                <strong>API Keys:</strong>
-                ''' + ''.join([f'<span class="key ' + ('key-active' if key else 'key-inactive') + f'">Key {i+1}: ' + ('✅' if key else '❌') + '</span>' for i, key in enumerate(GROQ_API_KEYS)]) + '''
-            </div>
-            
-            <p><strong>Model:</strong> ''' + GROQ_MODEL + '''</p>
-            <p><strong>API Provider:</strong> Groq (Parallel Processing)</p>
-            <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
-            <p><strong>Processing:</strong> Round-robin with 3 keys, ~10-15s for 10 resumes</p>
-            <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/3</p>
-            <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
-            
-            <h2>📡 Endpoints</h2>
-            <div class="endpoint">
-                <strong>POST /analyze</strong> - Analyze single resume
-            </div>
-            <div class="endpoint">
-                <strong>POST /analyze-batch</strong> - Analyze multiple resumes (up to ''' + str(MAX_BATCH_SIZE) + ''')
-            </div>
-            <div class="endpoint">
-                <strong>GET /health</strong> - Health check with key status
-            </div>
-            <div class="endpoint">
-                <strong>GET /ping</strong> - Keep-alive ping
-            </div>
-            <div class="endpoint">
-                <strong>GET /quick-check</strong> - Check Groq API availability
-            </div>
-            <div class="endpoint">
-                <strong>GET /resume-preview/&lt;analysis_id&gt;</strong> - Get resume preview (PDF)
-            </div>
-            <div class="endpoint">
-                <strong>GET /resume-original/&lt;analysis_id&gt;</strong> - Download original resume file
-            </div>
-            <div class="endpoint">
-                <strong>GET /download/&lt;filename&gt;</strong> - Download batch report
-            </div>
-            <div class="endpoint">
-                <strong>GET /download-individual/&lt;analysis_id&gt;</strong> - Download individual candidate report
-            </div>
-        </div>
-    </body>
-    </html>
-    '''
-
-@app.route('/analyze', methods=['POST'])
-def analyze_resume():
-    """Analyze single resume"""
-    update_activity()
-    
-    try:
-        print("\n" + "="*50)
-        print("📥 New single analysis request received")
-        start_time = time.time()
-        
-        if 'resume' not in request.files:
-            print("❌ No resume file in request")
-            return jsonify({'error': 'No resume file provided'}), 400
-        
-        if 'jobDescription' not in request.form:
-            print("❌ No job description in request")
-            return jsonify({'error': 'No job description provided'}), 400
-        
-        resume_file = request.files['resume']
-        job_description = request.form['jobDescription']
-        
-        print(f"📄 Resume file: {resume_file.filename}")
-        print(f"📋 Job description: {len(job_description)} chars")
-        
-        if resume_file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
-        
-        resume_file.seek(0, 2)
-        file_size = resume_file.tell()
-        resume_file.seek(0)
-        
-        if file_size > 15 * 1024 * 1024:
-            print(f"❌ File too large: {file_size} bytes")
-            return jsonify({'error': 'File size too large. Maximum size is 15MB.'}), 400
-        
-        api_key, key_index = get_available_key()
-        if not api_key:
-            return jsonify({'error': 'No available Groq API key'}), 500
-        
-        file_ext = os.path.splitext(resume_file.filename)[1].lower()
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}{file_ext}")
-        resume_file.save(file_path)
-        
-        # Store resume for preview
-        analysis_id = f"single_{timestamp}"
-        preview_filename = store_resume_file(resume_file, resume_file.filename, analysis_id)
-        
-        if file_ext == '.pdf':
-            resume_text = extract_text_from_pdf(file_path)
-        elif file_ext in ['.docx', '.doc']:
-            resume_text = extract_text_from_docx(file_path)
-        elif file_ext == '.txt':
-            resume_text = extract_text_from_txt(file_path)
-        else:
-            return jsonify({'error': 'Unsupported file format. Please upload PDF, DOCX, or TXT'}), 400
-        
-        if resume_text.startswith('Error'):
-            return jsonify({'error': resume_text}), 500
-        
-        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key, key_index)
-        
-        excel_filename = f"analysis_{analysis_id}.xlsx"
-        excel_path = create_detailed_individual_report(analysis, excel_filename)
-        
-        # Keep the preview file, remove only the temp upload file
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        
-        analysis['excel_filename'] = os.path.basename(excel_path)
-        analysis['ai_model'] = GROQ_MODEL
-        analysis['ai_provider'] = "groq"
-        analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
-        analysis['response_time'] = analysis.get('response_time', 'N/A')
-        analysis['analysis_id'] = analysis_id
-        analysis['key_used'] = f"Key {key_index}"
-        
-        # Add resume preview info
-        analysis['resume_stored'] = preview_filename is not None
-        analysis['has_pdf_preview'] = False
-        
-        if preview_filename:
-            analysis['resume_preview_filename'] = preview_filename
-            analysis['resume_original_filename'] = resume_file.filename
-            # Check if PDF preview is available
-            if analysis_id in resume_storage and resume_storage[analysis_id].get('has_pdf_preview'):
-                analysis['has_pdf_preview'] = True
-        
-        total_time = time.time() - start_time
-        print(f"✅ Request completed in {total_time:.2f} seconds")
-        print("="*50 + "\n")
-        
-        return jsonify(analysis)
-        
-    except Exception as e:
-        print(f"❌ Unexpected error: {traceback.format_exc()}")
-        return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
-
-@app.route('/analyze-batch', methods=['POST'])
-def analyze_resume_batch():
-    """Analyze multiple resumes with parallel processing"""
-    update_activity()
-    
-    try:
-        print("\n" + "="*50)
-        print("📦 New batch analysis request received")
-        start_time = time.time()
-        
-        if 'resumes' not in request.files:
-            print("❌ No 'resumes' key in request.files")
-            return jsonify({'error': 'No resume files provided'}), 400
-        
-        resume_files = request.files.getlist('resumes')
-        
-        if 'jobDescription' not in request.form:
-            print("❌ No job description in request")
-            return jsonify({'error': 'No job description provided'}), 400
-        
-        job_description = request.form['jobDescription']
-        
-        if len(resume_files) == 0:
-            print("❌ No files selected")
-            return jsonify({'error': 'No files selected'}), 400
-        
-        print(f"📦 Batch size: {len(resume_files)} resumes")
-        
-        if len(resume_files) > MAX_BATCH_SIZE:
-            print(f"❌ Too many files: {len(resume_files)} (max: {MAX_BATCH_SIZE})")
-            return jsonify({'error': f'Maximum {MAX_BATCH_SIZE} resumes allowed per batch'}), 400
-        
-        available_keys = sum(1 for key in GROQ_API_KEYS if key)
-        if available_keys == 0:
-            print("❌ No Groq API keys configured")
-            return jsonify({'error': 'No Groq API keys configured'}), 500
-        
-        batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        
-        for i in range(3):
-            key_usage[i]['count'] = 0
-            key_usage[i]['last_used'] = None
-        
-        all_analyses = []
-        errors = []
-        
-        print(f"🔄 Processing {len(resume_files)} resumes with {available_keys} keys...")
-        print(f"📊 Using round-robin distribution: Key 1→1,4,7,10 | Key 2→2,5,8 | Key 3→3,6,9")
-        
-        for index, resume_file in enumerate(resume_files):
-            if resume_file.filename == '':
-                errors.append({
-                    'filename': 'Empty file',
-                    'error': 'File has no name',
-                    'index': index
-                })
-                continue
-            
-            print(f"🔑 Processing resume {index + 1}/{len(resume_files)}")
-            
-            args = (resume_file, job_description, index, len(resume_files), batch_id)
-            result = process_single_resume(args)
-            
-            if result['status'] == 'success':
-                all_analyses.append(result['analysis'])
+            print(f"⚠️ Attempt {attempt + 1} failed: {str(e)}")
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(RETRY_DELAY_BASE * (attempt + 1))
             else:
-                errors.append({
-                    'filename': result.get('filename', 'Unknown'),
-                    'error': result.get('error', 'Unknown error'),
-                    'index': result.get('index')
-                })
-            
-            for i in range(3):
-                if key_usage[i]['count'] >= 4:
-                    mark_key_cooling(i, 15)
-        
-        all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
-        
-        for rank, analysis in enumerate(all_analyses, 1):
-            analysis['rank'] = rank
-        
-        batch_excel_path = None
-        if all_analyses:
-            try:
-                print("📊 Creating batch Excel report...")
-                excel_filename = f"batch_analysis_{batch_id}.xlsx"
-                batch_excel_path = create_comprehensive_batch_report(all_analyses, job_description, excel_filename)
-                print(f"✅ Excel report created: {batch_excel_path}")
-            except Exception as e:
-                print(f"❌ Failed to create Excel report: {str(e)}")
-                traceback.print_exc()
-                # Create a minimal report
-                batch_excel_path = create_minimal_batch_report(all_analyses, job_description, excel_filename)
-        
-        key_stats = []
-        for i in range(3):
-            if GROQ_API_KEYS[i]:
-                key_stats.append({
-                    'key': f'Key {i+1}',
-                    'used': key_usage[i]['count'],
-                    'status': 'cooling' if key_usage[i]['cooling'] else 'available'
-                })
-        
-        total_time = time.time() - start_time
-        batch_summary = {
-            'success': True,
-            'total_files': len(resume_files),
-            'successfully_analyzed': len(all_analyses),
-            'failed_files': len(errors),
-            'errors': errors,
-            'batch_excel_filename': os.path.basename(batch_excel_path) if batch_excel_path else None,
-            'batch_id': batch_id,
-            'analyses': all_analyses,
-            'model_used': GROQ_MODEL,
-            'ai_provider': "groq",
-            'ai_status': "Warmed up" if warmup_complete else "Warming up",
-            'processing_time': f"{total_time:.2f}s",
-            'processing_method': 'round_robin_parallel',
-            'key_statistics': key_stats,
-            'available_keys': available_keys,
-            'success_rate': f"{(len(all_analyses) / len(resume_files)) * 100:.1f}%" if resume_files else "0%",
-            'performance': f"{len(all_analyses)/total_time:.2f} resumes/second" if total_time > 0 else "N/A"
-        }
-        
-        print(f"✅ Batch analysis completed in {total_time:.2f}s")
-        print(f"📊 Key usage: {key_stats}")
-        print("="*50 + "\n")
-        
-        return jsonify(batch_summary)
-        
-    except Exception as e:
-        print(f"❌ Batch analysis error: {traceback.format_exc()}")
-        return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
+                print(f"❌ All retries exhausted for resume {resume_index + 1}")
+    
+    return create_fallback_analysis()
 
-@app.route('/resume-preview/<analysis_id>', methods=['GET'])
-def get_resume_preview(analysis_id):
-    """Get resume preview as PDF"""
-    update_activity()
+def warmup_groq_service():
+    """Warm up Groq API on startup"""
+    global warmup_complete, warmup_status
     
     try:
-        print(f"📄 Resume preview request for: {analysis_id}")
+        print("🔥 Warming up Groq service...")
         
-        # Get resume info from storage
-        resume_info = get_resume_preview(analysis_id)
-        if not resume_info:
-            return jsonify({'error': 'Resume preview not found'}), 404
+        test_prompt = "Respond with just 'ready' if you can process this message."
         
-        # Try to use PDF preview if available
-        preview_path = resume_info.get('pdf_path') or resume_info['path']
+        warmed_keys = 0
+        for i, api_key in enumerate(GROQ_API_KEYS):
+            if api_key:
+                try:
+                    response = call_groq_api(test_prompt, api_key, max_tokens=10, timeout=15)
+                    if response and 'ready' in str(response).lower():
+                        warmed_keys += 1
+                        print(f"✅ Key {i+1} warmed up successfully")
+                    else:
+                        print(f"⚠️ Key {i+1} warmup uncertain")
+                except Exception as e:
+                    print(f"❌ Key {i+1} warmup failed: {str(e)}")
         
-        if not os.path.exists(preview_path):
-            return jsonify({'error': 'Preview file not found'}), 404
+        warmup_complete = True
+        print(f"✅ Groq warmup complete! {warmed_keys}/{len([k for k in GROQ_API_KEYS if k])} keys ready")
         
-        # Determine file type
-        file_ext = os.path.splitext(preview_path)[1].lower()
-        
-        if file_ext == '.pdf':
-            return send_file(
-                preview_path,
-                as_attachment=False,
-                download_name=f"resume_preview_{analysis_id}.pdf",
-                mimetype='application/pdf'
-            )
-        else:
-            # If not PDF, try to convert or return original
-            return send_file(
-                preview_path,
-                as_attachment=True,
-                download_name=resume_info['original_filename'],
-                mimetype='application/octet-stream'
-            )
-            
     except Exception as e:
-        print(f"❌ Resume preview error: {traceback.format_exc()}")
-        return jsonify({'error': f'Failed to get resume preview: {str(e)}'}), 500
+        print(f"❌ Warmup failed: {str(e)}")
+        warmup_complete = True
 
-@app.route('/resume-original/<analysis_id>', methods=['GET'])
-def get_resume_original(analysis_id):
-    """Download original resume file"""
-    update_activity()
-    
-    try:
-        print(f"📄 Original resume request for: {analysis_id}")
-        
-        # Get resume info from storage
-        resume_info = get_resume_preview(analysis_id)
-        if not resume_info:
-            return jsonify({'error': 'Resume not found'}), 404
-        
-        original_path = resume_info['path']
-        
-        if not os.path.exists(original_path):
-            return jsonify({'error': 'Resume file not found'}), 404
-        
-        return send_file(
-            original_path,
-            as_attachment=True,
-            download_name=resume_info['original_filename']
-        )
+def keep_service_warm():
+    """Keep service warm with periodic pings"""
+    while service_running:
+        try:
+            time.sleep(300)  # Every 5 minutes
             
-    except Exception as e:
-        print(f"❌ Original resume download error: {traceback.format_exc()}")
-        return jsonify({'error': f'Failed to download resume: {str(e)}'}), 500
+            if (datetime.now() - last_activity_time).total_seconds() > 600:
+                print("🔄 Keeping service warm...")
+                api_key, _ = get_available_key()
+                if api_key:
+                    call_groq_api("ping", api_key, max_tokens=5, timeout=10)
+                    
+        except Exception as e:
+            print(f"⚠️ Keep-warm error: {str(e)}")
 
-def create_detailed_individual_report(analysis_data, filename="resume_analysis_report.xlsx"):
-    """Create a detailed Excel report for individual candidate (simplified)"""
+def create_individual_excel_report(analysis_data, job_description, filename="individual_resume_analysis.xlsx"):
+    """Create an individual Excel report for a single resume"""
     try:
         wb = Workbook()
         ws = wb.active
         ws.title = "Resume Analysis"
         
-        # Styles
+        # Styling
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        title_font = Font(bold=True, size=14, color="FFFFFF")
-        subheader_fill = PatternFill(start_color="8EA9DB", end_color="8EA9DB", fill_type="solid")
-        subheader_font = Font(bold=True, color="FFFFFF", size=10)
+        subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=12)
+        title_font = Font(bold=True, size=16)
         
         # Set column widths
-        column_widths = {
-            'A': 25, 'B': 60, 'C': 25, 'D': 25
-        }
-        for col, width in column_widths.items():
-            ws.column_dimensions[col].width = width
+        ws.column_dimensions['A'].width = 25
+        ws.column_dimensions['B'].width = 50
+        ws.column_dimensions['C'].width = 50
+        ws.column_dimensions['D'].width = 50
         
         row = 1
         
         # Title
-        ws['A1'] = "RESUME ANALYSIS REPORT (Groq AI)"
+        ws.merge_cells('A1:D1')
+        ws['A1'] = "RESUME ANALYSIS REPORT (Groq Parallel Processing)"
         ws['A1'].font = title_font
         ws['A1'].fill = header_fill
-        ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
-        
-        # Also set values for other cells to maintain structure
-        for col in ['B1', 'C1', 'D1']:
-            ws[col] = ""
-            ws[col].fill = header_fill
-        
+        ws['A1'].alignment = Alignment(horizontal='center')
         row += 2
         
         # Basic Information
-        ws[f'A{row}'] = "CANDIDATE INFORMATION"
-        ws[f'A{row}'].font = header_font
-        ws[f'A{row}'].fill = header_fill
-        ws[f'A{row}'].alignment = Alignment(horizontal='center')
-        
-        for col in ['B', 'C', 'D']:
-            cell = f'{col}{row}'
-            ws[cell] = ""
-            ws[cell].fill = header_fill
-        
-        row += 1
-        
-        info_fields = [
-            ("Candidate Name", analysis_data.get('candidate_name', 'N/A')),
+        basic_info = [
+            ("Candidate Name", analysis_data.get('candidate_name', 'Unknown')),
+            ("ATS Score", f"{analysis_data.get('overall_score', 0)}/100"),
+            ("Recommendation", analysis_data.get('recommendation', 'N/A')),
+            ("Original File", analysis_data.get('filename', 'N/A')),
             ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            ("Original Filename", analysis_data.get('filename', 'N/A')),
-            ("File Size", analysis_data.get('file_size', 'N/A')),
+            ("AI Model", "Groq " + GROQ_MODEL),
+            ("Key Used", analysis_data.get('key_used', 'N/A'))
         ]
         
-        for label, value in info_fields:
+        for label, value in basic_info:
             ws[f'A{row}'] = label
             ws[f'A{row}'].font = Font(bold=True)
             ws[f'B{row}'] = value
@@ -1462,35 +647,27 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         
         row += 1
         
-        # Score and Recommendation
-        ws[f'A{row}'] = "SCORE & RECOMMENDATION"
+        # Job Description (first 500 chars)
+        ws[f'A{row}'] = "JOB DESCRIPTION (Preview)"
         ws[f'A{row}'].font = header_font
-        ws[f'A{row}'].fill = header_fill
+        ws[f'A{row}'].fill = subheader_fill
         ws[f'A{row}'].alignment = Alignment(horizontal='center')
         
         for col in ['B', 'C', 'D']:
             cell = f'{col}{row}'
             ws[cell] = ""
-            ws[cell].fill = header_fill
+            ws[cell].fill = subheader_fill
         row += 1
         
-        score_info = [
-            ("Overall ATS Score", f"{analysis_data.get('overall_score', 0)}/100"),
-            ("Recommendation", analysis_data.get('recommendation', 'N/A')),
-        ]
+        job_desc_preview = job_description[:500] + "..." if len(job_description) > 500 else job_description
+        ws[f'A{row}'] = job_desc_preview
+        ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
+        ws.row_dimensions[row].height = 60
         
-        for i in range(0, len(score_info), 2):
-            if i < len(score_info):
-                ws[f'A{row}'] = score_info[i][0]
-                ws[f'A{row}'].font = Font(bold=True)
-                ws[f'B{row}'] = score_info[i][1]
-            if i + 1 < len(score_info):
-                ws[f'C{row}'] = score_info[i+1][0]
-                ws[f'C{row}'].font = Font(bold=True)
-                ws[f'D{row}'] = score_info[i+1][1]
-            row += 1
+        for col in ['B', 'C', 'D']:
+            ws[f'{col}{row}'] = ""
         
-        row += 1
+        row += 2
         
         # Skills Matched (5-8 skills)
         skills_matched = analysis_data.get('skills_matched', [])
@@ -1666,106 +843,20 @@ def create_detailed_individual_report(analysis_data, filename="resume_analysis_r
         return filepath
 
 def create_comprehensive_batch_report(analyses, job_description, filename="batch_resume_analysis.xlsx"):
-    """Create a comprehensive batch Excel report with multiple sheets"""
+    """Create a comprehensive batch Excel report with Candidate Details and Individual sheets only"""
     try:
         wb = Workbook()
         
-        # ================== SUMMARY SHEET ==================
-        ws_summary = wb.active
-        ws_summary.title = "Batch Summary"
+        # Remove the default sheet created by Workbook()
+        default_sheet = wb.active
+        
+        # ================== CANDIDATE DETAILS SHEET ==================
+        ws_details = wb.create_sheet(title="Candidate Details")
         
         # Styles
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         header_font = Font(bold=True, color="FFFFFF", size=11)
         title_font = Font(bold=True, size=16, color="FFFFFF")
-        
-        # Title
-        ws_summary.merge_cells('A1:H1')
-        title_cell = ws_summary['A1']
-        title_cell.value = "BATCH RESUME ANALYSIS REPORT (Groq Parallel Processing)"
-        title_cell.font = title_font
-        title_cell.fill = header_fill
-        title_cell.alignment = Alignment(horizontal='center')
-        
-        # Summary Information
-        row = 3
-        summary_info = [
-            ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            ("Total Resumes", len(analyses)),
-            ("AI Model", "Groq " + GROQ_MODEL),
-            ("Processing Method", "Round-robin Parallel"),
-            ("Job Description", job_description[:200] + "..." if len(job_description) > 200 else job_description),
-        ]
-        
-        for label, value in summary_info:
-            ws_summary[f'A{row}'] = label
-            ws_summary[f'A{row}'].font = Font(bold=True)
-            ws_summary[f'B{row}'] = value
-            row += 1
-        
-        row += 2
-        
-        # Candidate Rankings Table
-        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "Skills Matched", "Skills Missing", "Experience Summary", "Education Summary"]
-        
-        for col, header in enumerate(headers, start=1):
-            cell = ws_summary.cell(row=row, column=col)
-            cell.value = header
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal='center', wrap_text=True)
-        
-        row += 1
-        
-        # Candidate data
-        for analysis in analyses:
-            ws_summary.cell(row=row, column=1, value=analysis.get('rank', '-')).alignment = Alignment(horizontal='center')
-            ws_summary.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
-            
-            score = analysis.get('overall_score', 0)
-            score_cell = ws_summary.cell(row=row, column=3, value=score)
-            score_cell.alignment = Alignment(horizontal='center')
-            
-            # Color code based on score
-            if score >= 80:
-                score_cell.font = Font(bold=True, color="00FF00")
-            elif score >= 60:
-                score_cell.font = Font(bold=True, color="FFA500")
-            else:
-                score_cell.font = Font(bold=True, color="FF0000")
-            
-            ws_summary.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
-            
-            # Skills Matched
-            skills_matched = analysis.get('skills_matched', [])
-            ws_summary.cell(row=row, column=5, value=", ".join(skills_matched[:8]) if skills_matched else "N/A")
-            
-            # Skills Missing
-            skills_missing = analysis.get('skills_missing', [])
-            ws_summary.cell(row=row, column=6, value=", ".join(skills_missing[:8]) if skills_missing else "All matched")
-            
-            # Experience Summary (complete sentences)
-            experience_summary = analysis.get('experience_summary', 'No experience summary available.')
-            ws_summary.cell(row=row, column=7, value=experience_summary)
-            ws_summary.cell(row=row, column=7).alignment = Alignment(wrap_text=True, vertical='top')
-            
-            # Education Summary (complete sentences)
-            education_summary = analysis.get('education_summary', 'No education summary available.')
-            ws_summary.cell(row=row, column=8, value=education_summary)
-            ws_summary.cell(row=row, column=8).alignment = Alignment(wrap_text=True, vertical='top')
-            
-            # Set row height for summaries
-            ws_summary.row_dimensions[row].height = 80
-            
-            row += 1
-        
-        # Set column widths
-        column_widths = [8, 25, 12, 20, 30, 30, 40, 40]
-        for i, width in enumerate(column_widths, start=1):
-            ws_summary.column_dimensions[get_column_letter(i)].width = width
-        
-        # ================== CANDIDATE DETAILS SHEET ==================
-        ws_details = wb.create_sheet(title="Candidate Details")
         
         # Title
         ws_details.merge_cells('A1:H1')
@@ -1998,62 +1089,9 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ws_candidate.column_dimensions['C'].width = 40
             ws_candidate.column_dimensions['D'].width = 40
         
-        # ================== STATISTICS SHEET ==================
-        ws_stats = wb.create_sheet(title="Statistics")
-        
-        # Title
-        ws_stats.merge_cells('A1:B1')
-        title_cell = ws_stats['A1']
-        title_cell.value = "BATCH ANALYSIS STATISTICS"
-        title_cell.font = title_font
-        title_cell.fill = header_fill
-        title_cell.alignment = Alignment(horizontal='center')
-        
-        row = 3
-        
-        # Basic Statistics
-        stats_data = [
-            ("Total Candidates", len(analyses)),
-            ("Average Score", round(sum(a.get('overall_score', 0) for a in analyses) / len(analyses), 2) if analyses else 0),
-            ("Highest Score", max((a.get('overall_score', 0) for a in analyses), default=0)),
-            ("Lowest Score", min((a.get('overall_score', 0) for a in analyses), default=0)),
-            ("Top Candidate", analyses[0].get('candidate_name', 'N/A') if analyses else 'N/A'),
-            ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            ("AI Model", "Groq " + GROQ_MODEL),
-            ("Processing Method", "Round-robin Parallel"),
-        ]
-        
-        for label, value in stats_data:
-            ws_stats[f'A{row}'] = label
-            ws_stats[f'A{row}'].font = Font(bold=True)
-            ws_stats[f'B{row}'] = value
-            row += 1
-        
-        row += 1
-        
-        # Score Distribution
-        ws_stats[f'A{row}'] = "Score Distribution"
-        ws_stats[f'A{row}'].font = Font(bold=True, size=14, color="4472C4")
-        row += 1
-        
-        score_ranges = [
-            ("90-100 (Excellent)", len([a for a in analyses if 90 <= a.get('overall_score', 0) <= 100])),
-            ("80-89 (Great)", len([a for a in analyses if 80 <= a.get('overall_score', 0) <= 89])),
-            ("70-79 (Good)", len([a for a in analyses if 70 <= a.get('overall_score', 0) <= 79])),
-            ("60-69 (Fair)", len([a for a in analyses if 60 <= a.get('overall_score', 0) <= 69])),
-            ("0-59 (Needs Improvement)", len([a for a in analyses if a.get('overall_score', 0) < 60])),
-        ]
-        
-        for label, count in score_ranges:
-            ws_stats[f'A{row}'] = label
-            ws_stats[f'A{row}'].font = Font(bold=True)
-            ws_stats[f'B{row}'] = count
-            ws_stats[f'B{row}'].alignment = Alignment(horizontal='center')
-            row += 1
-        
-        # Set column widths for stats sheet
-        ws_stats.column_dimensions['A'].width = 35
-        ws_stats.column_dimensions['B'].width = 20
+        # Remove the default sheet if it still exists
+        if default_sheet.title in wb.sheetnames:
+            wb.remove(default_sheet)
         
         # Add borders to all cells in all sheets (skip merged cells)
         thin_border = Border(
@@ -2098,44 +1136,32 @@ def create_minimal_batch_report(analyses, job_description, filename):
         ws.merge_cells('A1:H1')
         ws['A1'] = "Batch Resume Analysis Report (Comprehensive)"
         ws['A1'].font = title_font
+        ws['A1'].fill = header_fill
         ws['A1'].alignment = Alignment(horizontal='center')
         
-        ws['A2'] = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        ws['A3'] = f"Total Candidates: {len(analyses)}"
-        ws['A4'] = f"AI Model: Groq {GROQ_MODEL}"
+        row = 3
         
-        # Job Description (wrapped)
-        ws['A5'] = "Job Description:"
-        ws['A5'].font = Font(bold=True)
-        ws.merge_cells('B5:H5')
-        ws['B5'] = job_description[:300] + "..." if len(job_description) > 300 else job_description
-        ws['B5'].alignment = Alignment(wrap_text=True)
-        
-        row = 7
-        
-        # Main headers - NOW INCLUDES SUMMARIES
-        headers = ["Rank", "Candidate Name", "Score", "Recommendation", "Skills Matched", "Skills Missing", "Experience Summary", "Education Summary"]
-        
+        # Headers with all fields including summaries
+        headers = ["Rank", "Candidate", "Score", "Recommendation", "Skills Matched", "Skills Missing", "Experience Summary", "Education Summary"]
         for col, header in enumerate(headers, start=1):
-            cell = ws.cell(row=row, column=col, value=header)
+            cell = ws.cell(row=row, column=col)
+            cell.value = header
             cell.font = header_font
             cell.fill = header_fill
             cell.alignment = Alignment(horizontal='center', wrap_text=True)
         
         row += 1
         
-        # Populate candidate data with ALL details
+        # Data rows with complete summaries
         for analysis in analyses:
-            # Rank
-            ws.cell(row=row, column=1, value=analysis.get('rank', '-')).alignment = Alignment(horizontal='center')
-            
-            # Candidate Name
+            ws.cell(row=row, column=1, value=analysis.get('rank', 'N/A')).alignment = Alignment(horizontal='center')
             ws.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
             
-            # Score with color coding
             score = analysis.get('overall_score', 0)
             score_cell = ws.cell(row=row, column=3, value=score)
             score_cell.alignment = Alignment(horizontal='center')
+            
+            # Color coding
             if score >= 80:
                 score_cell.font = Font(bold=True, color="00FF00")
             elif score >= 60:
@@ -2143,208 +1169,332 @@ def create_minimal_batch_report(analyses, job_description, filename):
             else:
                 score_cell.font = Font(bold=True, color="FF0000")
             
-            # Recommendation
             ws.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
             
-            # Skills Matched
+            # Skills
             skills_matched = analysis.get('skills_matched', [])
-            ws.cell(row=row, column=5, value=", ".join(skills_matched[:8]) if skills_matched else "N/A").alignment = Alignment(wrap_text=True)
+            ws.cell(row=row, column=5, value=", ".join(skills_matched) if skills_matched else "N/A")
             
-            # Skills Missing
             skills_missing = analysis.get('skills_missing', [])
-            ws.cell(row=row, column=6, value=", ".join(skills_missing[:8]) if skills_missing else "All matched").alignment = Alignment(wrap_text=True)
+            ws.cell(row=row, column=6, value=", ".join(skills_missing) if skills_missing else "All matched")
             
-            # *** FIXED: Experience Summary (complete sentences) ***
+            # Complete summaries (not truncated)
             experience_summary = analysis.get('experience_summary', 'No experience summary available.')
-            exp_cell = ws.cell(row=row, column=7, value=experience_summary)
-            exp_cell.alignment = Alignment(wrap_text=True, vertical='top')
+            ws.cell(row=row, column=7, value=experience_summary)
+            ws.cell(row=row, column=7).alignment = Alignment(wrap_text=True, vertical='top')
             
-            # *** FIXED: Education Summary (complete sentences) ***
             education_summary = analysis.get('education_summary', 'No education summary available.')
-            edu_cell = ws.cell(row=row, column=8, value=education_summary)
-            edu_cell.alignment = Alignment(wrap_text=True, vertical='top')
+            ws.cell(row=row, column=8, value=education_summary)
+            ws.cell(row=row, column=8).alignment = Alignment(wrap_text=True, vertical='top')
             
-            # Set row height to accommodate wrapped text
+            # Set row height for summaries
             ws.row_dimensions[row].height = 80
             
             row += 1
         
-        # Set column widths for better readability
-        column_widths = [8, 20, 10, 20, 30, 30, 40, 40]
+        # Set column widths
+        column_widths = [8, 25, 12, 20, 30, 30, 40, 40]
         for i, width in enumerate(column_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = width
         
-        # Add additional sheet with key strengths and improvements
-        ws2 = wb.create_sheet(title="Strengths & Improvements")
+        # Add borders
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
         
-        # Title for second sheet
-        ws2.merge_cells('A1:F1')
-        ws2['A1'] = "Candidate Strengths & Areas for Improvement"
-        ws2['A1'].font = title_font
-        ws2['A1'].alignment = Alignment(horizontal='center')
-        
-        row2 = 3
-        headers2 = ["Rank", "Candidate", "Key Strengths", "Areas for Improvement"]
-        
-        for col, header in enumerate(headers2, start=1):
-            cell = ws2.cell(row=row2, column=col, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal='center', wrap_text=True)
-        
-        row2 += 1
-        
-        for analysis in analyses:
-            ws2.cell(row=row2, column=1, value=analysis.get('rank', '-')).alignment = Alignment(horizontal='center')
-            ws2.cell(row=row2, column=2, value=analysis.get('candidate_name', 'Unknown'))
-            
-            # Key Strengths
-            strengths = analysis.get('key_strengths', [])
-            strengths_text = "\n".join([f"• {s}" for s in strengths[:3]]) if strengths else "N/A"
-            strengths_cell = ws2.cell(row=row2, column=3, value=strengths_text)
-            strengths_cell.alignment = Alignment(wrap_text=True, vertical='top')
-            
-            # Areas for Improvement
-            improvements = analysis.get('areas_for_improvement', [])
-            improvements_text = "\n".join([f"• {i}" for i in improvements[:3]]) if improvements else "N/A"
-            improvements_cell = ws2.cell(row=row2, column=4, value=improvements_text)
-            improvements_cell.alignment = Alignment(wrap_text=True, vertical='top')
-            
-            ws2.row_dimensions[row2].height = 60
-            row2 += 1
-        
-        # Set column widths for second sheet
-        ws2.column_dimensions['A'].width = 8
-        ws2.column_dimensions['B'].width = 20
-        ws2.column_dimensions['C'].width = 40
-        ws2.column_dimensions['D'].width = 40
+        for row_cells in ws.iter_rows(min_row=1, max_row=row-1, min_col=1, max_col=8):
+            for cell in row_cells:
+                if cell.value is not None and not isinstance(cell, MergedCell):
+                    cell.border = thin_border
         
         filepath = os.path.join(REPORTS_FOLDER, filename)
         wb.save(filepath)
-        print(f"📊 ✅ COMPREHENSIVE batch report saved to: {filepath}")
-        print(f"✅ Report includes: Rank, Name, Score, Recommendation, Skills, Summaries, Strengths & Improvements")
+        print(f"📊 Minimal batch report saved: {filepath}")
         return filepath
+        
     except Exception as e:
-        print(f"❌ Error creating comprehensive batch report: {str(e)}")
+        print(f"❌ Error creating minimal batch report: {str(e)}")
         traceback.print_exc()
         return None
 
-def get_score_grade_text(score):
-    """Get text description for score"""
-    if score >= 90:
-        return "Excellent Match 🎯"
-    elif score >= 80:
-        return "Great Match ✨"
-    elif score >= 70:
-        return "Good Match 👍"
-    elif score >= 60:
-        return "Fair Match 📊"
-    else:
-        return "Needs Improvement 📈"
+# ============ API ROUTES ============
 
-@app.route('/download/<filename>', methods=['GET'])
+@app.route('/')
+def index():
+    """Root endpoint"""
+    return jsonify({
+        'message': 'Resume Analyzer API (Groq Parallel Processing)',
+        'version': '2.5.2',
+        'status': 'running',
+        'ai_provider': 'groq',
+        'model': GROQ_MODEL,
+        'processing_method': 'round_robin_parallel',
+        'max_batch_size': MAX_BATCH_SIZE,
+        'endpoints': {
+            '/analyze': 'POST - Analyze single resume',
+            '/batch-analyze': 'POST - Analyze multiple resumes',
+            '/download/<filename>': 'GET - Download report',
+            '/preview-resume/<analysis_id>': 'GET - Preview resume',
+            '/check-ai': 'GET - Check AI availability',
+            '/health': 'GET - Health check',
+            '/ping': 'GET - Keep alive ping'
+        }
+    })
+
+@app.route('/analyze', methods=['POST'])
+def analyze_resume():
+    """Analyze a single resume"""
+    try:
+        update_activity()
+        
+        if 'resume' not in request.files:
+            return jsonify({'error': 'No resume file uploaded'}), 400
+        
+        if 'jobDescription' not in request.form:
+            return jsonify({'error': 'No job description provided'}), 400
+        
+        resume_file = request.files['resume']
+        job_description = request.form['jobDescription']
+        
+        if resume_file.filename == '':
+            return jsonify({'error': 'Empty filename'}), 400
+        
+        # Check file extension
+        file_ext = os.path.splitext(resume_file.filename)[1].lower()
+        if file_ext not in ['.pdf', '.docx', '.txt', '.doc']:
+            return jsonify({'error': 'Unsupported file format. Please upload PDF, DOCX, DOC, or TXT.'}), 400
+        
+        # Extract text based on file type
+        if file_ext == '.pdf':
+            resume_text = extract_text_from_pdf(resume_file)
+        elif file_ext in ['.docx', '.doc']:
+            resume_text = extract_text_from_docx(resume_file)
+        elif file_ext == '.txt':
+            resume_text = extract_text_from_txt(resume_file)
+        
+        if not resume_text or len(resume_text.strip()) < 50:
+            return jsonify({'error': 'Could not extract sufficient text from resume. Please ensure the file is not empty or corrupted.'}), 400
+        
+        # Analyze the resume
+        analysis = analyze_resume_with_retry(resume_text, job_description, resume_file.filename)
+        
+        # Store resume for preview
+        resume_file.seek(0)
+        preview_filename = store_resume_file(resume_file, resume_file.filename, analysis['analysis_id'])
+        analysis['preview_available'] = preview_filename is not None
+        
+        # Create individual Excel report
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        excel_filename = f"resume_analysis_{timestamp}.xlsx"
+        excel_path = create_individual_excel_report(analysis, job_description, excel_filename)
+        
+        # Prepare response
+        analysis['excel_report'] = excel_filename if excel_path else None
+        analysis['file_size'] = f"{len(resume_text)} characters"
+        
+        return jsonify(analysis)
+        
+    except Exception as e:
+        print(f"❌ Error in /analyze: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'error': f'Analysis failed: {str(e)}'}), 500
+
+@app.route('/batch-analyze', methods=['POST'])
+def batch_analyze_resumes():
+    """Analyze multiple resumes in parallel"""
+    try:
+        update_activity()
+        
+        if 'resumes[]' not in request.files:
+            return jsonify({'error': 'No resume files uploaded'}), 400
+        
+        if 'jobDescription' not in request.form:
+            return jsonify({'error': 'No job description provided'}), 400
+        
+        resume_files = request.files.getlist('resumes[]')
+        job_description = request.form['jobDescription']
+        
+        if len(resume_files) == 0:
+            return jsonify({'error': 'No resume files provided'}), 400
+        
+        if len(resume_files) > MAX_BATCH_SIZE:
+            return jsonify({'error': f'Maximum {MAX_BATCH_SIZE} resumes allowed per batch'}), 400
+        
+        print(f"\n{'='*60}")
+        print(f"🎯 BATCH ANALYSIS STARTED")
+        print(f"{'='*60}")
+        print(f"📊 Total Resumes: {len(resume_files)}")
+        print(f"🔑 Available Keys: {sum(1 for k in GROQ_API_KEYS if k)}")
+        print(f"⚡ Processing Method: Round-robin Parallel")
+        print(f"{'='*60}\n")
+        
+        start_time = time.time()
+        
+        # Extract text from all resumes
+        resume_data = []
+        for i, resume_file in enumerate(resume_files):
+            file_ext = os.path.splitext(resume_file.filename)[1].lower()
+            
+            if file_ext not in ['.pdf', '.docx', '.txt', '.doc']:
+                continue
+            
+            # Extract text
+            if file_ext == '.pdf':
+                text = extract_text_from_pdf(resume_file)
+            elif file_ext in ['.docx', '.doc']:
+                text = extract_text_from_docx(resume_file)
+            elif file_ext == '.txt':
+                text = extract_text_from_txt(resume_file)
+            
+            if text and len(text.strip()) >= 50:
+                resume_file.seek(0)
+                file_data = resume_file.read()
+                resume_data.append({
+                    'text': text,
+                    'filename': resume_file.filename,
+                    'index': i,
+                    'file_data': file_data,
+                    'file_size': len(text)
+                })
+        
+        if not resume_data:
+            return jsonify({'error': 'No valid resumes could be processed'}), 400
+        
+        print(f"✅ Extracted text from {len(resume_data)} resumes")
+        
+        # Analyze all resumes in parallel using round-robin
+        def analyze_resume_task(resume_info):
+            result = analyze_resume_with_retry(
+                resume_info['text'],
+                job_description,
+                resume_info['filename'],
+                resume_info['index']
+            )
+            result['file_size'] = f"{resume_info['file_size']} characters"
+            
+            # Store resume for preview
+            preview_filename = store_resume_file(
+                resume_info['file_data'],
+                resume_info['filename'],
+                result['analysis_id']
+            )
+            result['preview_available'] = preview_filename is not None
+            
+            return result
+        
+        # Use ThreadPoolExecutor for parallel processing
+        analyses = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS) as executor:
+            future_to_resume = {
+                executor.submit(analyze_resume_task, resume_info): resume_info
+                for resume_info in resume_data
+            }
+            
+            for future in concurrent.futures.as_completed(future_to_resume):
+                try:
+                    result = future.result()
+                    analyses.append(result)
+                    print(f"✅ Completed: {result.get('candidate_name', 'Unknown')} - Score: {result.get('overall_score', 0)}")
+                except Exception as e:
+                    print(f"❌ Analysis failed: {str(e)}")
+        
+        # Sort by score (descending)
+        analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
+        
+        # Add rankings
+        for rank, analysis in enumerate(analyses, start=1):
+            analysis['rank'] = rank
+        
+        processing_time = time.time() - start_time
+        
+        print(f"\n{'='*60}")
+        print(f"✅ BATCH ANALYSIS COMPLETE")
+        print(f"{'='*60}")
+        print(f"⏱️  Processing Time: {processing_time:.2f}s")
+        print(f"📊 Resumes Analyzed: {len(analyses)}")
+        print(f"⚡ Avg Time/Resume: {processing_time/len(analyses):.2f}s")
+        print(f"{'='*60}\n")
+        
+        # Create comprehensive Excel report
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        batch_filename = f"batch_analysis_{timestamp}.xlsx"
+        batch_excel_path = create_comprehensive_batch_report(analyses, job_description, batch_filename)
+        
+        return jsonify({
+            'analyses': analyses,
+            'total_resumes': len(analyses),
+            'processing_time': f"{processing_time:.2f}s",
+            'batch_excel_report': batch_filename if batch_excel_path else None,
+            'top_candidate': analyses[0] if analyses else None,
+            'ai_model': GROQ_MODEL,
+            'processing_method': 'round_robin_parallel'
+        })
+        
+    except Exception as e:
+        print(f"❌ Error in /batch-analyze: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'error': f'Batch analysis failed: {str(e)}'}), 500
+
+@app.route('/download/<filename>')
 def download_report(filename):
-    """Download the Excel report"""
-    update_activity()
-    
+    """Download a report file"""
     try:
-        print(f"📥 Download request for: {filename}")
-        
-        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
-        
-        file_path = os.path.join(REPORTS_FOLDER, safe_filename)
-        
-        if not os.path.exists(file_path):
-            print(f"❌ File not found: {file_path}")
+        update_activity()
+        filepath = os.path.join(REPORTS_FOLDER, filename)
+        if os.path.exists(filepath):
+            return send_file(filepath, as_attachment=True)
+        else:
             return jsonify({'error': 'File not found'}), 404
+    except Exception as e:
+        print(f"❌ Error downloading file: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/preview-resume/<analysis_id>')
+def preview_resume(analysis_id):
+    """Preview a stored resume"""
+    try:
+        update_activity()
         
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=safe_filename,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
+        if analysis_id not in resume_storage:
+            return jsonify({'error': 'Resume not found'}), 404
+        
+        resume_info = resume_storage[analysis_id]
+        
+        # Try to serve PDF preview if available
+        if resume_info.get('has_pdf_preview') and resume_info.get('pdf_path'):
+            pdf_path = resume_info['pdf_path']
+            if os.path.exists(pdf_path):
+                return send_file(pdf_path, mimetype='application/pdf')
+        
+        # Fallback to original file
+        file_path = resume_info['path']
+        if os.path.exists(file_path):
+            return send_file(file_path)
+        
+        return jsonify({'error': 'File not found'}), 404
         
     except Exception as e:
-        print(f"❌ Download error: {traceback.format_exc()}")
-        return jsonify({'error': f'Download failed: {str(e)}'}), 500
+        print(f"❌ Error previewing resume: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/download-individual/<analysis_id>', methods=['GET'])
-def download_individual_report(analysis_id):
-    """Download individual candidate report"""
-    update_activity()
-    
+@app.route('/check-ai', methods=['GET'])
+def check_ai_availability():
+    """Check if AI service is available and ready"""
     try:
-        print(f"📥 Download individual request for analysis ID: {analysis_id}")
+        update_activity()
         
-        filename = f"individual_{analysis_id}.xlsx"
-        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
-        
-        file_path = os.path.join(REPORTS_FOLDER, safe_filename)
-        
-        if not os.path.exists(file_path):
-            print(f"❌ Individual report not found: {file_path}")
-            return jsonify({'error': 'Individual report not found'}), 404
-        
-        download_name = f"candidate_report_{analysis_id}.xlsx"
-        
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=download_name,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-        
-    except Exception as e:
-        print(f"❌ Individual download error: {traceback.format_exc()}")
-        return jsonify({'error': f'Download failed: {str(e)}'}), 500
-
-@app.route('/warmup', methods=['GET'])
-def force_warmup():
-    """Force warm-up Groq API"""
-    update_activity()
-    
-    try:
         available_keys = sum(1 for key in GROQ_API_KEYS if key)
+        
         if available_keys == 0:
             return jsonify({
-                'status': 'error',
-                'message': 'No Groq API keys configured',
-                'warmup_complete': False
-            })
-        
-        result = warmup_groq_service()
-        
-        return jsonify({
-            'status': 'success' if result else 'error',
-            'message': f'Groq API warmed up successfully with {available_keys} keys' if result else 'Warm-up failed',
-            'warmup_complete': warmup_complete,
-            'ai_provider': 'groq',
-            'model': GROQ_MODEL,
-            'available_keys': available_keys,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e),
-            'warmup_complete': False
-        })
-
-@app.route('/quick-check', methods=['GET'])
-def quick_check():
-    """Quick endpoint to check if Groq API is responsive"""
-    update_activity()
-    
-    try:
-        available_keys = sum(1 for key in GROQ_API_KEYS if key)
-        if available_keys == 0:
-            return jsonify({
-                'available': False, 
-                'reason': 'No Groq API keys configured',
+                'available': False,
+                'reason': 'No API keys configured',
                 'available_keys': 0,
-                'warmup_complete': warmup_complete
+                'ai_provider': 'groq',
+                'model': GROQ_MODEL
             })
         
         if not warmup_complete:
@@ -2533,7 +1683,7 @@ if __name__ == '__main__':
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
     print(f"✅ Performance: ~10 resumes in 10-15 seconds")
-    print(f"✅ Excel Reports: Individual + Comprehensive Batch")
+    print(f"✅ Excel Reports: Candidate Details + Individual Sheets Only")
     print("="*50 + "\n")
     
     # Check for required dependencies
