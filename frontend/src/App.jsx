@@ -1173,7 +1173,7 @@ function App() {
             </div>
             <div className="tip">
               <Download size={16} />
-              <span>Download comprehensive Excel report with all candidate data</span>
+              <span>Download professional Excel report with all candidate data</span>
             </div>
           </>
         ) : (
@@ -1657,7 +1657,7 @@ function App() {
       <div className="action-section glass">
         <div className="action-content">
           <h3>Batch Analysis Complete</h3>
-          <p>Download comprehensive Excel report with candidate analysis</p>
+          <p>Download professional Excel report with candidate analysis</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
@@ -2093,7 +2093,7 @@ function App() {
               <div className="feature model-info">
                 <Cpu size={16} />
                 <span>{getModelDisplayName(modelInfo)}</span>
-              </div>
+            </div>
             )}
             
             {/* Navigation Indicator */}
