@@ -747,25 +747,31 @@ function App() {
     return modelInfo.name || 'Groq AI';
   };
 
-  // Format summary to max 5 lines
+  // Format summary to show complete sentences
   const formatSummary = (text) => {
     if (!text) return "No summary available.";
     
-    // Split into sentences
-    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    // Remove any trailing ellipsis or incomplete text
+    let cleanText = text.trim();
     
-    // Take only 4-5 sentences
-    const limitedSentences = sentences.slice(0, 5);
-    
-    // Join with periods and ensure proper ending
-    let result = limitedSentences.join('. ') + '.';
-    
-    // If still too long, truncate
-    if (result.length > 400) {
-      result = result.substring(0, 397) + '...';
+    // If text ends with ellipsis or incomplete sentence, find the last complete sentence
+    if (cleanText.includes('...') || !cleanText.endsWith('.') || cleanText.endsWith('..')) {
+      // Split by sentences
+      const sentences = cleanText.split(/[.!?]+/).filter(s => s.trim().length > 0);
+      
+      // Take only complete sentences (4-5 sentences)
+      const completeSentences = sentences.slice(0, 5);
+      
+      // Join with periods and ensure proper ending
+      cleanText = completeSentences.join('. ') + '.';
     }
     
-    return result;
+    // Ensure proper sentence endings
+    if (!cleanText.endsWith('.') && !cleanText.endsWith('!') && !cleanText.endsWith('?')) {
+      cleanText = cleanText + '.';
+    }
+    
+    return cleanText;
   };
 
   // Render functions for different views
@@ -1369,10 +1375,10 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section with Concise 4-5 sentences */}
+        {/* Summary Section with Complete 4-5 sentences */}
         <div className="section-title">
-          <h2>Profile Summary (4-5 sentences each)</h2>
-          <p>Key insights extracted from resume (medium length)</p>
+          <h2>Profile Summary (4-5 complete sentences each)</h2>
+          <p>Key insights extracted from resume (no truncation)</p>
         </div>
         
         <div className="summary-grid">
@@ -1384,7 +1390,7 @@ function App() {
               <h3>Experience Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="concise-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+              <p className="complete-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
                 {formatSummary(analysis.experience_summary)}
               </p>
             </div>
@@ -1398,7 +1404,7 @@ function App() {
               <h3>Education Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="concise-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+              <p className="complete-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
                 {formatSummary(analysis.education_summary)}
               </p>
             </div>
@@ -1504,35 +1510,6 @@ function App() {
         </div>
       </div>
 
-      {/* Batch Report Info */}
-      <div className="batch-report-info glass">
-        <div className="batch-info-header">
-          <FileSpreadsheet size={24} />
-          <div>
-            <h3>Comprehensive Excel Report Ready</h3>
-            <p>Download the batch report with detailed candidate analysis</p>
-          </div>
-        </div>
-        <div className="batch-report-features">
-          <div className="feature-item">
-            <CheckCircle size={16} />
-            <span>Multiple Sheets: Summary, Candidate Details, Individual Reports</span>
-          </div>
-          <div className="feature-item">
-            <CheckCircle size={16} />
-            <span>Each candidate gets their own sheet with complete analysis</span>
-          </div>
-          <div className="feature-item">
-            <CheckCircle size={16} />
-            <span>Includes scores, skills, summaries, and recommendations</span>
-          </div>
-          <div className="feature-item">
-            <CheckCircle size={16} />
-            <span>Statistics and score distribution analysis</span>
-          </div>
-        </div>
-      </div>
-
       {/* Stats */}
       <div className="multi-key-stats-container glass">
         <div className="stat-card">
@@ -1614,9 +1591,9 @@ function App() {
                 {candidate.recommendation}
               </div>
               
-              <div className="concise-summary-section">
+              <div className="complete-summary-section">
                 <h4>Experience Summary:</h4>
-                <p className="concise-text" style={{ fontSize: '0.9rem', lineHeight: '1.4' }}>
+                <p className="complete-text" style={{ fontSize: '0.9rem', lineHeight: '1.4' }}>
                   {formatSummary(candidate.experience_summary)}
                 </p>
               </div>
@@ -1888,10 +1865,10 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section with Concise 4-5 sentences */}
+        {/* Summary Section with Complete 4-5 sentences */}
         <div className="section-title">
-          <h2>Profile Summary (4-5 sentences each)</h2>
-          <p>Key insights extracted from resume (medium length)</p>
+          <h2>Profile Summary (4-5 complete sentences each)</h2>
+          <p>Key insights extracted from resume (no truncation)</p>
         </div>
         
         <div className="summary-grid">
@@ -1903,7 +1880,7 @@ function App() {
               <h3>Experience Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="concise-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+              <p className="complete-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
                 {formatSummary(candidate.experience_summary)}
               </p>
             </div>
@@ -1917,7 +1894,7 @@ function App() {
               <h3>Education Summary</h3>
             </div>
             <div className="summary-content">
-              <p className="concise-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+              <p className="complete-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
                 {formatSummary(candidate.education_summary)}
               </p>
             </div>
@@ -2044,7 +2021,7 @@ function App() {
                   <span className="powered-by">Powered by</span>
                   <span className="groq-badge">⚡ Groq</span>
                   <span className="divider">•</span>
-                  <span className="tagline">5-8 Skills Analysis • 4-5 Sentence Summaries</span>
+                  <span className="tagline">5-8 Skills Analysis • Complete Sentence Summaries</span>
                 </div>
               </div>
             </div>
@@ -2351,7 +2328,7 @@ function App() {
               <span>AI Resume Analyzer (Groq)</span>
             </div>
             <p className="footer-tagline">
-              Groq AI • 3-key parallel processing • 5-8 skills analysis • 4-5 sentence summaries
+              Groq AI • 3-key parallel processing • 5-8 skills analysis • Complete sentence summaries
             </p>
           </div>
           
@@ -2360,7 +2337,7 @@ function App() {
               <h4>Features</h4>
               <a href="#">Groq AI</a>
               <a href="#">5-8 Skills Analysis</a>
-              <a href="#">4-5 Sentence Summaries</a>
+              <a href="#">Complete Summaries</a>
               <a href="#">Parallel Processing</a>
             </div>
             <div className="footer-section">
@@ -2413,7 +2390,7 @@ function App() {
             </span>
             <span className="stat">
               <BookOpen size={12} />
-              Summaries: 4-5 sentences
+              Summaries: Complete sentences
             </span>
           </div>
         </div>
