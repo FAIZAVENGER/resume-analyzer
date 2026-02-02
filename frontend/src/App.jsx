@@ -2325,7 +2325,7 @@ function App() {
           <div className="footer-brand">
             <div className="footer-logo">
               <Brain size={20} />
-              <span>AI Resume Analyzer (Groq)</span>
+              <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
               Groq AI • 3-key parallel processing • 5-8 skills analysis • Complete sentence summaries
@@ -2360,7 +2360,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. 5-8 Skills Analysis Mode.</p>
+          <p>© 2026 AI Resume Analyzer. Built with React + Flask + Groq AI. 5-8 Skills Analysis Mode.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
