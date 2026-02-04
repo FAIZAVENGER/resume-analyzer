@@ -1639,15 +1639,6 @@ function App() {
                 View Full Details
                 <ChevronRight size={16} />
               </button>
-              {candidate.analysis_id && (
-                <button 
-                  className="download-individual-btn"
-                  onClick={() => handleIndividualDownload(candidate.analysis_id)}
-                  title="Download individual report"
-                >
-                  <FileDown size={16} />
-                </button>
-              )}
             </div>
           </div>
         ))}
@@ -1958,30 +1949,6 @@ function App() {
             </div>
           </div>
         </div>
-
-        {/* Action Section */}
-        <div className="action-section glass">
-          <div className="action-content">
-            <h3>Candidate Analysis Complete</h3>
-            <p>Download individual report or go back to rankings</p>
-          </div>
-          <div className="action-buttons">
-            {candidate.analysis_id && (
-              <button 
-                className="download-button" 
-                onClick={() => handleIndividualDownload(candidate.analysis_id)}
-              >
-                <FileDown size={20} />
-                <span>Download Individual Report</span>
-              </button>
-            )}
-            <button className="reset-button" onClick={navigateBack}>
-              <ArrowLeft size={20} />
-              <span>Back to Rankings</span>
-            </button>
-          </div>
-        </div>
-      </div>
     );
   };
 
