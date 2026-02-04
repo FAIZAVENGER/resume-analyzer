@@ -608,27 +608,11 @@ function App() {
     }
   };
 
-  const handleDownload = () => {
-    if (analysis?.excel_filename) {
-      window.open(`${API_BASE_URL}/download/${analysis.excel_filename}`, '_blank');
-    } else {
-      setError('No analysis report available for download.');
-    }
-  };
-
   const handleBatchDownload = () => {
     if (batchAnalysis?.batch_excel_filename) {
       window.open(`${API_BASE_URL}/download/${batchAnalysis.batch_excel_filename}`, '_blank');
     } else {
       setError('No batch analysis report available for download.');
-    }
-  };
-
-  const handleIndividualDownload = (analysisId) => {
-    if (analysisId) {
-      window.open(`${API_BASE_URL}/download-individual/${analysisId}`, '_blank');
-    } else {
-      setError('No individual report available for download.');
     }
   };
 
@@ -1173,7 +1157,7 @@ function App() {
             </div>
             <div className="tip">
               <Download size={16} />
-              <span>Download professional Excel report with all candidate data</span>
+              <span>Download Excel report with comparison sheet + individual candidate sheets</span>
             </div>
           </>
         ) : (
@@ -1215,12 +1199,6 @@ function App() {
             <h2>⚡ Resume Analysis Results (Groq)</h2>
             <p>{analysis.candidate_name}</p>
           </div>
-          <div className="navigation-actions">
-            <button className="download-report-btn" onClick={handleDownload}>
-              <DownloadCloud size={18} />
-              <span>Download Report</span>
-            </button>
-          </div>
         </div>
 
         {/* Candidate Header */}
@@ -1240,6 +1218,10 @@ function App() {
                     month: 'long', 
                     day: 'numeric' 
                   })}
+                </span>
+                <span className="years-experience">
+                  <Calendar size={14} />
+                  {analysis.years_of_experience || 'N/A'}
                 </span>
               </div>
             </div>
@@ -1375,37 +1357,23 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section with Complete 4-5 sentences */}
+        {/* Experience Summary Only */}
         <div className="section-title">
-          <h2>Profile Summary (4-5 complete sentences each)</h2>
+          <h2>Experience Summary (4-5 complete sentences)</h2>
           <p>Key insights extracted from resume (no truncation)</p>
         </div>
         
         <div className="summary-grid">
-          <div className="summary-card glass">
+          <div className="summary-card glass" style={{ gridColumn: '1 / -1' }}>
             <div className="summary-header">
               <div className="summary-icon">
                 <Briefcase size={24} />
               </div>
-              <h3>Experience Summary</h3>
+              <h3>Professional Experience Summary</h3>
             </div>
             <div className="summary-content">
               <p className="complete-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
                 {formatSummary(analysis.experience_summary)}
-              </p>
-            </div>
-          </div>
-
-          <div className="summary-card glass">
-            <div className="summary-header">
-              <div className="summary-icon">
-                <BookOpen size={24} />
-              </div>
-              <h3>Education Summary</h3>
-            </div>
-            <div className="summary-content">
-              <p className="complete-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
-                {formatSummary(analysis.education_summary)}
               </p>
             </div>
           </div>
@@ -1473,13 +1441,9 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Analysis Complete</h3>
-            <p>Download the simplified Excel report or start a new analysis</p>
+            <p>Download the Excel report or start a new analysis</p>
           </div>
           <div className="action-buttons">
-            <button className="download-button" onClick={handleDownload}>
-              <DownloadCloud size={20} />
-              <span>Download Excel Report</span>
-            </button>
             <button className="reset-button" onClick={navigateToMain}>
               <RefreshCw size={20} />
               <span>New Analysis</span>
@@ -1570,7 +1534,12 @@ function App() {
                 <div className="candidate-main-info">
                   <h3 className="candidate-name">{candidate.candidate_name}</h3>
                   <div className="candidate-meta">
-                    <span className="file-info">{candidate.filename}</span>
+                    <span className="file-info">
+                      <FileText size={12} /> {candidate.filename}
+                    </span>
+                    <span className="years-exp">
+                      <Calendar size={12} /> {candidate.years_of_experience || 'N/A'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1639,25 +1608,35 @@ function App() {
                 View Full Details
                 <ChevronRight size={16} />
               </button>
-              {candidate.analysis_id && (
-                <button 
-                  className="download-individual-btn"
-                  onClick={() => handleIndividualDownload(candidate.analysis_id)}
-                  title="Download individual report"
-                >
-                  <FileDown size={16} />
-                </button>
-              )}
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Report Information */}
+      <div className="report-info-section glass">
+        <div className="report-info-header">
+          <FileSpreadsheet size={24} />
+          <h3>Excel Report Details</h3>
+        </div>
+        <div className="report-info-content">
+          <p>The downloaded Excel report contains:</p>
+          <ul className="report-features">
+            <li><Check size={16} /> <strong>Candidate Comparison Sheet:</strong> Side-by-side comparison of all candidates</li>
+            <li><Check size={16} /> <strong>Filename First:</strong> Filename column instead of candidate name</li>
+            <li><Check size={16} /> <strong>Years of Experience:</strong> New column showing experience level</li>
+            <li><Check size={16} /> <strong>Individual Candidate Sheets:</strong> One sheet per candidate with detailed analysis</li>
+            <li><Check size={16} /> <strong>Experience Summary Only:</strong> No education section included</li>
+            <li><Check size={16} /> <strong>5-8 Skills Analysis:</strong> Comprehensive skills matching for each candidate</li>
+          </ul>
+        </div>
       </div>
 
       {/* Action Buttons */}
       <div className="action-section glass">
         <div className="action-content">
           <h3>Batch Analysis Complete</h3>
-          <p>Download professional Excel report with candidate analysis</p>
+          <p>Download professional Excel report with candidate comparison and individual sheets</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
@@ -1701,17 +1680,6 @@ function App() {
             <h2>Candidate Details</h2>
             <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
           </div>
-          <div className="navigation-actions">
-            {candidate.analysis_id && (
-              <button 
-                className="download-report-btn" 
-                onClick={() => handleIndividualDownload(candidate.analysis_id)}
-              >
-                <FileDown size={18} />
-                <span>Download Report</span>
-              </button>
-            )}
-          </div>
         </div>
 
         {/* Candidate Header */}
@@ -1730,6 +1698,10 @@ function App() {
                 <span className="file-info">
                   <FileText size={14} />
                   {candidate.filename} • {candidate.file_size}
+                </span>
+                <span className="years-experience">
+                  <Calendar size={14} />
+                  {candidate.years_of_experience || 'N/A'}
                 </span>
               </div>
             </div>
@@ -1865,37 +1837,23 @@ function App() {
           </div>
         </div>
 
-        {/* Summary Section with Complete 4-5 sentences */}
+        {/* Experience Summary Only */}
         <div className="section-title">
-          <h2>Profile Summary (4-5 complete sentences each)</h2>
+          <h2>Experience Summary (4-5 complete sentences)</h2>
           <p>Key insights extracted from resume (no truncation)</p>
         </div>
         
         <div className="summary-grid">
-          <div className="summary-card glass">
+          <div className="summary-card glass" style={{ gridColumn: '1 / -1' }}>
             <div className="summary-header">
               <div className="summary-icon">
                 <Briefcase size={24} />
               </div>
-              <h3>Experience Summary</h3>
+              <h3>Professional Experience Summary</h3>
             </div>
             <div className="summary-content">
               <p className="complete-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
                 {formatSummary(candidate.experience_summary)}
-              </p>
-            </div>
-          </div>
-
-          <div className="summary-card glass">
-            <div className="summary-header">
-              <div className="summary-icon">
-                <BookOpen size={24} />
-              </div>
-              <h3>Education Summary</h3>
-            </div>
-            <div className="summary-content">
-              <p className="complete-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
-                {formatSummary(candidate.education_summary)}
               </p>
             </div>
           </div>
@@ -1963,18 +1921,13 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Candidate Analysis Complete</h3>
-            <p>Download individual report or go back to rankings</p>
+            <p>Download batch report or go back to rankings</p>
           </div>
           <div className="action-buttons">
-            {candidate.analysis_id && (
-              <button 
-                className="download-button" 
-                onClick={() => handleIndividualDownload(candidate.analysis_id)}
-              >
-                <FileDown size={20} />
-                <span>Download Individual Report</span>
-              </button>
-            )}
+            <button className="download-button" onClick={handleBatchDownload}>
+              <DownloadCloud size={20} />
+              <span>Download Batch Report</span>
+            </button>
             <button className="reset-button" onClick={navigateBack}>
               <ArrowLeft size={20} />
               <span>Back to Rankings</span>
@@ -2021,7 +1974,7 @@ function App() {
                   <span className="powered-by">Powered by</span>
                   <span className="groq-badge">⚡ Groq</span>
                   <span className="divider">•</span>
-                  <span className="tagline">5-8 Skills Analysis • Complete Sentence Summaries</span>
+                  <span className="tagline">Filename First • Years of Experience • No Education Summary</span>
                 </div>
               </div>
             </div>
@@ -2196,9 +2149,9 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Skills Analysis</div>
+                <div className="summary-label">Report Features</div>
                 <div className="summary-value info">
-                  ⚡ 5-8 skills each
+                  📄 Filename First + Years of Experience
                 </div>
               </div>
               <div className="summary-item">
@@ -2275,7 +2228,11 @@ function App() {
               )}
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                <span>Skills: 5-8 each</span>
+                <span>Filename First</span>
+              </div>
+              <div className="status-indicator active">
+                <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                <span>Years of Experience</span>
               </div>
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
@@ -2328,7 +2285,7 @@ function App() {
               <span>AI Resume Analyzer</span>
             </div>
             <p className="footer-tagline">
-              Groq AI • 3-key parallel processing • 5-8 skills analysis • Complete sentence summaries
+              Groq AI • 3-key parallel processing • Filename First • Years of Experience • No Education Summary
             </p>
           </div>
           
@@ -2336,9 +2293,9 @@ function App() {
             <div className="footer-section">
               <h4>Features</h4>
               <a href="#">Groq AI</a>
-              <a href="#">5-8 Skills Analysis</a>
-              <a href="#">Complete Summaries</a>
-              <a href="#">Parallel Processing</a>
+              <a href="#">Filename First</a>
+              <a href="#">Years of Experience</a>
+              <a href="#">No Education Summary</a>
             </div>
             <div className="footer-section">
               <h4>Service</h4>
@@ -2360,7 +2317,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2026 AI Resume Analyzer. Built with React + Flask + Groq AI. 5-8 Skills Analysis Mode.</p>
+          <p>© 2026 AI Resume Analyzer. Built with React + Flask + Groq AI. Filename First + Years of Experience Mode.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
@@ -2385,12 +2342,12 @@ function App() {
               </span>
             )}
             <span className="stat">
-              <Target size={12} />
-              Skills: 5-8 each
+              <FileText size={12} />
+              Feature: Filename First
             </span>
             <span className="stat">
-              <BookOpen size={12} />
-              Summaries: Complete sentences
+              <Calendar size={12} />
+              Feature: Years of Experience
             </span>
           </div>
         </div>
