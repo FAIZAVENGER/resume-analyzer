@@ -980,14 +980,8 @@ def process_single_resume(args):
             if analysis_id in resume_storage and resume_storage[analysis_id].get('has_pdf_preview'):
                 analysis['has_pdf_preview'] = True
         
-        # Create individual Excel report for each candidate
-        try:
-            excel_filename = f"individual_{analysis_id}.xlsx"
-            excel_path = create_detailed_individual_report(analysis, excel_filename)
-            analysis['individual_excel_filename'] = os.path.basename(excel_path)
-        except Exception as e:
-            print(f"⚠️ Failed to create individual report: {str(e)}")
-            analysis['individual_excel_filename'] = None
+        # REMOVED: Individual Excel report creation
+        # Only create batch report, no individual reports
         
         # Keep the preview file, remove only the temp upload file
         if os.path.exists(file_path):
@@ -1088,9 +1082,6 @@ def home():
             <div class="endpoint">
                 <strong>GET /download/&lt;filename&gt;</strong> - Download batch report
             </div>
-            <div class="endpoint">
-                <strong>GET /download-individual/&lt;analysis_id&gt;</strong> - Download individual candidate report
-            </div>
         </div>
     </body>
     </html>
@@ -1158,14 +1149,13 @@ def analyze_resume():
         
         analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key, key_index)
         
-        excel_filename = f"analysis_{analysis_id}.xlsx"
-        excel_path = create_detailed_individual_report(analysis, excel_filename)
+        # REMOVED: Individual Excel report creation for single analysis
+        # Only create batch reports for batch mode
         
         # Keep the preview file, remove only the temp upload file
         if os.path.exists(file_path):
             os.remove(file_path)
         
-        analysis['excel_filename'] = os.path.basename(excel_path)
         analysis['ai_model'] = GROQ_MODEL
         analysis['ai_provider'] = "groq"
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
@@ -1398,272 +1388,34 @@ def get_resume_original(analysis_id):
         print(f"❌ Original resume download error: {traceback.format_exc()}")
         return jsonify({'error': f'Failed to download resume: {str(e)}'}), 500
 
-def create_detailed_individual_report(analysis_data, filename="resume_analysis_report.xlsx"):
-    """Create a detailed Excel report for individual candidate (simplified)"""
+@app.route('/download/<filename>', methods=['GET'])
+def download_report(filename):
+    """Download the Excel report"""
+    update_activity()
+    
     try:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Resume Analysis"
+        print(f"📥 Download request for: {filename}")
         
-        # Styles
-        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        title_font = Font(bold=True, size=14, color="FFFFFF")
-        subheader_fill = PatternFill(start_color="8EA9DB", end_color="8EA9DB", fill_type="solid")
-        subheader_font = Font(bold=True, color="FFFFFF", size=10)
+        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
         
-        # Set column widths
-        column_widths = {
-            'A': 25, 'B': 60, 'C': 25, 'D': 25
-        }
-        for col, width in column_widths.items():
-            ws.column_dimensions[col].width = width
+        file_path = os.path.join(REPORTS_FOLDER, safe_filename)
         
-        row = 1
+        if not os.path.exists(file_path):
+            print(f"❌ File not found: {file_path}")
+            return jsonify({'error': 'File not found'}), 404
         
-        # Title
-        ws['A1'] = "RESUME ANALYSIS REPORT (Groq AI)"
-        ws['A1'].font = title_font
-        ws['A1'].fill = header_fill
-        ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
-        
-        # Also set values for other cells to maintain structure
-        for col in ['B1', 'C1', 'D1']:
-            ws[col] = ""
-            ws[col].fill = header_fill
-        
-        row += 2
-        
-        # Basic Information
-        ws[f'A{row}'] = "CANDIDATE INFORMATION"
-        ws[f'A{row}'].font = header_font
-        ws[f'A{row}'].fill = header_fill
-        ws[f'A{row}'].alignment = Alignment(horizontal='center')
-        
-        for col in ['B', 'C', 'D']:
-            cell = f'{col}{row}'
-            ws[cell] = ""
-            ws[cell].fill = header_fill
-        
-        row += 1
-        
-        info_fields = [
-            ("Candidate Name", analysis_data.get('candidate_name', 'N/A')),
-            ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            ("Original Filename", analysis_data.get('filename', 'N/A')),
-            ("File Size", analysis_data.get('file_size', 'N/A')),
-        ]
-        
-        for label, value in info_fields:
-            ws[f'A{row}'] = label
-            ws[f'A{row}'].font = Font(bold=True)
-            ws[f'B{row}'] = value
-            row += 1
-        
-        row += 1
-        
-        # Score and Recommendation
-        ws[f'A{row}'] = "SCORE & RECOMMENDATION"
-        ws[f'A{row}'].font = header_font
-        ws[f'A{row}'].fill = header_fill
-        ws[f'A{row}'].alignment = Alignment(horizontal='center')
-        
-        for col in ['B', 'C', 'D']:
-            cell = f'{col}{row}'
-            ws[cell] = ""
-            ws[cell].fill = header_fill
-        row += 1
-        
-        score_info = [
-            ("Overall ATS Score", f"{analysis_data.get('overall_score', 0)}/100"),
-            ("Recommendation", analysis_data.get('recommendation', 'N/A')),
-        ]
-        
-        for i in range(0, len(score_info), 2):
-            if i < len(score_info):
-                ws[f'A{row}'] = score_info[i][0]
-                ws[f'A{row}'].font = Font(bold=True)
-                ws[f'B{row}'] = score_info[i][1]
-            if i + 1 < len(score_info):
-                ws[f'C{row}'] = score_info[i+1][0]
-                ws[f'C{row}'].font = Font(bold=True)
-                ws[f'D{row}'] = score_info[i+1][1]
-            row += 1
-        
-        row += 1
-        
-        # Skills Matched (5-8 skills)
-        skills_matched = analysis_data.get('skills_matched', [])
-        ws[f'A{row}'] = f"SKILLS MATCHED ({len(skills_matched)} skills)"
-        ws[f'A{row}'].font = header_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'A{row}'].alignment = Alignment(horizontal='center')
-        
-        for col in ['B', 'C', 'D']:
-            cell = f'{col}{row}'
-            ws[cell] = ""
-            ws[cell].fill = subheader_fill
-        row += 1
-        
-        if skills_matched:
-            for i, skill in enumerate(skills_matched, 1):
-                ws[f'A{row}'] = f"{i}."
-                ws[f'A{row}'].font = Font(bold=True)
-                ws[f'B{row}'] = skill
-                row += 1
-        else:
-            ws[f'A{row}'] = "No matched skills found"
-            row += 1
-        
-        row += 1
-        
-        # Skills Missing (5-8 skills)
-        skills_missing = analysis_data.get('skills_missing', [])
-        ws[f'A{row}'] = f"SKILLS MISSING ({len(skills_missing)} skills)"
-        ws[f'A{row}'].font = header_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'A{row}'].alignment = Alignment(horizontal='center')
-        
-        for col in ['B', 'C', 'D']:
-            cell = f'{col}{row}'
-            ws[cell] = ""
-            ws[cell].fill = subheader_fill
-        row += 1
-        
-        if skills_missing:
-            for i, skill in enumerate(skills_missing, 1):
-                ws[f'A{row}'] = f"{i}."
-                ws[f'A{row}'].font = Font(bold=True)
-                ws[f'B{row}'] = skill
-                row += 1
-        else:
-            ws[f'A{row}'] = "All required skills are present!"
-            row += 1
-        
-        row += 1
-        
-        # Experience Summary (Complete sentences, not truncated)
-        ws[f'A{row}'] = "EXPERIENCE SUMMARY (4-5 complete sentences)"
-        ws[f'A{row}'].font = header_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'A{row}'].alignment = Alignment(horizontal='center')
-        
-        for col in ['B', 'C', 'D']:
-            cell = f'{col}{row}'
-            ws[cell] = ""
-            ws[cell].fill = subheader_fill
-        row += 1
-        
-        experience_text = analysis_data.get('experience_summary', 'No experience summary available.')
-        ws[f'A{row}'] = experience_text
-        ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
-        ws.row_dimensions[row].height = 80
-        
-        for col in ['B', 'C', 'D']:
-            ws[f'{col}{row}'] = ""
-        
-        row += 2
-        
-        # Education Summary (Complete sentences, not truncated)
-        ws[f'A{row}'] = "EDUCATION SUMMARY (4-5 complete sentences)"
-        ws[f'A{row}'].font = header_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'A{row}'].alignment = Alignment(horizontal='center')
-        
-        for col in ['B', 'C', 'D']:
-            cell = f'{col}{row}'
-            ws[cell] = ""
-            ws[cell].fill = subheader_fill
-        row += 1
-        
-        education_text = analysis_data.get('education_summary', 'No education summary available.')
-        ws[f'A{row}'] = education_text
-        ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
-        ws.row_dimensions[row].height = 80
-        
-        for col in ['B', 'C', 'D']:
-            ws[f'{col}{row}'] = ""
-        
-        row += 2
-        
-        # Key Strengths (3 items)
-        ws[f'A{row}'] = "KEY STRENGTHS (3)"
-        ws[f'A{row}'].font = header_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'A{row}'].alignment = Alignment(horizontal='center')
-        
-        for col in ['B', 'C', 'D']:
-            cell = f'{col}{row}'
-            ws[cell] = ""
-            ws[cell].fill = subheader_fill
-        row += 1
-        
-        key_strengths = analysis_data.get('key_strengths', [])
-        if key_strengths:
-            for i, strength in enumerate(key_strengths[:3], 1):
-                ws[f'A{row}'] = f"{i}."
-                ws[f'A{row}'].font = Font(bold=True)
-                ws[f'B{row}'] = strength
-                row += 1
-        else:
-            ws[f'A{row}'] = "No strengths identified"
-            row += 1
-        
-        row += 1
-        
-        # Areas for Improvement (3 items)
-        ws[f'A{row}'] = "AREAS FOR IMPROVEMENT (3)"
-        ws[f'A{row}'].font = header_font
-        ws[f'A{row}'].fill = subheader_fill
-        ws[f'A{row}'].alignment = Alignment(horizontal='center')
-        
-        for col in ['B', 'C', 'D']:
-            cell = f'{col}{row}'
-            ws[cell] = ""
-            ws[cell].fill = subheader_fill
-        row += 1
-        
-        areas_for_improvement = analysis_data.get('areas_for_improvement', [])
-        if areas_for_improvement:
-            for i, area in enumerate(areas_for_improvement[:3], 1):
-                ws[f'A{row}'] = f"{i}."
-                ws[f'A{row}'].font = Font(bold=True)
-                ws[f'B{row}'] = area
-                row += 1
-        else:
-            ws[f'A{row}'] = "No areas for improvement identified"
-            row += 1
-        
-        # Add borders to all cells with data
-        thin_border = Border(
-            left=Side(style='thin'),
-            right=Side(style='thin'),
-            top=Side(style='thin'),
-            bottom=Side(style='thin')
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=safe_filename,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
         
-        for row_cells in ws.iter_rows(min_row=1, max_row=row-1, min_col=1, max_col=4):
-            for cell in row_cells:
-                if cell.value is not None:
-                    cell.border = thin_border
-        
-        # Save the file
-        filepath = os.path.join(REPORTS_FOLDER, filename)
-        wb.save(filepath)
-        print(f"📄 Individual Excel report saved to: {filepath}")
-        return filepath
     except Exception as e:
-        print(f"❌ Error creating individual Excel report: {str(e)}")
-        traceback.print_exc()
-        filepath = os.path.join(REPORTS_FOLDER, f"individual_fallback_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
-        wb = Workbook()
-        ws = wb.active
-        ws['A1'] = "Resume Analysis Report (Groq)"
-        ws['A2'] = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        ws['A3'] = f"Candidate: {analysis_data.get('candidate_name', 'Unknown')}"
-        ws['A4'] = f"Score: {analysis_data.get('overall_score', 0)}/100"
-        wb.save(filepath)
-        return filepath
+        print(f"❌ Download error: {traceback.format_exc()}")
+        return jsonify({'error': f'Download failed: {str(e)}'}), 500
+
+# REMOVED: /download-individual endpoint - no longer needed
 
 def create_comprehensive_batch_report(analyses, job_description, filename="batch_resume_analysis.xlsx"):
     """Create a comprehensive batch Excel report with professional formatting"""
@@ -1861,240 +1613,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ws_comparison.cell(row=summary_row, column=2 + i*3, value=value).font = bold_font
             ws_comparison.cell(row=summary_row, column=2 + i*3).alignment = Alignment(horizontal='center')
         
-        # ================== INDIVIDUAL CANDIDATE SHEETS ==================
-        for analysis in analyses:
-            candidate_name = analysis.get('candidate_name', f"Candidate_{analysis.get('rank', 'Unknown')}")
-            # Clean sheet name (remove invalid characters)
-            sheet_name = re.sub(r'[\\/*?:[\]]', '_', candidate_name[:31])
-            
-            # Create individual sheet for each candidate
-            ws_candidate = wb.create_sheet(title=sheet_name)
-            
-            # Define professional styles for candidate sheet
-            candidate_title_font = Font(bold=True, size=14, color="FFFFFF")
-            candidate_header_font = Font(bold=True, size=11, color="000000")
-            candidate_label_font = Font(bold=True, size=10, color="000000")
-            candidate_value_font = Font(size=10, color="000000")
-            
-            candidate_title_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-            candidate_section_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-            
-            # Title Section
-            ws_candidate.merge_cells('A1:D1')
-            title_cell = ws_candidate['A1']
-            title_cell.value = f"CANDIDATE ANALYSIS REPORT"
-            title_cell.font = candidate_title_font
-            title_cell.fill = candidate_title_fill
-            title_cell.alignment = Alignment(horizontal='center', vertical='center')
-            title_cell.border = thick_border
-            
-            # Candidate Name and Rank
-            ws_candidate.merge_cells('A2:D2')
-            name_cell = ws_candidate['A2']
-            name_cell.value = f"Candidate: {candidate_name} | Rank: #{analysis.get('rank', 'N/A')}"
-            name_cell.font = Font(bold=True, size=12, color="000000")
-            name_cell.alignment = Alignment(horizontal='center')
-            name_cell.border = thin_border
-            
-            row = 4
-            
-            # Basic Information Section
-            ws_candidate.merge_cells(f'A{row}:D{row}')
-            section_cell = ws_candidate[f'A{row}']
-            section_cell.value = "BASIC INFORMATION"
-            section_cell.font = candidate_header_font
-            section_cell.fill = candidate_section_fill
-            section_cell.alignment = Alignment(horizontal='center')
-            section_cell.border = thin_border
-            row += 1
-            
-            basic_info = [
-                ("ATS Score:", f"{analysis.get('overall_score', 0)}/100"),
-                ("Recommendation:", analysis.get('recommendation', 'N/A')),
-                ("Original File:", analysis.get('filename', 'N/A')),
-                ("File Size:", analysis.get('file_size', 'N/A')),
-                ("Analysis Date:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-                ("AI Model:", f"Groq {GROQ_MODEL}")
-            ]
-            
-            for i in range(0, len(basic_info), 2):
-                if i < len(basic_info):
-                    # Label
-                    label_cell = ws_candidate.cell(row=row, column=1, value=basic_info[i][0])
-                    label_cell.font = candidate_label_font
-                    label_cell.border = thin_border
-                    # Value
-                    value_cell = ws_candidate.cell(row=row, column=2, value=basic_info[i][1])
-                    value_cell.font = candidate_value_font
-                    value_cell.border = thin_border
-                
-                if i + 1 < len(basic_info):
-                    # Label
-                    label_cell = ws_candidate.cell(row=row, column=3, value=basic_info[i+1][0])
-                    label_cell.font = candidate_label_font
-                    label_cell.border = thin_border
-                    # Value
-                    value_cell = ws_candidate.cell(row=row, column=4, value=basic_info[i+1][1])
-                    value_cell.font = candidate_value_font
-                    value_cell.border = thin_border
-                
-                row += 1
-            
-            row += 1
-            
-            # Skills Analysis Section
-            ws_candidate.merge_cells(f'A{row}:D{row}')
-            section_cell = ws_candidate[f'A{row}']
-            section_cell.value = "SKILLS ANALYSIS (5-8 skills each)"
-            section_cell.font = candidate_header_font
-            section_cell.fill = candidate_section_fill
-            section_cell.alignment = Alignment(horizontal='center')
-            section_cell.border = thin_border
-            row += 1
-            
-            # Skills Matched Header
-            ws_candidate.merge_cells(f'A{row}:B{row}')
-            matched_header = ws_candidate[f'A{row}']
-            matched_header.value = "MATCHED SKILLS"
-            matched_header.font = Font(bold=True, size=10, color="00B050")
-            matched_header.alignment = Alignment(horizontal='center')
-            matched_header.border = thin_border
-            
-            # Skills Missing Header
-            ws_candidate.merge_cells(f'C{row}:D{row}')
-            missing_header = ws_candidate[f'C{row}']
-            missing_header.value = "MISSING SKILLS"
-            missing_header.font = Font(bold=True, size=10, color="FF0000")
-            missing_header.alignment = Alignment(horizontal='center')
-            missing_header.border = thin_border
-            row += 1
-            
-            # Skills lists
-            skills_matched = analysis.get('skills_matched', [])
-            skills_missing = analysis.get('skills_missing', [])
-            max_skills = max(len(skills_matched), len(skills_missing))
-            
-            for i in range(max_skills):
-                if i < len(skills_matched):
-                    cell = ws_candidate.cell(row=row, column=1, value=f"• {skills_matched[i]}")
-                    cell.font = Font(size=10, color="00B050")
-                    cell.border = thin_border
-                    cell = ws_candidate.cell(row=row, column=2, value="")
-                    cell.border = thin_border
-                
-                if i < len(skills_missing):
-                    cell = ws_candidate.cell(row=row, column=3, value=f"• {skills_missing[i]}")
-                    cell.font = Font(size=10, color="FF0000")
-                    cell.border = thin_border
-                    cell = ws_candidate.cell(row=row, column=4, value="")
-                    cell.border = thin_border
-                
-                row += 1
-            
-            row += 1
-            
-            # Experience Summary Section
-            ws_candidate.merge_cells(f'A{row}:D{row}')
-            section_cell = ws_candidate[f'A{row}']
-            section_cell.value = "EXPERIENCE SUMMARY (4-5 complete sentences)"
-            section_cell.font = candidate_header_font
-            section_cell.fill = candidate_section_fill
-            section_cell.alignment = Alignment(horizontal='center')
-            section_cell.border = thin_border
-            row += 1
-            
-            experience = analysis.get('experience_summary', 'No experience summary available.')
-            ws_candidate.merge_cells(f'A{row}:D{row}')
-            exp_cell = ws_candidate[f'A{row}']
-            exp_cell.value = experience
-            exp_cell.font = candidate_value_font
-            exp_cell.alignment = Alignment(wrap_text=True, vertical='top')
-            exp_cell.border = thin_border
-            ws_candidate.row_dimensions[row].height = 60
-            row += 1
-            
-            # Education Summary Section
-            ws_candidate.merge_cells(f'A{row}:D{row}')
-            section_cell = ws_candidate[f'A{row}']
-            section_cell.value = "EDUCATION SUMMARY (4-5 complete sentences)"
-            section_cell.font = candidate_header_font
-            section_cell.fill = candidate_section_fill
-            section_cell.alignment = Alignment(horizontal='center')
-            section_cell.border = thin_border
-            row += 1
-            
-            education = analysis.get('education_summary', 'No education summary available.')
-            ws_candidate.merge_cells(f'A{row}:D{row}')
-            edu_cell = ws_candidate[f'A{row}']
-            edu_cell.value = education
-            edu_cell.font = candidate_value_font
-            edu_cell.alignment = Alignment(wrap_text=True, vertical='top')
-            edu_cell.border = thin_border
-            ws_candidate.row_dimensions[row].height = 60
-            row += 1
-            
-            # Key Strengths Section
-            ws_candidate.merge_cells(f'A{row}:D{row}')
-            section_cell = ws_candidate[f'A{row}']
-            section_cell.value = "KEY STRENGTHS (3)"
-            section_cell.font = candidate_header_font
-            section_cell.fill = candidate_section_fill
-            section_cell.alignment = Alignment(horizontal='center')
-            section_cell.border = thin_border
-            row += 1
-            
-            strengths = analysis.get('key_strengths', [])
-            for strength in strengths[:3]:
-                ws_candidate.merge_cells(f'A{row}:D{row}')
-                cell = ws_candidate.cell(row=row, column=1, value=f"• {strength}")
-                cell.font = Font(size=10, color="00B050")
-                cell.alignment = Alignment(wrap_text=True)
-                cell.border = thin_border
-                row += 1
-            
-            if not strengths:
-                ws_candidate.merge_cells(f'A{row}:D{row}')
-                cell = ws_candidate.cell(row=row, column=1, value="No strengths identified")
-                cell.font = Font(size=10, color="666666")
-                cell.alignment = Alignment(horizontal='center')
-                cell.border = thin_border
-                row += 1
-            
-            row += 1
-            
-            # Areas for Improvement Section
-            ws_candidate.merge_cells(f'A{row}:D{row}')
-            section_cell = ws_candidate[f'A{row}']
-            section_cell.value = "AREAS FOR IMPROVEMENT (3)"
-            section_cell.font = candidate_header_font
-            section_cell.fill = candidate_section_fill
-            section_cell.alignment = Alignment(horizontal='center')
-            section_cell.border = thin_border
-            row += 1
-            
-            improvements = analysis.get('areas_for_improvement', [])
-            for area in improvements[:3]:
-                ws_candidate.merge_cells(f'A{row}:D{row}')
-                cell = ws_candidate.cell(row=row, column=1, value=f"• {area}")
-                cell.font = Font(size=10, color="FF6600")
-                cell.alignment = Alignment(wrap_text=True)
-                cell.border = thin_border
-                row += 1
-            
-            if not improvements:
-                ws_candidate.merge_cells(f'A{row}:D{row}')
-                cell = ws_candidate.cell(row=row, column=1, value="No areas for improvement identified")
-                cell.font = Font(size=10, color="666666")
-                cell.alignment = Alignment(horizontal='center')
-                cell.border = thin_border
-                row += 1
-            
-            # Set column widths for candidate sheet
-            ws_candidate.column_dimensions['A'].width = 20
-            ws_candidate.column_dimensions['B'].width = 25
-            ws_candidate.column_dimensions['C'].width = 20
-            ws_candidate.column_dimensions['D'].width = 25
-        
         # Save the file
         filepath = os.path.join(REPORTS_FOLDER, filename)
         wb.save(filepath)
@@ -2172,63 +1690,6 @@ def get_score_grade_text(score):
         return "Fair Match 📊"
     else:
         return "Needs Improvement 📈"
-
-@app.route('/download/<filename>', methods=['GET'])
-def download_report(filename):
-    """Download the Excel report"""
-    update_activity()
-    
-    try:
-        print(f"📥 Download request for: {filename}")
-        
-        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
-        
-        file_path = os.path.join(REPORTS_FOLDER, safe_filename)
-        
-        if not os.path.exists(file_path):
-            print(f"❌ File not found: {file_path}")
-            return jsonify({'error': 'File not found'}), 404
-        
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=safe_filename,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-        
-    except Exception as e:
-        print(f"❌ Download error: {traceback.format_exc()}")
-        return jsonify({'error': f'Download failed: {str(e)}'}), 500
-
-@app.route('/download-individual/<analysis_id>', methods=['GET'])
-def download_individual_report(analysis_id):
-    """Download individual candidate report"""
-    update_activity()
-    
-    try:
-        print(f"📥 Download individual request for analysis ID: {analysis_id}")
-        
-        filename = f"individual_{analysis_id}.xlsx"
-        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
-        
-        file_path = os.path.join(REPORTS_FOLDER, safe_filename)
-        
-        if not os.path.exists(file_path):
-            print(f"❌ Individual report not found: {file_path}")
-            return jsonify({'error': 'Individual report not found'}), 404
-        
-        download_name = f"candidate_report_{analysis_id}.xlsx"
-        
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=download_name,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-        
-    except Exception as e:
-        print(f"❌ Individual download error: {traceback.format_exc()}")
-        return jsonify({'error': f'Download failed: {str(e)}'}), 500
 
 @app.route('/warmup', methods=['GET'])
 def force_warmup():
@@ -2464,7 +1925,7 @@ if __name__ == '__main__':
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
     print(f"✅ Performance: ~10 resumes in 10-15 seconds")
-    print(f"✅ Excel Reports: Individual + Professional Batch")
+    print(f"✅ Excel Reports: Professional Batch Only")
     print("="*50 + "\n")
     
     # Check for required dependencies
