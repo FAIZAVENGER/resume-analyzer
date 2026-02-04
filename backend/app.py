@@ -1685,7 +1685,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
         start_row = 5
         headers = [
             ("Rank", 8),
-            ("Candidate Name", 20),
             ("File Name", 25),
             ("Years of Experience", 15),
             ("ATS Score", 12),
@@ -1715,12 +1714,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             cell = ws_comparison.cell(row=row, column=1, value=analysis.get('rank', '-'))
             cell.font = bold_font
             cell.alignment = Alignment(horizontal='center')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            # Candidate Name
-            cell = ws_comparison.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
-            cell.font = normal_font
             cell.fill = row_fill
             cell.border = thin_border
             
