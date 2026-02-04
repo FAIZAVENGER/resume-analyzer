@@ -1759,8 +1759,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             # Experience Summary
             exp_summary = analysis.get('experience_summary', 'No summary available.')
             # Truncate if too long
-            if len(exp_summary) > 200:
-                exp_summary = exp_summary[:197] + "..."
             cell = ws_comparison.cell(row=row, column=7, value=exp_summary)
             cell.font = Font(size=9)
             cell.alignment = Alignment(wrap_text=True, vertical='top')
