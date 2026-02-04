@@ -624,7 +624,13 @@ function App() {
     }
   };
 
-  // REMOVED: handleIndividualDownload function
+  const handleIndividualDownload = (analysisId) => {
+    if (analysisId) {
+      window.open(`${API_BASE_URL}/download-single/${analysisId}`, '_blank');
+    } else {
+      setError('No individual report available for download.');
+    }
+  };
 
   const getScoreColor = (score) => {
     if (score >= 80) return '#00ff9d';
@@ -1210,7 +1216,10 @@ function App() {
             <p>{analysis.candidate_name}</p>
           </div>
           <div className="navigation-actions">
-            {/* REMOVED: Download Report Button for Single Analysis */}
+            <button className="download-report-btn" onClick={() => handleIndividualDownload(analysis.analysis_id)}>
+              <DownloadCloud size={18} />
+              <span>Download Report</span>
+            </button>
           </div>
         </div>
 
@@ -1272,7 +1281,7 @@ function App() {
                 </span>
               </div>
             </div>
-        </div>
+          </div>
         </div>
 
         {/* Recommendation Card */}
@@ -1460,13 +1469,17 @@ function App() {
           </div>
         </div>
 
-        {/* Action Section - REMOVED download button */}
+        {/* Action Section */}
         <div className="action-section glass">
           <div className="action-content">
             <h3>Analysis Complete</h3>
-            <p>Start a new analysis or view other candidates</p>
+            <p>Download the Excel report or start a new analysis</p>
           </div>
           <div className="action-buttons">
+            <button className="download-button" onClick={() => handleIndividualDownload(analysis.analysis_id)}>
+              <DownloadCloud size={20} />
+              <span>Download Excel Report</span>
+            </button>
             <button className="reset-button" onClick={navigateToMain}>
               <RefreshCw size={20} />
               <span>New Analysis</span>
@@ -1518,7 +1531,7 @@ function App() {
               <div className="stat-value">{batchAnalysis?.failed_files || 0}</div>
               <div className="stat-label">Failed</div>
             </div>
-        </div>
+          </div>
         )}
         
         <div className="stat-card">
@@ -1626,6 +1639,15 @@ function App() {
                 View Full Details
                 <ChevronRight size={16} />
               </button>
+              {candidate.analysis_id && (
+                <button 
+                  className="download-individual-btn"
+                  onClick={() => handleIndividualDownload(candidate.analysis_id)}
+                  title="Download individual report"
+                >
+                  <FileDown size={16} />
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -1680,7 +1702,15 @@ function App() {
             <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
           </div>
           <div className="navigation-actions">
-            {/* REMOVED: Individual download button */}
+            {candidate.analysis_id && (
+              <button 
+                className="download-report-btn" 
+                onClick={() => handleIndividualDownload(candidate.analysis_id)}
+              >
+                <FileDown size={18} />
+                <span>Download Report</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1933,9 +1963,18 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Candidate Analysis Complete</h3>
-            <p>Go back to rankings or start a new analysis</p>
+            <p>Download individual report or go back to rankings</p>
           </div>
           <div className="action-buttons">
+            {candidate.analysis_id && (
+              <button 
+                className="download-button" 
+                onClick={() => handleIndividualDownload(candidate.analysis_id)}
+              >
+                <FileDown size={20} />
+                <span>Download Individual Report</span>
+              </button>
+            )}
             <button className="reset-button" onClick={navigateBack}>
               <ArrowLeft size={20} />
               <span>Back to Rankings</span>
