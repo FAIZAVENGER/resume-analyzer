@@ -1,3 +1,4 @@
+app.py:
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from PyPDF2 import PdfReader, PdfWriter
@@ -1660,7 +1661,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
         )
         
         # Title Section
-        ws_comparison.merge_cells('A1:L1')
+        ws_comparison.merge_cells('A1:K1')
         title_cell = ws_comparison['A1']
         title_cell.value = "RESUME ANALYSIS REPORT - BATCH COMPARISON"
         title_cell.font = title_font
@@ -1681,20 +1682,19 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ws_comparison.cell(row=info_row, column=1 + i*3, value=label).font = bold_font
             ws_comparison.cell(row=info_row, column=2 + i*3, value=value).font = normal_font
         
-        # Candidate Comparison Table Headers (WITH candidate name and experience summary)
+        # Candidate Comparison Table Headers (REMOVED Candidate Name column)
         start_row = 5
         headers = [
             ("Rank", 8),
-            ("Candidate Name", 20),
-            ("File Name", 25),
+            ("File Name", 30),  # Increased width since we removed candidate name
             ("Years of Experience", 15),
             ("ATS Score", 12),
             ("Recommendation", 20),
             ("Experience Summary", 40),
             ("Skills Matched", 30),
             ("Skills Missing", 30),
-            ("Key Strengths", 30),
-            ("Areas for Improvement", 30)
+            ("Key Strengths", 25),
+            ("Areas for Improvement", 25)
         ]
         
         # Write headers
@@ -1718,20 +1718,14 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Candidate Name
-            cell = ws_comparison.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
-            cell.font = normal_font
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            # File Name
-            cell = ws_comparison.cell(row=row, column=3, value=analysis.get('filename', 'Unknown'))
+            # File Name (Now column 2 since we removed candidate name)
+            cell = ws_comparison.cell(row=row, column=2, value=analysis.get('filename', 'Unknown'))
             cell.font = normal_font
             cell.fill = row_fill
             cell.border = thin_border
             
             # Years of Experience
-            cell = ws_comparison.cell(row=row, column=4, value=analysis.get('years_of_experience', 'Not specified'))
+            cell = ws_comparison.cell(row=row, column=3, value=analysis.get('years_of_experience', 'Not specified'))
             cell.font = normal_font
             cell.alignment = Alignment(horizontal='center')
             cell.fill = row_fill
@@ -1739,7 +1733,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             
             # ATS Score with color coding
             score = analysis.get('overall_score', 0)
-            cell = ws_comparison.cell(row=row, column=5, value=score)
+            cell = ws_comparison.cell(row=row, column=4, value=score)
             cell.alignment = Alignment(horizontal='center')
             cell.fill = row_fill
             cell.border = thin_border
@@ -1751,7 +1745,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
                 cell.font = Font(bold=True, color="FF0000", size=10)  # Red
             
             # Recommendation
-            cell = ws_comparison.cell(row=row, column=6, value=analysis.get('recommendation', 'N/A'))
+            cell = ws_comparison.cell(row=row, column=5, value=analysis.get('recommendation', 'N/A'))
             cell.font = normal_font
             cell.fill = row_fill
             cell.border = thin_border
@@ -1759,7 +1753,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             # Experience Summary
             exp_summary = analysis.get('experience_summary', 'No summary available.')
             # Truncate if too long
-            cell = ws_comparison.cell(row=row, column=7, value=exp_summary)
+            cell = ws_comparison.cell(row=row, column=6, value=exp_summary)
             cell.font = Font(size=9)
             cell.alignment = Alignment(wrap_text=True, vertical='top')
             cell.fill = row_fill
@@ -1767,7 +1761,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             
             # Skills Matched (5-8 skills)
             skills_matched = analysis.get('skills_matched', [])
-            cell = ws_comparison.cell(row=row, column=8, value="\n".join([f"• {skill}" for skill in skills_matched[:8]]))
+            cell = ws_comparison.cell(row=row, column=7, value="\n".join([f"• {skill}" for skill in skills_matched[:8]]))
             cell.font = Font(size=9)
             cell.alignment = Alignment(wrap_text=True, vertical='top')
             cell.fill = row_fill
@@ -1775,7 +1769,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             
             # Skills Missing (5-8 skills)
             skills_missing = analysis.get('skills_missing', [])
-            cell = ws_comparison.cell(row=row, column=9, value="\n".join([f"• {skill}" for skill in skills_missing[:8]]))
+            cell = ws_comparison.cell(row=row, column=8, value="\n".join([f"• {skill}" for skill in skills_missing[:8]]))
             cell.font = Font(size=9, color="FF0000")
             cell.alignment = Alignment(wrap_text=True, vertical='top')
             cell.fill = row_fill
@@ -1783,7 +1777,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             
             # Key Strengths (3 items)
             strengths = analysis.get('key_strengths', [])
-            cell = ws_comparison.cell(row=row, column=10, value="\n".join([f"• {strength}" for strength in strengths[:3]]))
+            cell = ws_comparison.cell(row=row, column=9, value="\n".join([f"• {strength}" for strength in strengths[:3]]))
             cell.font = Font(size=9, color="00B050")
             cell.alignment = Alignment(wrap_text=True, vertical='top')
             cell.fill = row_fill
@@ -1791,7 +1785,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             
             # Areas for Improvement (3 items)
             improvements = analysis.get('areas_for_improvement', [])
-            cell = ws_comparison.cell(row=row, column=11, value="\n".join([f"• {area}" for area in improvements[:3]]))
+            cell = ws_comparison.cell(row=row, column=10, value="\n".join([f"• {area}" for area in improvements[:3]]))
             cell.font = Font(size=9, color="FF6600")
             cell.alignment = Alignment(wrap_text=True, vertical='top')
             cell.fill = row_fill
@@ -2074,13 +2068,13 @@ def create_minimal_batch_report(analyses, job_description, filename):
         # Title
         ws['A1'] = "Batch Resume Analysis Report"
         ws['A1'].font = Font(bold=True, size=16)
-        ws.merge_cells('A1:L1')
+        ws.merge_cells('A1:K1')
         
         ws['A2'] = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         ws['A3'] = f"Total Candidates: {len(analyses)}"
         
-        # Headers (WITH candidate name and experience summary)
-        headers = ["Rank", "Candidate Name", "File Name", "Years of Experience", "ATS Score", "Recommendation", "Experience Summary", "Skills Matched", "Skills Missing", "Key Strengths", "Areas for Improvement"]
+        # Headers (WITHOUT candidate name column)
+        headers = ["Rank", "File Name", "Years of Experience", "ATS Score", "Recommendation", "Experience Summary", "Skills Matched", "Skills Missing", "Key Strengths", "Areas for Improvement"]
         for col, header in enumerate(headers, start=1):
             cell = ws.cell(row=5, column=col, value=header)
             cell.font = Font(bold=True)
@@ -2089,28 +2083,27 @@ def create_minimal_batch_report(analyses, job_description, filename):
         for idx, analysis in enumerate(analyses):
             row = 6 + idx
             ws.cell(row=row, column=1, value=analysis.get('rank', '-'))
-            ws.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
-            ws.cell(row=row, column=3, value=analysis.get('filename', 'Unknown'))
-            ws.cell(row=row, column=4, value=analysis.get('years_of_experience', 'Not specified'))
-            ws.cell(row=row, column=5, value=analysis.get('overall_score', 0))
-            ws.cell(row=row, column=6, value=analysis.get('recommendation', 'N/A'))
+            ws.cell(row=row, column=2, value=analysis.get('filename', 'Unknown'))
+            ws.cell(row=row, column=3, value=analysis.get('years_of_experience', 'Not specified'))
+            ws.cell(row=row, column=4, value=analysis.get('overall_score', 0))
+            ws.cell(row=row, column=5, value=analysis.get('recommendation', 'N/A'))
             
             exp_summary = analysis.get('experience_summary', 'No summary available.')
             if len(exp_summary) > 100:
                 exp_summary = exp_summary[:97] + "..."
-            ws.cell(row=row, column=7, value=exp_summary)
+            ws.cell(row=row, column=6, value=exp_summary)
             
             skills_matched = analysis.get('skills_matched', [])
-            ws.cell(row=row, column=8, value=", ".join(skills_matched[:8]))
+            ws.cell(row=row, column=7, value=", ".join(skills_matched[:8]))
             
             skills_missing = analysis.get('skills_missing', [])
-            ws.cell(row=row, column=9, value=", ".join(skills_missing[:8]))
+            ws.cell(row=row, column=8, value=", ".join(skills_missing[:8]))
             
             key_strengths = analysis.get('key_strengths', [])
-            ws.cell(row=row, column=10, value=", ".join(key_strengths[:3]))
+            ws.cell(row=row, column=9, value=", ".join(key_strengths[:3]))
             
             areas_for_improvement = analysis.get('areas_for_improvement', [])
-            ws.cell(row=row, column=11, value=", ".join(areas_for_improvement[:3]))
+            ws.cell(row=row, column=10, value=", ".join(areas_for_improvement[:3]))
         
         # Auto-size columns
         for column in ws.columns:
@@ -2439,7 +2432,7 @@ if __name__ == '__main__':
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
     print(f"✅ Years of Experience: Included in analysis")
-    print(f"✅ Excel Report: Candidate name & experience summary columns added")
+    print(f"✅ Excel Report: Experience summary column added (Candidate name removed from comparison sheet)")
     print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
