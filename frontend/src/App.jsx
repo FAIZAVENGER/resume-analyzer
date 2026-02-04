@@ -624,13 +624,7 @@ function App() {
     }
   };
 
-  const handleIndividualDownload = (analysisId) => {
-    if (analysisId) {
-      window.open(`${API_BASE_URL}/download-individual/${analysisId}`, '_blank');
-    } else {
-      setError('No individual report available for download.');
-    }
-  };
+  // REMOVED: handleIndividualDownload function
 
   const getScoreColor = (score) => {
     if (score >= 80) return '#00ff9d';
@@ -1216,10 +1210,7 @@ function App() {
             <p>{analysis.candidate_name}</p>
           </div>
           <div className="navigation-actions">
-            <button className="download-report-btn" onClick={handleDownload}>
-              <DownloadCloud size={18} />
-              <span>Download Report</span>
-            </button>
+            {/* REMOVED: Download Report Button for Single Analysis */}
           </div>
         </div>
 
@@ -1469,17 +1460,13 @@ function App() {
           </div>
         </div>
 
-        {/* Action Section */}
+        {/* Action Section - REMOVED download button */}
         <div className="action-section glass">
           <div className="action-content">
             <h3>Analysis Complete</h3>
-            <p>Download the simplified Excel report or start a new analysis</p>
+            <p>Start a new analysis or view other candidates</p>
           </div>
           <div className="action-buttons">
-            <button className="download-button" onClick={handleDownload}>
-              <DownloadCloud size={20} />
-              <span>Download Excel Report</span>
-            </button>
             <button className="reset-button" onClick={navigateToMain}>
               <RefreshCw size={20} />
               <span>New Analysis</span>
@@ -1639,15 +1626,6 @@ function App() {
                 View Full Details
                 <ChevronRight size={16} />
               </button>
-              {candidate.analysis_id && (
-                <button 
-                  className="download-individual-btn"
-                  onClick={() => handleIndividualDownload(candidate.analysis_id)}
-                  title="Download individual report"
-                >
-                  <FileDown size={16} />
-                </button>
-              )}
             </div>
           </div>
         ))}
@@ -1702,15 +1680,7 @@ function App() {
             <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
           </div>
           <div className="navigation-actions">
-            {candidate.analysis_id && (
-              <button 
-                className="download-report-btn" 
-                onClick={() => handleIndividualDownload(candidate.analysis_id)}
-              >
-                <FileDown size={18} />
-                <span>Download Report</span>
-              </button>
-            )}
+            {/* REMOVED: Individual download button */}
           </div>
         </div>
 
@@ -1963,18 +1933,9 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Candidate Analysis Complete</h3>
-            <p>Download individual report or go back to rankings</p>
+            <p>Go back to rankings or start a new analysis</p>
           </div>
           <div className="action-buttons">
-            {candidate.analysis_id && (
-              <button 
-                className="download-button" 
-                onClick={() => handleIndividualDownload(candidate.analysis_id)}
-              >
-                <FileDown size={20} />
-                <span>Download Individual Report</span>
-              </button>
-            )}
             <button className="reset-button" onClick={navigateBack}>
               <ArrowLeft size={20} />
               <span>Back to Rankings</span>
