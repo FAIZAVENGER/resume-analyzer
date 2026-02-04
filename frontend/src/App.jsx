@@ -540,7 +540,7 @@ function App() {
     setLoadingMessage(`Starting batch analysis of ${resumeFiles.length} resumes...`);
 
     const formData = new FormData();
-    formData.append('jobDescription', jobDescription);
+    formData.append('jobDescription', job_description);
     
     resumeFiles.forEach((file, index) => {
       formData.append('resumes', file);
@@ -609,10 +609,9 @@ function App() {
   };
 
   const handleDownload = () => {
-    if (analysis?.excel_filename) {
-      window.open(`${API_BASE_URL}/download/${analysis.excel_filename}`, '_blank');
-    } else {
-      setError('No analysis report available for download.');
+    if (analysis) {
+      // For single analysis, no download button since we removed individual reports
+      setError('No individual reports available. Use batch mode to download reports.');
     }
   };
 
@@ -621,14 +620,6 @@ function App() {
       window.open(`${API_BASE_URL}/download/${batchAnalysis.batch_excel_filename}`, '_blank');
     } else {
       setError('No batch analysis report available for download.');
-    }
-  };
-
-  const handleIndividualDownload = (analysisId) => {
-    if (analysisId) {
-      window.open(`${API_BASE_URL}/download-individual/${analysisId}`, '_blank');
-    } else {
-      setError('No individual report available for download.');
     }
   };
 
@@ -1216,10 +1207,8 @@ function App() {
             <p>{analysis.candidate_name}</p>
           </div>
           <div className="navigation-actions">
-            <button className="download-report-btn" onClick={handleDownload}>
-              <DownloadCloud size={18} />
-              <span>Download Report</span>
-            </button>
+            {/* REMOVED: Download report button for single analysis */}
+            {/* No download option for single analysis */}
           </div>
         </div>
 
@@ -1473,13 +1462,9 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Analysis Complete</h3>
-            <p>Download the simplified Excel report or start a new analysis</p>
+            <p>Use batch mode to download comprehensive Excel reports</p>
           </div>
           <div className="action-buttons">
-            <button className="download-button" onClick={handleDownload}>
-              <DownloadCloud size={20} />
-              <span>Download Excel Report</span>
-            </button>
             <button className="reset-button" onClick={navigateToMain}>
               <RefreshCw size={20} />
               <span>New Analysis</span>
@@ -1639,15 +1624,7 @@ function App() {
                 View Full Details
                 <ChevronRight size={16} />
               </button>
-              {candidate.analysis_id && (
-                <button 
-                  className="download-individual-btn"
-                  onClick={() => handleIndividualDownload(candidate.analysis_id)}
-                  title="Download individual report"
-                >
-                  <FileDown size={16} />
-                </button>
-              )}
+              {/* REMOVED: Download individual button */}
             </div>
           </div>
         ))}
@@ -1702,15 +1679,8 @@ function App() {
             <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
           </div>
           <div className="navigation-actions">
-            {candidate.analysis_id && (
-              <button 
-                className="download-report-btn" 
-                onClick={() => handleIndividualDownload(candidate.analysis_id)}
-              >
-                <FileDown size={18} />
-                <span>Download Report</span>
-              </button>
-            )}
+            {/* REMOVED: Download report button */}
+            {/* No individual download option */}
           </div>
         </div>
 
@@ -1963,18 +1933,9 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Candidate Analysis Complete</h3>
-            <p>Download individual report or go back to rankings</p>
+            <p>Download the batch report for all candidates or go back to rankings</p>
           </div>
           <div className="action-buttons">
-            {candidate.analysis_id && (
-              <button 
-                className="download-button" 
-                onClick={() => handleIndividualDownload(candidate.analysis_id)}
-              >
-                <FileDown size={20} />
-                <span>Download Individual Report</span>
-              </button>
-            )}
             <button className="reset-button" onClick={navigateBack}>
               <ArrowLeft size={20} />
               <span>Back to Rankings</span>
