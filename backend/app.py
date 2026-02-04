@@ -1,5 +1,3 @@
-# app.py - UPDATED VERSION with requested changes
-
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from PyPDF2 import PdfReader, PdfWriter
@@ -12,6 +10,7 @@ from datetime import datetime, timedelta
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.cell.cell import MergedCell
 from dotenv import load_dotenv
 import traceback
 import threading
@@ -28,8 +27,6 @@ import subprocess
 import tempfile
 import shutil
 from pathlib import Path
-import queue
-from collections import defaultdict
 
 # Load environment variables
 load_dotenv()
@@ -43,9 +40,6 @@ GROQ_API_KEYS = [
     os.getenv('GROQ_API_KEY_2'),
     os.getenv('GROQ_API_KEY_3')
 ]
-
-# Filter out None or empty keys
-GROQ_API_KEYS = [key for key in GROQ_API_KEYS if key and key.strip()]
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
@@ -70,101 +64,22 @@ print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
 score_cache = {}
 cache_lock = threading.Lock()
 
-# Rate limiting configuration
-RATE_LIMIT_CONFIG = {
-    'requests_per_minute': 30,
-    'max_concurrent_per_key': 3,
-    'request_delay': 2.0,
-    'batch_delay': 0.5,
-}
-
-# Enhanced rate limiting
-class RateLimiter:
-    def __init__(self, keys, requests_per_minute=30):
-        self.keys = keys
-        self.requests_per_minute = requests_per_minute
-        self.key_usage = defaultdict(list)
-        self.lock = threading.Lock()
-        self.key_status = {i: {'available': True, 'cooling_until': None, 'concurrent': 0} for i in range(len(keys))}
-        
-    def get_available_key(self):
-        """Get next available key with proper rate limiting"""
-        with self.lock:
-            current_time = time.time()
-            
-            for key_index in range(len(self.keys)):
-                status = self.key_status[key_index]
-                
-                if status['cooling_until'] and current_time < status['cooling_until']:
-                    continue
-                
-                if status['concurrent'] >= RATE_LIMIT_CONFIG['max_concurrent_per_key']:
-                    continue
-                
-                usage_times = self.key_usage[key_index]
-                usage_times = [t for t in usage_times if current_time - t < 60]
-                self.key_usage[key_index] = usage_times
-                
-                if len(usage_times) < self.requests_per_minute:
-                    status['concurrent'] += 1
-                    return key_index, self.keys[key_index]
-            
-            available_times = []
-            for key_index in range(len(self.keys)):
-                status = self.key_status[key_index]
-                if status['cooling_until']:
-                    wait_time = status['cooling_until'] - current_time
-                else:
-                    usage_times = self.key_usage[key_index]
-                    if len(usage_times) >= self.requests_per_minute:
-                        oldest = min(usage_times)
-                        wait_time = 60 - (current_time - oldest)
-                    else:
-                        wait_time = 0
-                
-                available_times.append((wait_time, key_index))
-            
-            available_times.sort()
-            wait_time, key_index = available_times[0]
-            
-            if wait_time > 0:
-                time.sleep(min(wait_time, 5))
-            
-            status = self.key_status[key_index]
-            status['concurrent'] += 1
-            return key_index, self.keys[key_index]
-    
-    def mark_request_complete(self, key_index):
-        """Mark request as complete for a key"""
-        with self.lock:
-            self.key_usage[key_index].append(time.time())
-            self.key_status[key_index]['concurrent'] -= 1
-    
-    def mark_key_cooling(self, key_index, duration=60):
-        """Mark a key as cooling down"""
-        with self.lock:
-            self.key_status[key_index]['cooling_until'] = time.time() + duration
-            self.key_status[key_index]['concurrent'] = 0
-            
-            def reset_cooling():
-                time.sleep(duration)
-                with self.lock:
-                    self.key_status[key_index]['cooling_until'] = None
-                    print(f"✅ Key {key_index + 1} cooling completed")
-            
-            threading.Thread(target=reset_cooling, daemon=True).start()
-
-# Initialize rate limiter
-rate_limiter = RateLimiter(GROQ_API_KEYS, RATE_LIMIT_CONFIG['requests_per_minute'])
-
 # Batch processing configuration
+MAX_CONCURRENT_REQUESTS = 3
 MAX_BATCH_SIZE = 10
-MIN_SKILLS_TO_SHOW = 5
-MAX_SKILLS_TO_SHOW = 8
+MIN_SKILLS_TO_SHOW = 5  # Minimum skills to show
+MAX_SKILLS_TO_SHOW = 8  # Maximum skills to show (5-8 range)
 
 # Rate limiting protection
-MAX_RETRIES = 5
-RETRY_DELAY_BASE = 2
+MAX_RETRIES = 3
+RETRY_DELAY_BASE = 3
+
+# Track key usage
+key_usage = {
+    0: {'count': 0, 'last_used': None, 'cooling': False},
+    1: {'count': 0, 'last_used': None, 'cooling': False},
+    2: {'count': 0, 'last_used': None, 'cooling': False}
+}
 
 # Memory optimization
 service_running = True
@@ -176,6 +91,34 @@ def update_activity():
     """Update last activity timestamp"""
     global last_activity_time
     last_activity_time = datetime.now()
+
+def get_available_key(resume_index=None):
+    """Get the next available Groq API key using round-robin strategy"""
+    if not any(GROQ_API_KEYS):
+        return None, None
+    
+    if resume_index is not None:
+        key_index = resume_index % 3
+        if GROQ_API_KEYS[key_index]:
+            return GROQ_API_KEYS[key_index], key_index + 1
+    
+    for i, key in enumerate(GROQ_API_KEYS):
+        if key and not key_usage[i]['cooling']:
+            return key, i + 1
+    
+    return None, None
+
+def mark_key_cooling(key_index, duration=30):
+    """Mark a key as cooling down"""
+    key_usage[key_index]['cooling'] = True
+    key_usage[key_index]['last_used'] = datetime.now()
+    
+    def reset_cooling():
+        time.sleep(duration)
+        key_usage[key_index]['cooling'] = False
+        print(f"✅ Key {key_index + 1} cooling completed")
+    
+    threading.Thread(target=reset_cooling, daemon=True).start()
 
 def calculate_resume_hash(resume_text, job_description):
     """Calculate a hash for caching consistent scores"""
@@ -200,16 +143,43 @@ def store_resume_file(file_data, filename, analysis_id):
         preview_filename = f"{analysis_id}_{safe_filename}"
         preview_path = os.path.join(RESUME_PREVIEW_FOLDER, preview_filename)
         
+        # Save the original file
         with open(preview_path, 'wb') as f:
             if isinstance(file_data, bytes):
                 f.write(file_data)
             else:
                 file_data.save(f)
         
+        # Also create a PDF version for preview if not already PDF
+        file_ext = os.path.splitext(filename)[1].lower()
+        pdf_preview_path = None
+        
+        if file_ext == '.pdf':
+            pdf_preview_path = preview_path
+        else:
+            # Try to convert to PDF for better preview
+            try:
+                pdf_filename = f"{analysis_id}_{safe_filename.rsplit('.', 1)[0]}_preview.pdf"
+                pdf_preview_path = os.path.join(RESUME_PREVIEW_FOLDER, pdf_filename)
+                
+                if file_ext in ['.docx', '.doc']:
+                    # Try to convert DOC/DOCX to PDF
+                    convert_doc_to_pdf(preview_path, pdf_preview_path)
+                elif file_ext == '.txt':
+                    # Convert TXT to PDF
+                    convert_txt_to_pdf(preview_path, pdf_preview_path)
+            except Exception as e:
+                print(f"⚠️ Could not create PDF preview: {str(e)}")
+                pdf_preview_path = None
+        
+        # Store in memory for quick access
         resume_storage[analysis_id] = {
             'filename': preview_filename,
             'original_filename': filename,
             'path': preview_path,
+            'pdf_path': pdf_preview_path,
+            'file_type': file_ext[1:],  # Remove dot
+            'has_pdf_preview': pdf_preview_path is not None and os.path.exists(pdf_preview_path),
             'stored_at': datetime.now().isoformat()
         }
         
@@ -219,12 +189,197 @@ def store_resume_file(file_data, filename, analysis_id):
         print(f"❌ Error storing resume for preview: {str(e)}")
         return None
 
+def convert_doc_to_pdf(doc_path, pdf_path):
+    """Convert DOC/DOCX to PDF using LibreOffice or fallback methods"""
+    try:
+        # Check if LibreOffice is available
+        if shutil.which('libreoffice'):
+            # Use LibreOffice for conversion
+            cmd = [
+                'libreoffice', '--headless', '--convert-to', 'pdf',
+                '--outdir', os.path.dirname(pdf_path),
+                doc_path
+            ]
+            subprocess.run(cmd, check=True, capture_output=True, timeout=30)
+            
+            # Rename the output file
+            expected_pdf = doc_path.rsplit('.', 1)[0] + '.pdf'
+            if os.path.exists(expected_pdf):
+                shutil.move(expected_pdf, pdf_path)
+                return True
+        else:
+            # Fallback: Try using python-docx2pdf if available
+            try:
+                from docx2pdf import convert
+                convert(doc_path, pdf_path)
+                return True
+            except ImportError:
+                pass
+            
+            # Another fallback: Create a simple PDF from text
+            extract_text_and_create_pdf(doc_path, pdf_path)
+            return True
+            
+    except Exception as e:
+        print(f"⚠️ DOC to PDF conversion failed: {str(e)}")
+        # Create a simple PDF from extracted text
+        extract_text_and_create_pdf(doc_path, pdf_path)
+        return True
+    
+    return False
+
+def convert_txt_to_pdf(txt_path, pdf_path):
+    """Convert TXT to PDF"""
+    try:
+        extract_text_and_create_pdf(txt_path, pdf_path)
+        return True
+    except Exception as e:
+        print(f"⚠️ TXT to PDF conversion failed: {str(e)}")
+        return False
+
+def extract_text_and_create_pdf(input_path, pdf_path):
+    """Extract text and create a simple PDF"""
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+        from reportlab.lib.units import inch
+        
+        # Extract text based on file type
+        file_ext = os.path.splitext(input_path)[1].lower()
+        
+        if file_ext == '.pdf':
+            text = extract_text_from_pdf(input_path)
+        elif file_ext in ['.docx', '.doc']:
+            text = extract_text_from_docx(input_path)
+        elif file_ext == '.txt':
+            text = extract_text_from_txt(input_path)
+        else:
+            text = "Cannot preview this file type."
+        
+        # Create PDF
+        doc = SimpleDocTemplate(pdf_path, pagesize=letter,
+                                rightMargin=72, leftMargin=72,
+                                topMargin=72, bottomMargin=72)
+        
+        styles = getSampleStyleSheet()
+        story = []
+        
+        # Add title
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=30
+        )
+        title = Paragraph("Resume Preview", title_style)
+        story.append(title)
+        
+        # Add file info
+        info_style = ParagraphStyle(
+            'CustomInfo',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor='gray',
+            spaceAfter=20
+        )
+        info_text = f"Original file: {os.path.basename(input_path)} | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        info = Paragraph(info_text, info_style)
+        story.append(info)
+        
+        story.append(Spacer(1, 20))
+        
+        # Add content
+        content_style = ParagraphStyle(
+            'CustomContent',
+            parent=styles['Normal'],
+            fontSize=11,
+            leading=14,
+            spaceBefore=6,
+            spaceAfter=6
+        )
+        
+        # Split text into paragraphs
+        paragraphs = text.split('\n')
+        for para in paragraphs:
+            if para.strip():
+                story.append(Paragraph(para.replace('\t', '&nbsp;' * 4), content_style))
+        
+        # Build PDF
+        doc.build(story)
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ Failed to create PDF from text: {str(e)}")
+        # Create minimal PDF
+        try:
+            from reportlab.pdfgen import canvas
+            c = canvas.Canvas(pdf_path)
+            c.drawString(100, 750, "Resume Preview")
+            c.drawString(100, 730, f"File: {os.path.basename(input_path)}")
+            c.drawString(100, 710, "Unable to display content. Please download the original file.")
+            c.save()
+            return True
+        except:
+            return False
+
 def get_resume_preview(analysis_id):
     """Get resume preview data"""
-    return resume_storage.get(analysis_id)
+    if analysis_id in resume_storage:
+        return resume_storage[analysis_id]
+    return None
 
-def call_groq_api_with_retry(prompt, api_key, key_index, max_tokens=1500, temperature=0.1, max_retries=MAX_RETRIES):
-    """Call Groq API with exponential backoff and key rotation"""
+def cleanup_resume_previews():
+    """Clean up old resume previews"""
+    try:
+        now = datetime.now()
+        for analysis_id in list(resume_storage.keys()):
+            stored_time = datetime.fromisoformat(resume_storage[analysis_id]['stored_at'])
+            if (now - stored_time).total_seconds() > 3600:  # 1 hour retention
+                try:
+                    # Clean up all related files
+                    paths_to_clean = [
+                        resume_storage[analysis_id]['path'],
+                        resume_storage[analysis_id].get('pdf_path')
+                    ]
+                    
+                    for path in paths_to_clean:
+                        if path and os.path.exists(path):
+                            os.remove(path)
+                    
+                    del resume_storage[analysis_id]
+                    print(f"🧹 Cleaned up resume preview for {analysis_id}")
+                except Exception as e:
+                    print(f"⚠️ Error cleaning up files for {analysis_id}: {str(e)}")
+        # Also clean up any orphaned files
+        cleanup_orphaned_files()
+    except Exception as e:
+        print(f"⚠️ Error cleaning up resume previews: {str(e)}")
+
+def cleanup_orphaned_files():
+    """Clean up orphaned files in preview folder"""
+    try:
+        now = datetime.now()
+        for filename in os.listdir(RESUME_PREVIEW_FOLDER):
+            filepath = os.path.join(RESUME_PREVIEW_FOLDER, filename)
+            if os.path.isfile(filepath):
+                file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
+                if (now - file_time).total_seconds() > 7200:  # 2 hours
+                    try:
+                        os.remove(filepath)
+                        print(f"🧹 Cleaned up orphaned file: {filename}")
+                    except:
+                        pass
+    except Exception as e:
+        print(f"⚠️ Error cleaning up orphaned files: {str(e)}")
+
+def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45, retry_count=0):
+    """Call Groq API with optimized settings"""
+    if not api_key:
+        print(f"❌ No Groq API key provided")
+        return {'error': 'no_api_key', 'status': 500}
+    
     headers = {
         'Authorization': f'Bearer {api_key}',
         'Content-Type': 'application/json'
@@ -232,7 +387,12 @@ def call_groq_api_with_retry(prompt, api_key, key_index, max_tokens=1500, temper
     
     payload = {
         'model': GROQ_MODEL,
-        'messages': [{'role': 'user', 'content': prompt}],
+        'messages': [
+            {
+                'role': 'user',
+                'content': prompt
+            }
+        ],
         'max_tokens': max_tokens,
         'temperature': temperature,
         'top_p': 0.9,
@@ -240,105 +400,106 @@ def call_groq_api_with_retry(prompt, api_key, key_index, max_tokens=1500, temper
         'stop': None
     }
     
-    for attempt in range(max_retries):
-        try:
-            if attempt > 0:
-                jitter = random.uniform(0.5, 1.5)
-                wait_time = (RETRY_DELAY_BASE ** attempt) * jitter
-                print(f"⏳ Retry {attempt + 1}/{max_retries} in {wait_time:.1f}s (Key {key_index + 1})")
-                time.sleep(wait_time)
-            
-            start_time = time.time()
-            response = requests.post(
-                GROQ_API_URL,
-                headers=headers,
-                json=payload,
-                timeout=45 + (attempt * 5)
-            )
-            
-            response_time = time.time() - start_time
-            
-            if response.status_code == 200:
-                data = response.json()
-                if 'choices' in data and len(data['choices']) > 0:
-                    result = data['choices'][0]['message']['content']
-                    print(f"✅ Groq API response in {response_time:.2f}s (Key {key_index + 1})")
-                    return result
-                else:
-                    print(f"❌ Unexpected Groq API response format (Key {key_index + 1})")
-                    continue
-            
-            elif response.status_code == 429:
-                print(f"❌ Rate limit exceeded for Key {key_index + 1}")
-                rate_limiter.mark_key_cooling(key_index, 60)
-                
-                if attempt < max_retries - 1 and len(GROQ_API_KEYS) > 1:
-                    new_key_index, new_api_key = rate_limiter.get_available_key()
-                    if new_key_index != key_index:
-                        print(f"🔄 Switching from Key {key_index + 1} to Key {new_key_index + 1}")
-                        rate_limiter.mark_request_complete(key_index)
-                        return call_groq_api_with_retry(prompt, new_api_key, new_key_index, max_tokens, temperature, max_retries - attempt)
-                
-                continue
-                
-            elif response.status_code == 503:
-                print(f"❌ Service unavailable for Groq API (Key {key_index + 1})")
-                time.sleep(10 + random.uniform(0, 5))
-                continue
-            
-            else:
-                print(f"❌ Groq API Error {response.status_code}: {response.text[:100]} (Key {key_index + 1})")
-                continue
-                
-        except requests.exceptions.Timeout:
-            print(f"❌ Groq API timeout (Key {key_index + 1})")
-            continue
+    try:
+        start_time = time.time()
+        response = requests.post(
+            GROQ_API_URL,
+            headers=headers,
+            json=payload,
+            timeout=timeout
+        )
         
-        except Exception as e:
-            print(f"❌ Groq API Exception (Key {key_index + 1}): {str(e)}")
-            continue
+        response_time = time.time() - start_time
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'choices' in data and len(data['choices']) > 0:
+                result = data['choices'][0]['message']['content']
+                print(f"✅ Groq API response in {response_time:.2f}s")
+                return result
+            else:
+                print(f"❌ Unexpected Groq API response format")
+                return {'error': 'invalid_response', 'status': response.status_code}
+        
+        if response.status_code == 429:
+            print(f"❌ Rate limit exceeded for Groq API")
+            
+            if retry_count < MAX_RETRIES:
+                wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(5, 10)
+                print(f"⏳ Rate limited, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
+                time.sleep(wait_time)
+                return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
+            return {'error': 'rate_limit', 'status': 429}
+        
+        elif response.status_code == 503:
+            print(f"❌ Service unavailable for Groq API")
+            
+            if retry_count < 2:
+                wait_time = 15 + random.uniform(5, 10)
+                print(f"⏳ Service unavailable, retrying in {wait_time:.1f}s")
+                time.sleep(wait_time)
+                return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
+            return {'error': 'service_unavailable', 'status': 503}
+        
+        else:
+            print(f"❌ Groq API Error {response.status_code}: {response.text[:100]}")
+            return {'error': f'api_error_{response.status_code}', 'status': response.status_code}
+            
+    except requests.exceptions.Timeout:
+        print(f"❌ Groq API timeout after {timeout}s")
+        
+        if retry_count < 2:
+            wait_time = 10 + random.uniform(5, 10)
+            print(f"⏳ Timeout, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/3)")
+            time.sleep(wait_time)
+            return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
+        return {'error': 'timeout', 'status': 408}
     
-    return {'error': 'max_retries_exceeded', 'status': 429}
+    except Exception as e:
+        print(f"❌ Groq API Exception: {str(e)}")
+        return {'error': str(e), 'status': 500}
 
 def warmup_groq_service():
     """Warm up Groq service connection"""
     global warmup_complete
     
-    if len(GROQ_API_KEYS) == 0:
+    available_keys = sum(1 for key in GROQ_API_KEYS if key)
+    if available_keys == 0:
         print("⚠️ Skipping Groq warm-up: No API keys configured")
         return False
     
     try:
-        print(f"🔥 Warming up Groq connection with {len(GROQ_API_KEYS)} keys...")
+        print(f"🔥 Warming up Groq connection with {available_keys} keys...")
         print(f"📊 Using model: {GROQ_MODEL}")
         
         warmup_results = []
         
         for i, api_key in enumerate(GROQ_API_KEYS):
-            print(f"  Testing key {i+1}...")
-            start_time = time.time()
-            
-            response = call_groq_api_with_retry(
-                prompt="Hello, are you ready? Respond with just 'ready'.",
-                api_key=api_key,
-                key_index=i,
-                max_tokens=10,
-                temperature=0.1
-            )
-            
-            if isinstance(response, dict) and 'error' in response:
-                print(f"    ⚠️ Key {i+1} failed: {response.get('error')}")
-                warmup_results.append(False)
-            elif response and 'ready' in response.lower():
-                elapsed = time.time() - start_time
-                print(f"    ✅ Key {i+1} warmed up in {elapsed:.2f}s")
-                warmup_results.append(True)
-            else:
-                print(f"    ⚠️ Key {i+1} warm-up failed: Unexpected response")
-                warmup_results.append(False)
-            
-            if i < len(GROQ_API_KEYS) - 1:
-                time.sleep(2)
+            if api_key:
+                print(f"  Testing key {i+1}...")
+                start_time = time.time()
+                
+                response = call_groq_api(
+                    prompt="Hello, are you ready? Respond with just 'ready'.",
+                    api_key=api_key,
+                    max_tokens=10,
+                    temperature=0.1,
+                    timeout=15
+                )
+                
+                if isinstance(response, dict) and 'error' in response:
+                    print(f"    ⚠️ Key {i+1} failed: {response.get('error')}")
+                    warmup_results.append(False)
+                elif response and 'ready' in response.lower():
+                    elapsed = time.time() - start_time
+                    print(f"    ✅ Key {i+1} warmed up in {elapsed:.2f}s")
+                    warmup_results.append(True)
+                else:
+                    print(f"    ⚠️ Key {i+1} warm-up failed: Unexpected response")
+                    warmup_results.append(False)
+                
+                if i < available_keys - 1:
+                    time.sleep(1)
         
         success = any(warmup_results)
         if success:
@@ -362,24 +523,26 @@ def keep_service_warm():
         try:
             time.sleep(180)
             
-            if len(GROQ_API_KEYS) > 0 and warmup_complete:
-                print(f"♨️ Keeping Groq warm with {len(GROQ_API_KEYS)} keys...")
+            available_keys = sum(1 for key in GROQ_API_KEYS if key)
+            if available_keys > 0 and warmup_complete:
+                print(f"♨️ Keeping Groq warm with {available_keys} keys...")
                 
                 for i, api_key in enumerate(GROQ_API_KEYS):
-                    try:
-                        response = call_groq_api_with_retry(
-                            prompt="Ping - just say 'pong'",
-                            api_key=api_key,
-                            key_index=i,
-                            max_tokens=5
-                        )
-                        if response and 'pong' in str(response).lower():
-                            print(f"  ✅ Key {i+1} keep-alive successful")
-                        else:
-                            print(f"  ⚠️ Key {i+1} keep-alive got unexpected response")
-                    except Exception as e:
-                        print(f"  ⚠️ Key {i+1} keep-alive failed: {str(e)}")
-                    time.sleep(1)
+                    if api_key and not key_usage[i]['cooling']:
+                        try:
+                            response = call_groq_api(
+                                prompt="Ping - just say 'pong'",
+                                api_key=api_key,
+                                max_tokens=5,
+                                timeout=20
+                            )
+                            if response and 'pong' in str(response).lower():
+                                print(f"  ✅ Key {i+1} keep-alive successful")
+                            else:
+                                print(f"  ⚠️ Key {i+1} keep-alive got unexpected response")
+                        except Exception as e:
+                            print(f"  ⚠️ Key {i+1} keep-alive failed: {str(e)}")
+                        break
                     
         except Exception as e:
             print(f"⚠️ Keep-warm thread error: {str(e)}")
@@ -387,7 +550,7 @@ def keep_service_warm():
 
 # Text extraction functions
 def extract_text_from_pdf(file_path):
-    """Extract text from PDF file"""
+    """Extract text from PDF file with error handling"""
     try:
         text = ""
         max_attempts = 2
@@ -397,7 +560,7 @@ def extract_text_from_pdf(file_path):
                 reader = PdfReader(file_path)
                 text = ""
                 
-                for page_num, page in enumerate(reader.pages[:8]):
+                for page_num, page in enumerate(reader.pages[:8]):  # Increased to 8 pages
                     try:
                         page_text = page.extract_text()
                         if page_text:
@@ -418,7 +581,7 @@ def extract_text_from_pdf(file_path):
                             text = content.decode('utf-8', errors='ignore')
                             if text.strip():
                                 words = text.split()
-                                text = ' '.join(words[:1500])
+                                text = ' '.join(words[:1500])  # Increased word limit
                     except:
                         text = "Error: Could not extract text from PDF file"
         
@@ -467,19 +630,20 @@ def extract_text_from_txt(file_path):
         print(f"❌ TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
-def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None):
-    """Use Groq API to analyze resume against job description with rate limiting"""
+def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None, api_key=None, key_index=None):
+    """Use Groq API to analyze resume against job description"""
     
-    if len(GROQ_API_KEYS) == 0:
-        print(f"❌ No Groq API keys configured.")
-        return generate_fallback_analysis(filename, "No API keys configured")
+    if not api_key:
+        print(f"❌ No Groq API key provided for analysis.")
+        return generate_fallback_analysis(filename, "No API key available")
     
-    resume_text = resume_text[:3000]
-    job_description = job_description[:1500]
+    resume_text = resume_text[:3000]  # Increased from 2500
+    job_description = job_description[:1500]  # Increased from 1200
     
     resume_hash = calculate_resume_hash(resume_text, job_description)
     cached_score = get_cached_score(resume_hash)
     
+    # Updated: Request complete sentences, not truncated
     prompt = f"""Analyze resume against job description:
 
 RESUME:
@@ -494,7 +658,7 @@ Provide analysis in this JSON format:
     "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
     "skills_missing": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
     "experience_summary": "Provide a concise 4-5 sentence summary of candidate's experience. Focus on key roles, achievements, and relevance. Make sure each sentence is complete and not truncated. Write full sentences.",
-    "years_of_experience": "5+ years",
+    "education_summary": "Provide a concise 4-5 sentence summary of education. Include degrees, institutions, and relevance. Make sure each sentence is complete and not truncated. Write full sentences.",
     "overall_score": 75,
     "recommendation": "Strongly Recommended/Recommended/Consider/Not Recommended",
     "key_strengths": ["strength1", "strength2", "strength3"],
@@ -504,41 +668,36 @@ Provide analysis in this JSON format:
 IMPORTANT: 
 1. Provide 5-8 skills in both skills_matched and skills_missing arrays
 2. Experience summary: MAX 4-5 COMPLETE sentences (not truncated)
-3. DO NOT include education summary, job_title_suggestion, industry_fit, or salary_expectation
+3. Education summary: MAX 4-5 COMPLETE sentences (not truncated)
 4. Provide EXACTLY 3 key_strengths and 3 areas_for_improvement
-5. Provide years_of_experience as a string (e.g., "2-4 years", "5+ years", "10+ years")
+5. DO NOT include job_title_suggestion, years_experience, industry_fit, or salary_expectation
 6. Write full, complete sentences. Do not cut off sentences mid-way.
 7. Ensure proper sentence endings with periods."""
 
     try:
-        print(f"⚡ Getting API key for analysis...")
-        
-        key_index, api_key = rate_limiter.get_available_key()
-        print(f"⚡ Using Key {key_index + 1} for analysis...")
-        
+        print(f"⚡ Sending to Groq API (Key {key_index})...")
         start_time = time.time()
         
-        response = call_groq_api_with_retry(
+        response = call_groq_api(
             prompt=prompt,
             api_key=api_key,
-            key_index=key_index,
-            max_tokens=1500,
-            temperature=0.1
+            max_tokens=1500,  # Increased to ensure complete sentences
+            temperature=0.1,
+            timeout=60
         )
-        
-        rate_limiter.mark_request_complete(key_index)
         
         if isinstance(response, dict) and 'error' in response:
             error_type = response.get('error')
             print(f"❌ Groq API error: {error_type}")
             
             if 'rate_limit' in error_type or '429' in str(error_type):
-                rate_limiter.mark_key_cooling(key_index, 60)
+                if key_index:
+                    mark_key_cooling(key_index - 1, 30)
             
             return generate_fallback_analysis(filename, f"API Error: {error_type}", partial_success=True)
         
         elapsed_time = time.time() - start_time
-        print(f"✅ Groq API response in {elapsed_time:.2f} seconds (Key {key_index + 1})")
+        print(f"✅ Groq API response in {elapsed_time:.2f} seconds (Key {key_index})")
         
         result_text = response.strip()
         
@@ -579,12 +738,12 @@ IMPORTANT:
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['ai_model'] = GROQ_MODEL
         analysis['response_time'] = f"{elapsed_time:.2f}s"
-        analysis['key_used'] = f"Key {key_index + 1}"
+        analysis['key_used'] = f"Key {key_index}"
         
         if analysis_id:
             analysis['analysis_id'] = analysis_id
         
-        print(f"✅ Analysis completed: {analysis['candidate_name']} (Score: {analysis['overall_score']}) (Key {key_index + 1})")
+        print(f"✅ Analysis completed: {analysis['candidate_name']} (Score: {analysis['overall_score']}) (Key {key_index})")
         
         return analysis
         
@@ -593,13 +752,13 @@ IMPORTANT:
         return generate_fallback_analysis(filename, f"Analysis Error: {str(e)[:100]}")
     
 def validate_analysis(analysis, filename):
-    """Validate analysis data and fill missing fields"""
+    """Validate analysis data and fill missing fields - FIXED to ensure complete sentences"""
     required_fields = {
         'candidate_name': 'Professional Candidate',
         'skills_matched': ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Team Collaboration', 'Project Management', 'Agile Methodology'],
         'skills_missing': ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX Design', 'Cybersecurity', 'Mobile Development', 'Database Administration'],
         'experience_summary': 'The candidate demonstrates relevant professional experience with progressive responsibility. Their background shows expertise in key areas relevant to modern industry demands. They have experience collaborating with teams and delivering measurable results. Additional experience in specific domains enhances their suitability.',
-        'years_of_experience': '3-5 years',
+        'education_summary': 'The candidate holds relevant educational qualifications from reputable institutions. Their academic background provides strong foundational knowledge in core subjects. Additional certifications enhance their professional profile. The education aligns well with industry requirements.',
         'overall_score': 70,
         'recommendation': 'Consider for Interview',
         'key_strengths': ['Strong technical foundation', 'Excellent communication skills', 'Proven track record of delivery'],
@@ -616,9 +775,11 @@ def validate_analysis(analysis, filename):
         if len(clean_name.split()) <= 4:
             analysis['candidate_name'] = clean_name
     
+    # Ensure 5-8 skills in each category
     skills_matched = analysis.get('skills_matched', [])
     skills_missing = analysis.get('skills_missing', [])
     
+    # If we have fewer than 5 skills, pad with defaults
     if len(skills_matched) < MIN_SKILLS_TO_SHOW:
         default_skills = ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Teamwork', 'Project Management', 'Agile']
         needed = MIN_SKILLS_TO_SHOW - len(skills_matched)
@@ -629,24 +790,26 @@ def validate_analysis(analysis, filename):
         needed = MIN_SKILLS_TO_SHOW - len(skills_missing)
         skills_missing.extend(default_skills[:needed])
     
+    # Limit to maximum
     analysis['skills_matched'] = skills_matched[:MAX_SKILLS_TO_SHOW]
     analysis['skills_missing'] = skills_missing[:MAX_SKILLS_TO_SHOW]
     
+    # Ensure exactly 3 strengths and improvements
     analysis['key_strengths'] = analysis.get('key_strengths', [])[:3]
     analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:3]
     
-    # Remove any education summary if present
-    if 'education_summary' in analysis:
-        del analysis['education_summary']
-    
-    for field in ['experience_summary']:
+    # FIXED: Ensure complete sentences for summaries (don't truncate)
+    for field in ['experience_summary', 'education_summary']:
         if field in analysis:
             text = analysis[field]
+            # Remove any trailing ellipsis or incomplete sentences
             if '...' in text:
+                # Find the last complete sentence before ellipsis
                 sentences = text.split('. ')
                 complete_sentences = []
                 for sentence in sentences:
                     if '...' in sentence:
+                        # Remove the incomplete part
                         sentence = sentence.split('...')[0]
                         if sentence.strip():
                             complete_sentences.append(sentence.strip() + '.')
@@ -655,15 +818,19 @@ def validate_analysis(analysis, filename):
                         complete_sentences.append(sentence.strip() + '.')
                 analysis[field] = ' '.join(complete_sentences)
             
+            # Ensure proper sentence endings
             if not analysis[field].strip().endswith(('.', '!', '?')):
                 analysis[field] = analysis[field].strip() + '.'
             
+            # Limit to reasonable length but keep sentences complete
             if len(analysis[field]) > 800:
+                # Take first 5 sentences instead of truncating
                 sentences = analysis[field].split('. ')
                 if len(sentences) > 5:
                     analysis[field] = '. '.join(sentences[:5]) + '.'
     
-    unwanted_fields = ['job_title_suggestion', 'industry_fit', 'salary_expectation', 'education_summary']
+    # Remove unwanted fields
+    unwanted_fields = ['job_title_suggestion', 'years_experience', 'industry_fit', 'salary_expectation']
     for field in unwanted_fields:
         if field in analysis:
             del analysis[field]
@@ -688,7 +855,7 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "skills_matched": ['Python Programming', 'JavaScript Development', 'Database Management', 'Communication Skills', 'Problem Solving', 'Team Collaboration'],
             "skills_missing": ['Machine Learning Algorithms', 'Cloud Platform Expertise', 'Advanced Data Analysis', 'DevOps Practices', 'UI/UX Design Principles'],
             "experience_summary": 'The candidate has demonstrated professional experience in relevant technical roles. Their background includes working with modern technologies and methodologies. They have contributed to multiple projects with measurable outcomes. Additional experience enhances their suitability for the role.',
-            "years_of_experience": "3-5 years",
+            "education_summary": 'The candidate possesses educational qualifications that provide a strong foundation for professional work. Their academic background includes relevant coursework and projects. Additional training complements their formal education. The educational profile aligns with industry requirements.',
             "overall_score": 55,
             "recommendation": "Needs Full Analysis",
             "key_strengths": ['Technical proficiency', 'Communication abilities', 'Problem-solving approach'],
@@ -703,7 +870,7 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "skills_matched": ['Basic Programming', 'Communication Skills', 'Problem Solving', 'Teamwork', 'Technical Knowledge', 'Learning Ability'],
             "skills_missing": ['Advanced Technical Skills', 'Industry Experience', 'Specialized Knowledge', 'Certifications', 'Project Management'],
             "experience_summary": 'Professional experience analysis will be available once the Groq AI service is fully initialized. The candidate appears to have relevant background based on initial file processing. Additional details will be available with full analysis.',
-            "years_of_experience": "1-3 years",
+            "education_summary": 'Educational background analysis will be available shortly upon service initialization. Academic qualifications assessment is pending full AI processing. Further details will be provided with complete analysis.',
             "overall_score": 50,
             "recommendation": "Service Warming Up - Please Retry",
             "key_strengths": ['Fast learning capability', 'Strong work ethic', 'Good communication'],
@@ -714,23 +881,41 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
         }
 
 def process_single_resume(args):
-    """Process a single resume with intelligent rate limiting"""
+    """Process a single resume with intelligent error handling"""
     resume_file, job_description, index, total, batch_id = args
     
     try:
         print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
         
-        delay = (index * RATE_LIMIT_CONFIG['batch_delay']) + random.uniform(0, 0.3)
-        if delay > 0:
+        if index > 0:
+            if index < 3:
+                base_delay = 0.5
+            elif index < 6:
+                base_delay = 1.0
+            else:
+                base_delay = 1.5
+            
+            delay = base_delay + random.uniform(0, 0.3)
             print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
             time.sleep(delay)
+        
+        api_key, key_index = get_available_key(index)
+        if not api_key:
+            return {
+                'filename': resume_file.filename,
+                'error': 'No available API key',
+                'status': 'failed',
+                'index': index
+            }
         
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         file_path = os.path.join(UPLOAD_FOLDER, f"batch_{batch_id}_{index}{file_ext}")
         
+        # Save the file first
         resume_file.save(file_path)
         
+        # Store resume for preview
         analysis_id = f"{batch_id}_resume_{index}"
         preview_filename = store_resume_file(resume_file, resume_file.filename, analysis_id)
         
@@ -760,11 +945,16 @@ def process_single_resume(args):
                 'index': index
             }
         
+        key_usage[key_index - 1]['count'] += 1
+        key_usage[key_index - 1]['last_used'] = datetime.now()
+        
         analysis = analyze_resume_with_ai(
             resume_text, 
             job_description, 
             resume_file.filename, 
-            analysis_id
+            analysis_id,
+            api_key,
+            key_index
         )
         
         analysis['filename'] = resume_file.filename
@@ -777,17 +967,33 @@ def process_single_resume(args):
         
         analysis['analysis_id'] = analysis_id
         analysis['processing_order'] = index + 1
+        analysis['key_used'] = f"Key {key_index}"
         
+        # Add resume preview info
         analysis['resume_stored'] = preview_filename is not None
+        analysis['has_pdf_preview'] = False
         
         if preview_filename:
             analysis['resume_preview_filename'] = preview_filename
             analysis['resume_original_filename'] = resume_file.filename
+            # Check if PDF preview is available
+            if analysis_id in resume_storage and resume_storage[analysis_id].get('has_pdf_preview'):
+                analysis['has_pdf_preview'] = True
         
+        # Create individual Excel report for each candidate
+        try:
+            excel_filename = f"individual_{analysis_id}.xlsx"
+            excel_path = create_detailed_individual_report(analysis, excel_filename)
+            analysis['individual_excel_filename'] = os.path.basename(excel_path)
+        except Exception as e:
+            print(f"⚠️ Failed to create individual report: {str(e)}")
+            analysis['individual_excel_filename'] = None
+        
+        # Keep the preview file, remove only the temp upload file
         if os.path.exists(file_path):
             os.remove(file_path)
         
-        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
+        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')} (Key {key_index})")
         
         return {
             'analysis': analysis,
@@ -806,404 +1012,6 @@ def process_single_resume(args):
             'index': index
         }
 
-def create_comprehensive_batch_report(analyses, job_description, filename="batch_resume_analysis.xlsx"):
-    """Create a comprehensive batch Excel report with candidate comparison sheet and individual sheets"""
-    try:
-        wb = Workbook()
-        
-        # Remove default sheet
-        if 'Sheet' in wb.sheetnames:
-            default_sheet = wb['Sheet']
-            wb.remove(default_sheet)
-        
-        # 1. Create Candidate Comparison Sheet (Main Sheet)
-        ws_comparison = wb.create_sheet("Candidate Comparison")
-        
-        title_font = Font(bold=True, size=16, color="FFFFFF")
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        normal_font = Font(size=10)
-        bold_font = Font(bold=True, size=10)
-        
-        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-        even_row_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-        odd_row_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-        
-        thin_border = Border(
-            left=Side(style='thin', color='000000'),
-            right=Side(style='thin', color='000000'),
-            top=Side(style='thin', color='000000'),
-            bottom=Side(style='thin', color='000000')
-        )
-        
-        thick_border = Border(
-            left=Side(style='medium', color='000000'),
-            right=Side(style='medium', color='000000'),
-            top=Side(style='medium', color='000000'),
-            bottom=Side(style='medium', color='000000')
-        )
-        
-        # Title
-        ws_comparison.merge_cells('A1:K1')
-        title_cell = ws_comparison['A1']
-        title_cell.value = "RESUME ANALYSIS REPORT - BATCH COMPARISON"
-        title_cell.font = title_font
-        title_cell.fill = header_fill
-        title_cell.alignment = Alignment(horizontal='center', vertical='center')
-        title_cell.border = thick_border
-        
-        # Info row
-        info_row = 3
-        info_data = [
-            ("Report Date:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            ("Total Candidates:", len(analyses)),
-            ("AI Model:", f"Groq {GROQ_MODEL}"),
-        ]
-        
-        for i, (label, value) in enumerate(info_data):
-            ws_comparison.cell(row=info_row, column=1 + i*4, value=label).font = bold_font
-            ws_comparison.cell(row=info_row, column=2 + i*4, value=value).font = normal_font
-            ws_comparison.merge_cells(start_row=info_row, start_column=2 + i*4, end_row=info_row, end_column=3 + i*4)
-        
-        # Job Description
-        info_row += 2
-        ws_comparison.merge_cells(f'A{info_row}:K{info_row}')
-        ws_comparison.cell(row=info_row, column=1, value="Job Description:").font = bold_font
-        info_row += 1
-        ws_comparison.merge_cells(f'A{info_row}:K{info_row}')
-        jd_text = job_description[:500] + "..." if len(job_description) > 500 else job_description
-        ws_comparison.cell(row=info_row, column=1, value=jd_text)
-        ws_comparison.cell(row=info_row, column=1).font = normal_font
-        ws_comparison.cell(row=info_row, column=1).alignment = Alignment(wrap_text=True)
-        ws_comparison.row_dimensions[info_row].height = 40
-        
-        start_row = info_row + 2
-        
-        # Updated headers with Filename first and Years of Experience
-        headers = [
-            ("Rank", 8),
-            ("Filename", 25),  # Filename instead of Candidate Name
-            ("Years of Experience", 15),  # New column
-            ("ATS Score", 12),
-            ("Recommendation", 20),
-            ("Skills Matched", 30),
-            ("Skills Missing", 30),
-            ("Experience Summary", 50),
-            ("Key Strengths", 30),
-            ("Areas for Improvement", 30)
-        ]
-        
-        for col, (header, width) in enumerate(headers, start=1):
-            cell = ws_comparison.cell(row=start_row, column=col, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            cell.border = thin_border
-            ws_comparison.column_dimensions[get_column_letter(col)].width = width
-        
-        # Add data rows
-        for idx, analysis in enumerate(analyses):
-            row = start_row + idx + 1
-            row_fill = even_row_fill if idx % 2 == 0 else odd_row_fill
-            
-            # Rank
-            cell = ws_comparison.cell(row=row, column=1, value=analysis.get('rank', '-'))
-            cell.font = bold_font
-            cell.alignment = Alignment(horizontal='center')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            # Filename (instead of candidate name)
-            cell = ws_comparison.cell(row=row, column=2, value=analysis.get('filename', 'Unknown'))
-            cell.font = normal_font
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            # Years of Experience
-            years_exp = analysis.get('years_of_experience', 'N/A')
-            cell = ws_comparison.cell(row=row, column=3, value=years_exp)
-            cell.alignment = Alignment(horizontal='center')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            # ATS Score
-            score = analysis.get('overall_score', 0)
-            cell = ws_comparison.cell(row=row, column=4, value=score)
-            cell.alignment = Alignment(horizontal='center')
-            cell.fill = row_fill
-            cell.border = thin_border
-            if score >= 80:
-                cell.font = Font(bold=True, color="00B050", size=10)
-            elif score >= 60:
-                cell.font = Font(bold=True, color="FFC000", size=10)
-            else:
-                cell.font = Font(bold=True, color="FF0000", size=10)
-            
-            # Recommendation
-            cell = ws_comparison.cell(row=row, column=5, value=analysis.get('recommendation', 'N/A'))
-            cell.font = normal_font
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            # Skills Matched
-            skills_matched = analysis.get('skills_matched', [])
-            cell = ws_comparison.cell(row=row, column=6, value="\n".join([f"• {skill}" for skill in skills_matched[:8]]))
-            cell.font = Font(size=9)
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            # Skills Missing
-            skills_missing = analysis.get('skills_missing', [])
-            cell = ws_comparison.cell(row=row, column=7, value="\n".join([f"• {skill}" for skill in skills_missing[:8]]))
-            cell.font = Font(size=9, color="FF0000")
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            # Experience Summary (NO Education Summary)
-            experience = analysis.get('experience_summary', 'No experience summary available.')
-            cell = ws_comparison.cell(row=row, column=8, value=experience)
-            cell.font = Font(size=9)
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
-            cell.fill = row_fill
-            cell.border = thin_border
-            ws_comparison.row_dimensions[row].height = 80
-            
-            # Key Strengths
-            strengths = analysis.get('key_strengths', [])
-            cell = ws_comparison.cell(row=row, column=9, value="\n".join([f"• {strength}" for strength in strengths[:3]]))
-            cell.font = Font(size=9, color="00B050")
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            # Areas for Improvement
-            improvements = analysis.get('areas_for_improvement', [])
-            cell = ws_comparison.cell(row=row, column=10, value="\n".join([f"• {area}" for area in improvements[:3]]))
-            cell.font = Font(size=9, color="FF6600")
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
-            cell.fill = row_fill
-            cell.border = thin_border
-        
-        # Summary Statistics
-        summary_row = start_row + len(analyses) + 2
-        avg_score = round(sum(a.get('overall_score', 0) for a in analyses) / len(analyses), 1) if analyses else 0
-        top_score = max((a.get('overall_score', 0) for a in analyses), default=0)
-        bottom_score = min((a.get('overall_score', 0) for a in analyses), default=0)
-        
-        summary_data = [
-            ("Average Score:", f"{avg_score}/100"),
-            ("Highest Score:", f"{top_score}/100"),
-            ("Lowest Score:", f"{bottom_score}/100"),
-            ("Analysis Date:", datetime.now().strftime("%Y-%m-%d"))
-        ]
-        
-        for i, (label, value) in enumerate(summary_data):
-            ws_comparison.cell(row=summary_row, column=1 + i*3, value=label).font = bold_font
-            ws_comparison.cell(row=summary_row, column=2 + i*3, value=value).font = bold_font
-            ws_comparison.cell(row=summary_row, column=2 + i*3).alignment = Alignment(horizontal='center')
-        
-        # 2. Create Individual Sheets for Each Candidate
-        for idx, analysis in enumerate(analyses):
-            # Create sheet name from filename (safe for Excel)
-            filename = analysis.get('filename', f'Candidate_{idx+1}')
-            safe_sheet_name = re.sub(r'[\\/*?:\[\]]', '', filename[:31])  # Excel sheet names max 31 chars
-            
-            # Add index if sheet name already exists
-            original_sheet_name = safe_sheet_name
-            counter = 1
-            while safe_sheet_name in wb.sheetnames:
-                safe_sheet_name = f"{original_sheet_name[:28]}_{counter}"
-                counter += 1
-            
-            ws_individual = wb.create_sheet(safe_sheet_name)
-            
-            # Individual candidate sheet styling
-            ind_title_font = Font(bold=True, size=14, color="FFFFFF")
-            ind_header_font = Font(bold=True, color="FFFFFF", size=10)
-            ind_normal_font = Font(size=10)
-            
-            # Title
-            ws_individual.merge_cells('A1:F1')
-            title_cell = ws_individual['A1']
-            title_cell.value = f"RESUME ANALYSIS - {analysis.get('filename', 'Candidate')}"
-            title_cell.font = ind_title_font
-            title_cell.fill = header_fill
-            title_cell.alignment = Alignment(horizontal='center', vertical='center')
-            
-            # Candidate Info
-            info_row = 3
-            info_fields = [
-                ("Filename:", analysis.get('filename', 'N/A')),
-                ("Rank:", analysis.get('rank', '-')),
-                ("Years of Experience:", analysis.get('years_of_experience', 'N/A')),
-                ("ATS Score:", f"{analysis.get('overall_score', 0)}/100"),
-                ("Recommendation:", analysis.get('recommendation', 'N/A')),
-                ("File Size:", analysis.get('file_size', 'N/A')),
-                ("Analysis Date:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            ]
-            
-            for i, (label, value) in enumerate(info_fields):
-                if i % 2 == 0:
-                    row = info_row + (i // 2)
-                    ws_individual.cell(row=row, column=1, value=label).font = Font(bold=True)
-                    ws_individual.cell(row=row, column=2, value=value)
-                    ws_individual.cell(row=row, column=3, value="")
-                else:
-                    ws_individual.cell(row=row, column=4, value=label).font = Font(bold=True)
-                    ws_individual.cell(row=row, column=5, value=value)
-            
-            # Experience Summary Section
-            exp_row = info_row + len(info_fields) // 2 + 2
-            ws_individual.merge_cells(f'A{exp_row}:F{exp_row}')
-            ws_individual.cell(row=exp_row, column=1, value="EXPERIENCE SUMMARY").font = ind_header_font
-            ws_individual.cell(row=exp_row, column=1).fill = subheader_fill
-            ws_individual.cell(row=exp_row, column=1).alignment = Alignment(horizontal='center')
-            
-            exp_row += 1
-            ws_individual.merge_cells(f'A{exp_row}:F{exp_row}')
-            experience_text = analysis.get('experience_summary', 'No experience summary available.')
-            ws_individual.cell(row=exp_row, column=1, value=experience_text)
-            ws_individual.cell(row=exp_row, column=1).font = ind_normal_font
-            ws_individual.cell(row=exp_row, column=1).alignment = Alignment(wrap_text=True, vertical='top')
-            ws_individual.row_dimensions[exp_row].height = 80
-            
-            # Skills Section
-            skills_row = exp_row + 2
-            
-            # Skills Matched
-            ws_individual.merge_cells(f'A{skills_row}:C{skills_row}')
-            ws_individual.cell(row=skills_row, column=1, value="SKILLS MATCHED").font = ind_header_font
-            ws_individual.cell(row=skills_row, column=1).fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-            ws_individual.cell(row=skills_row, column=1).alignment = Alignment(horizontal='center')
-            
-            ws_individual.merge_cells(f'D{skills_row}:F{skills_row}')
-            ws_individual.cell(row=skills_row, column=4, value="SKILLS MISSING").font = ind_header_font
-            ws_individual.cell(row=skills_row, column=4).fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-            ws_individual.cell(row=skills_row, column=4).alignment = Alignment(horizontal='center')
-            
-            skills_row += 1
-            skills_matched = analysis.get('skills_matched', [])
-            skills_missing = analysis.get('skills_missing', [])
-            
-            max_skills = max(len(skills_matched), len(skills_missing))
-            for i in range(max_skills):
-                if i < len(skills_matched):
-                    ws_individual.cell(row=skills_row + i, column=1, value=f"• {skills_matched[i]}")
-                    ws_individual.cell(row=skills_row + i, column=1).font = Font(color="006100")
-                if i < len(skills_missing):
-                    ws_individual.cell(row=skills_row + i, column=4, value=f"• {skills_missing[i]}")
-                    ws_individual.cell(row=skills_row + i, column=4).font = Font(color="9C0006")
-            
-            # Strengths & Improvements Section
-            insights_row = skills_row + max_skills + 2
-            
-            # Key Strengths
-            ws_individual.merge_cells(f'A{insights_row}:C{insights_row}')
-            ws_individual.cell(row=insights_row, column=1, value="KEY STRENGTHS").font = ind_header_font
-            ws_individual.cell(row=insights_row, column=1).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
-            ws_individual.cell(row=insights_row, column=1).alignment = Alignment(horizontal='center')
-            
-            # Areas for Improvement
-            ws_individual.merge_cells(f'D{insights_row}:F{insights_row}')
-            ws_individual.cell(row=insights_row, column=4, value="AREAS FOR IMPROVEMENT").font = ind_header_font
-            ws_individual.cell(row=insights_row, column=4).fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
-            ws_individual.cell(row=insights_row, column=4).alignment = Alignment(horizontal='center')
-            
-            insights_row += 1
-            strengths = analysis.get('key_strengths', [])
-            improvements = analysis.get('areas_for_improvement', [])
-            
-            max_insights = max(len(strengths), len(improvements))
-            for i in range(max_insights):
-                if i < len(strengths):
-                    ws_individual.cell(row=insights_row + i, column=1, value=f"• {strengths[i]}")
-                if i < len(improvements):
-                    ws_individual.cell(row=insights_row + i, column=4, value=f"• {improvements[i]}")
-            
-            # Set column widths
-            for col in ['A', 'B', 'C', 'D', 'E', 'F']:
-                ws_individual.column_dimensions[col].width = 25
-        
-        # Set column widths for comparison sheet
-        for col, width in enumerate([8, 25, 15, 12, 20, 30, 30, 50, 30, 30], start=1):
-            ws_comparison.column_dimensions[get_column_letter(col)].width = width
-        
-        # Save the workbook
-        filepath = os.path.join(REPORTS_FOLDER, filename)
-        wb.save(filepath)
-        print(f"📊 Professional batch Excel report saved to: {filepath}")
-        print(f"📄 Created {len(analyses) + 1} sheets: 1 comparison sheet + {len(analyses)} individual sheets")
-        return filepath
-        
-    except Exception as e:
-        print(f"❌ Error creating professional batch Excel report: {str(e)}")
-        traceback.print_exc()
-        return create_minimal_batch_report(analyses, job_description, filename)
-
-def create_minimal_batch_report(analyses, job_description, filename):
-    """Create a minimal batch report as fallback"""
-    try:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Batch Analysis"
-        
-        ws['A1'] = "Batch Resume Analysis Report"
-        ws['A1'].font = Font(bold=True, size=16)
-        ws.merge_cells('A1:E1')
-        
-        ws['A2'] = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        ws['A3'] = f"Total Candidates: {len(analyses)}"
-        
-        # Updated headers
-        headers = ["Rank", "Filename", "Years of Experience", "ATS Score", "Recommendation"]
-        for col, header in enumerate(headers, start=1):
-            cell = ws.cell(row=5, column=col, value=header)
-            cell.font = Font(bold=True)
-        
-        for idx, analysis in enumerate(analyses):
-            row = 6 + idx
-            ws.cell(row=row, column=1, value=analysis.get('rank', '-'))
-            ws.cell(row=row, column=2, value=analysis.get('filename', 'Unknown'))
-            ws.cell(row=row, column=3, value=analysis.get('years_of_experience', 'N/A'))
-            ws.cell(row=row, column=4, value=analysis.get('overall_score', 0))
-            ws.cell(row=row, column=5, value=analysis.get('recommendation', 'N/A'))
-        
-        for column in ws.columns:
-            max_length = 0
-            column_letter = get_column_letter(column[0].column)
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max_length + 2, 50)
-            ws.column_dimensions[column_letter].width = adjusted_width
-        
-        filepath = os.path.join(REPORTS_FOLDER, filename)
-        wb.save(filepath)
-        print(f"📊 Minimal batch report saved to: {filepath}")
-        return filepath
-    except Exception as e:
-        print(f"❌ Error creating minimal batch report: {str(e)}")
-        traceback.print_exc()
-        return None
-
-def get_score_grade_text(score):
-    """Get text description for score"""
-    if score >= 90:
-        return "Excellent Match 🎯"
-    elif score >= 80:
-        return "Great Match ✨"
-    elif score >= 70:
-        return "Good Match 👍"
-    elif score >= 60:
-        return "Fair Match 📊"
-    else:
-        return "Needs Improvement 📈"
-
 @app.route('/')
 def home():
     """Root route - API landing page"""
@@ -1213,7 +1021,7 @@ def home():
     
     warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
     
-    available_keys = len(GROQ_API_KEYS)
+    available_keys = sum(1 for key in GROQ_API_KEYS if key)
     
     return '''
     <!DOCTYPE html>
@@ -1237,7 +1045,7 @@ def home():
     <body>
         <div class="container">
             <h1>🚀 Resume Analyzer API (Groq Parallel)</h1>
-            <p>AI-powered resume analysis using Groq API with advanced rate limiting</p>
+            <p>AI-powered resume analysis using Groq API with 3-key parallel processing</p>
             
             <div class="status ''' + ('ready' if warmup_complete else 'warming') + '''">
                 <strong>Status:</strong> ''' + warmup_status + '''
@@ -1245,14 +1053,14 @@ def home():
             
             <div class="key-status">
                 <strong>API Keys:</strong>
-                ''' + ''.join([f'<span class="key key-active">Key {i+1}: ✅ Configured</span>' for i in range(available_keys)]) + '''
+                ''' + ''.join([f'<span class="key ' + ('key-active' if key else 'key-inactive') + f'">Key {i+1}: ' + ('✅' if key else '❌') + '</span>' for i, key in enumerate(GROQ_API_KEYS)]) + '''
             </div>
             
             <p><strong>Model:</strong> ''' + GROQ_MODEL + '''</p>
-            <p><strong>API Provider:</strong> Groq (Advanced Rate Limiting)</p>
+            <p><strong>API Provider:</strong> Groq (Parallel Processing)</p>
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
-            <p><strong>Rate Limit:</strong> ''' + str(RATE_LIMIT_CONFIG['requests_per_minute']) + ''' requests/min/key</p>
-            <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''</p>
+            <p><strong>Processing:</strong> Round-robin with 3 keys, ~10-15s for 10 resumes</p>
+            <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/3</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
             
             <h2>📡 Endpoints</h2>
@@ -1272,10 +1080,16 @@ def home():
                 <strong>GET /quick-check</strong> - Check Groq API availability
             </div>
             <div class="endpoint">
-                <strong>GET /resume-preview/&lt;analysis_id&gt;</strong> - Get resume preview
+                <strong>GET /resume-preview/&lt;analysis_id&gt;</strong> - Get resume preview (PDF)
+            </div>
+            <div class="endpoint">
+                <strong>GET /resume-original/&lt;analysis_id&gt;</strong> - Download original resume file
             </div>
             <div class="endpoint">
                 <strong>GET /download/&lt;filename&gt;</strong> - Download batch report
+            </div>
+            <div class="endpoint">
+                <strong>GET /download-individual/&lt;analysis_id&gt;</strong> - Download individual candidate report
             </div>
         </div>
     </body>
@@ -1317,14 +1131,16 @@ def analyze_resume():
             print(f"❌ File too large: {file_size} bytes")
             return jsonify({'error': 'File size too large. Maximum size is 15MB.'}), 400
         
-        if len(GROQ_API_KEYS) == 0:
-            return jsonify({'error': 'No Groq API keys configured'}), 500
+        api_key, key_index = get_available_key()
+        if not api_key:
+            return jsonify({'error': 'No available Groq API key'}), 500
         
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}{file_ext}")
         resume_file.save(file_path)
         
+        # Store resume for preview
         analysis_id = f"single_{timestamp}"
         preview_filename = store_resume_file(resume_file, resume_file.filename, analysis_id)
         
@@ -1340,22 +1156,33 @@ def analyze_resume():
         if resume_text.startswith('Error'):
             return jsonify({'error': resume_text}), 500
         
-        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id)
+        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key, key_index)
         
+        excel_filename = f"analysis_{analysis_id}.xlsx"
+        excel_path = create_detailed_individual_report(analysis, excel_filename)
+        
+        # Keep the preview file, remove only the temp upload file
         if os.path.exists(file_path):
             os.remove(file_path)
         
+        analysis['excel_filename'] = os.path.basename(excel_path)
         analysis['ai_model'] = GROQ_MODEL
         analysis['ai_provider'] = "groq"
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['response_time'] = analysis.get('response_time', 'N/A')
         analysis['analysis_id'] = analysis_id
+        analysis['key_used'] = f"Key {key_index}"
         
+        # Add resume preview info
         analysis['resume_stored'] = preview_filename is not None
+        analysis['has_pdf_preview'] = False
         
         if preview_filename:
             analysis['resume_preview_filename'] = preview_filename
             analysis['resume_original_filename'] = resume_file.filename
+            # Check if PDF preview is available
+            if analysis_id in resume_storage and resume_storage[analysis_id].get('has_pdf_preview'):
+                analysis['has_pdf_preview'] = True
         
         total_time = time.time() - start_time
         print(f"✅ Request completed in {total_time:.2f} seconds")
@@ -1369,7 +1196,7 @@ def analyze_resume():
 
 @app.route('/analyze-batch', methods=['POST'])
 def analyze_resume_batch():
-    """Analyze multiple resumes with parallel processing and rate limiting"""
+    """Analyze multiple resumes with parallel processing"""
     update_activity()
     
     try:
@@ -1399,17 +1226,22 @@ def analyze_resume_batch():
             print(f"❌ Too many files: {len(resume_files)} (max: {MAX_BATCH_SIZE})")
             return jsonify({'error': f'Maximum {MAX_BATCH_SIZE} resumes allowed per batch'}), 400
         
-        if len(GROQ_API_KEYS) == 0:
+        available_keys = sum(1 for key in GROQ_API_KEYS if key)
+        if available_keys == 0:
             print("❌ No Groq API keys configured")
             return jsonify({'error': 'No Groq API keys configured'}), 500
         
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         
+        for i in range(3):
+            key_usage[i]['count'] = 0
+            key_usage[i]['last_used'] = None
+        
         all_analyses = []
         errors = []
         
-        print(f"🔄 Processing {len(resume_files)} resumes with {len(GROQ_API_KEYS)} keys...")
-        print(f"📊 Using smart rate limiting with {RATE_LIMIT_CONFIG['requests_per_minute']} requests/min/key")
+        print(f"🔄 Processing {len(resume_files)} resumes with {available_keys} keys...")
+        print(f"📊 Using round-robin distribution: Key 1→1,4,7,10 | Key 2→2,5,8 | Key 3→3,6,9")
         
         for index, resume_file in enumerate(resume_files):
             if resume_file.filename == '':
@@ -1434,10 +1266,9 @@ def analyze_resume_batch():
                     'index': result.get('index')
                 })
             
-            if index < len(resume_files) - 1:
-                delay = RATE_LIMIT_CONFIG['request_delay'] + random.uniform(0, 0.5)
-                print(f"⏳ Waiting {delay:.1f}s before next resume...")
-                time.sleep(delay)
+            for i in range(3):
+                if key_usage[i]['count'] >= 4:
+                    mark_key_cooling(i, 15)
         
         all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
         
@@ -1454,7 +1285,17 @@ def analyze_resume_batch():
             except Exception as e:
                 print(f"❌ Failed to create Excel report: {str(e)}")
                 traceback.print_exc()
+                # Create a minimal report
                 batch_excel_path = create_minimal_batch_report(all_analyses, job_description, excel_filename)
+        
+        key_stats = []
+        for i in range(3):
+            if GROQ_API_KEYS[i]:
+                key_stats.append({
+                    'key': f'Key {i+1}',
+                    'used': key_usage[i]['count'],
+                    'status': 'cooling' if key_usage[i]['cooling'] else 'available'
+                })
         
         total_time = time.time() - start_time
         batch_summary = {
@@ -1470,15 +1311,15 @@ def analyze_resume_batch():
             'ai_provider': "groq",
             'ai_status': "Warmed up" if warmup_complete else "Warming up",
             'processing_time': f"{total_time:.2f}s",
-            'processing_method': 'sequential_with_rate_limiting',
-            'available_keys': len(GROQ_API_KEYS),
-            'rate_limit': f"{RATE_LIMIT_CONFIG['requests_per_minute']} requests/min/key",
+            'processing_method': 'round_robin_parallel',
+            'key_statistics': key_stats,
+            'available_keys': available_keys,
             'success_rate': f"{(len(all_analyses) / len(resume_files)) * 100:.1f}%" if resume_files else "0%",
             'performance': f"{len(all_analyses)/total_time:.2f} resumes/second" if total_time > 0 else "N/A"
         }
         
         print(f"✅ Batch analysis completed in {total_time:.2f}s")
-        print(f"📊 Success rate: {batch_summary['success_rate']}")
+        print(f"📊 Key usage: {key_stats}")
         print("="*50 + "\n")
         
         return jsonify(batch_summary)
@@ -1488,31 +1329,849 @@ def analyze_resume_batch():
         return jsonify({'error': f'Server error: {str(e)[:200]}'}), 500
 
 @app.route('/resume-preview/<analysis_id>', methods=['GET'])
-def get_resume_preview_route(analysis_id):
-    """Get resume preview"""
+def get_resume_preview(analysis_id):
+    """Get resume preview as PDF"""
     update_activity()
     
     try:
         print(f"📄 Resume preview request for: {analysis_id}")
         
+        # Get resume info from storage
         resume_info = get_resume_preview(analysis_id)
         if not resume_info:
             return jsonify({'error': 'Resume preview not found'}), 404
         
-        preview_path = resume_info['path']
+        # Try to use PDF preview if available
+        preview_path = resume_info.get('pdf_path') or resume_info['path']
         
         if not os.path.exists(preview_path):
             return jsonify({'error': 'Preview file not found'}), 404
         
+        # Determine file type
+        file_ext = os.path.splitext(preview_path)[1].lower()
+        
+        if file_ext == '.pdf':
+            return send_file(
+                preview_path,
+                as_attachment=False,
+                download_name=f"resume_preview_{analysis_id}.pdf",
+                mimetype='application/pdf'
+            )
+        else:
+            # If not PDF, try to convert or return original
+            return send_file(
+                preview_path,
+                as_attachment=True,
+                download_name=resume_info['original_filename'],
+                mimetype='application/octet-stream'
+            )
+            
+    except Exception as e:
+        print(f"❌ Resume preview error: {traceback.format_exc()}")
+        return jsonify({'error': f'Failed to get resume preview: {str(e)}'}), 500
+
+@app.route('/resume-original/<analysis_id>', methods=['GET'])
+def get_resume_original(analysis_id):
+    """Download original resume file"""
+    update_activity()
+    
+    try:
+        print(f"📄 Original resume request for: {analysis_id}")
+        
+        # Get resume info from storage
+        resume_info = get_resume_preview(analysis_id)
+        if not resume_info:
+            return jsonify({'error': 'Resume not found'}), 404
+        
+        original_path = resume_info['path']
+        
+        if not os.path.exists(original_path):
+            return jsonify({'error': 'Resume file not found'}), 404
+        
         return send_file(
-            preview_path,
+            original_path,
             as_attachment=True,
             download_name=resume_info['original_filename']
         )
             
     except Exception as e:
-        print(f"❌ Resume preview error: {traceback.format_exc()}")
-        return jsonify({'error': f'Failed to get resume preview: {str(e)}'}), 500
+        print(f"❌ Original resume download error: {traceback.format_exc()}")
+        return jsonify({'error': f'Failed to download resume: {str(e)}'}), 500
+
+def create_detailed_individual_report(analysis_data, filename="resume_analysis_report.xlsx"):
+    """Create a detailed Excel report for individual candidate (simplified)"""
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Resume Analysis"
+        
+        # Styles
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        title_font = Font(bold=True, size=14, color="FFFFFF")
+        subheader_fill = PatternFill(start_color="8EA9DB", end_color="8EA9DB", fill_type="solid")
+        subheader_font = Font(bold=True, color="FFFFFF", size=10)
+        
+        # Set column widths
+        column_widths = {
+            'A': 25, 'B': 60, 'C': 25, 'D': 25
+        }
+        for col, width in column_widths.items():
+            ws.column_dimensions[col].width = width
+        
+        row = 1
+        
+        # Title
+        ws['A1'] = "RESUME ANALYSIS REPORT (Groq AI)"
+        ws['A1'].font = title_font
+        ws['A1'].fill = header_fill
+        ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
+        
+        # Also set values for other cells to maintain structure
+        for col in ['B1', 'C1', 'D1']:
+            ws[col] = ""
+            ws[col].fill = header_fill
+        
+        row += 2
+        
+        # Basic Information
+        ws[f'A{row}'] = "CANDIDATE INFORMATION"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = header_fill
+        ws[f'A{row}'].alignment = Alignment(horizontal='center')
+        
+        for col in ['B', 'C', 'D']:
+            cell = f'{col}{row}'
+            ws[cell] = ""
+            ws[cell].fill = header_fill
+        
+        row += 1
+        
+        info_fields = [
+            ("Candidate Name", analysis_data.get('candidate_name', 'N/A')),
+            ("Analysis Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            ("Original Filename", analysis_data.get('filename', 'N/A')),
+            ("File Size", analysis_data.get('file_size', 'N/A')),
+        ]
+        
+        for label, value in info_fields:
+            ws[f'A{row}'] = label
+            ws[f'A{row}'].font = Font(bold=True)
+            ws[f'B{row}'] = value
+            row += 1
+        
+        row += 1
+        
+        # Score and Recommendation
+        ws[f'A{row}'] = "SCORE & RECOMMENDATION"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = header_fill
+        ws[f'A{row}'].alignment = Alignment(horizontal='center')
+        
+        for col in ['B', 'C', 'D']:
+            cell = f'{col}{row}'
+            ws[cell] = ""
+            ws[cell].fill = header_fill
+        row += 1
+        
+        score_info = [
+            ("Overall ATS Score", f"{analysis_data.get('overall_score', 0)}/100"),
+            ("Recommendation", analysis_data.get('recommendation', 'N/A')),
+        ]
+        
+        for i in range(0, len(score_info), 2):
+            if i < len(score_info):
+                ws[f'A{row}'] = score_info[i][0]
+                ws[f'A{row}'].font = Font(bold=True)
+                ws[f'B{row}'] = score_info[i][1]
+            if i + 1 < len(score_info):
+                ws[f'C{row}'] = score_info[i+1][0]
+                ws[f'C{row}'].font = Font(bold=True)
+                ws[f'D{row}'] = score_info[i+1][1]
+            row += 1
+        
+        row += 1
+        
+        # Skills Matched (5-8 skills)
+        skills_matched = analysis_data.get('skills_matched', [])
+        ws[f'A{row}'] = f"SKILLS MATCHED ({len(skills_matched)} skills)"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = subheader_fill
+        ws[f'A{row}'].alignment = Alignment(horizontal='center')
+        
+        for col in ['B', 'C', 'D']:
+            cell = f'{col}{row}'
+            ws[cell] = ""
+            ws[cell].fill = subheader_fill
+        row += 1
+        
+        if skills_matched:
+            for i, skill in enumerate(skills_matched, 1):
+                ws[f'A{row}'] = f"{i}."
+                ws[f'A{row}'].font = Font(bold=True)
+                ws[f'B{row}'] = skill
+                row += 1
+        else:
+            ws[f'A{row}'] = "No matched skills found"
+            row += 1
+        
+        row += 1
+        
+        # Skills Missing (5-8 skills)
+        skills_missing = analysis_data.get('skills_missing', [])
+        ws[f'A{row}'] = f"SKILLS MISSING ({len(skills_missing)} skills)"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = subheader_fill
+        ws[f'A{row}'].alignment = Alignment(horizontal='center')
+        
+        for col in ['B', 'C', 'D']:
+            cell = f'{col}{row}'
+            ws[cell] = ""
+            ws[cell].fill = subheader_fill
+        row += 1
+        
+        if skills_missing:
+            for i, skill in enumerate(skills_missing, 1):
+                ws[f'A{row}'] = f"{i}."
+                ws[f'A{row}'].font = Font(bold=True)
+                ws[f'B{row}'] = skill
+                row += 1
+        else:
+            ws[f'A{row}'] = "All required skills are present!"
+            row += 1
+        
+        row += 1
+        
+        # Experience Summary (Complete sentences, not truncated)
+        ws[f'A{row}'] = "EXPERIENCE SUMMARY (4-5 complete sentences)"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = subheader_fill
+        ws[f'A{row}'].alignment = Alignment(horizontal='center')
+        
+        for col in ['B', 'C', 'D']:
+            cell = f'{col}{row}'
+            ws[cell] = ""
+            ws[cell].fill = subheader_fill
+        row += 1
+        
+        experience_text = analysis_data.get('experience_summary', 'No experience summary available.')
+        ws[f'A{row}'] = experience_text
+        ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
+        ws.row_dimensions[row].height = 80
+        
+        for col in ['B', 'C', 'D']:
+            ws[f'{col}{row}'] = ""
+        
+        row += 2
+        
+        # Education Summary (Complete sentences, not truncated)
+        ws[f'A{row}'] = "EDUCATION SUMMARY (4-5 complete sentences)"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = subheader_fill
+        ws[f'A{row}'].alignment = Alignment(horizontal='center')
+        
+        for col in ['B', 'C', 'D']:
+            cell = f'{col}{row}'
+            ws[cell] = ""
+            ws[cell].fill = subheader_fill
+        row += 1
+        
+        education_text = analysis_data.get('education_summary', 'No education summary available.')
+        ws[f'A{row}'] = education_text
+        ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
+        ws.row_dimensions[row].height = 80
+        
+        for col in ['B', 'C', 'D']:
+            ws[f'{col}{row}'] = ""
+        
+        row += 2
+        
+        # Key Strengths (3 items)
+        ws[f'A{row}'] = "KEY STRENGTHS (3)"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = subheader_fill
+        ws[f'A{row}'].alignment = Alignment(horizontal='center')
+        
+        for col in ['B', 'C', 'D']:
+            cell = f'{col}{row}'
+            ws[cell] = ""
+            ws[cell].fill = subheader_fill
+        row += 1
+        
+        key_strengths = analysis_data.get('key_strengths', [])
+        if key_strengths:
+            for i, strength in enumerate(key_strengths[:3], 1):
+                ws[f'A{row}'] = f"{i}."
+                ws[f'A{row}'].font = Font(bold=True)
+                ws[f'B{row}'] = strength
+                row += 1
+        else:
+            ws[f'A{row}'] = "No strengths identified"
+            row += 1
+        
+        row += 1
+        
+        # Areas for Improvement (3 items)
+        ws[f'A{row}'] = "AREAS FOR IMPROVEMENT (3)"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = subheader_fill
+        ws[f'A{row}'].alignment = Alignment(horizontal='center')
+        
+        for col in ['B', 'C', 'D']:
+            cell = f'{col}{row}'
+            ws[cell] = ""
+            ws[cell].fill = subheader_fill
+        row += 1
+        
+        areas_for_improvement = analysis_data.get('areas_for_improvement', [])
+        if areas_for_improvement:
+            for i, area in enumerate(areas_for_improvement[:3], 1):
+                ws[f'A{row}'] = f"{i}."
+                ws[f'A{row}'].font = Font(bold=True)
+                ws[f'B{row}'] = area
+                row += 1
+        else:
+            ws[f'A{row}'] = "No areas for improvement identified"
+            row += 1
+        
+        # Add borders to all cells with data
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        for row_cells in ws.iter_rows(min_row=1, max_row=row-1, min_col=1, max_col=4):
+            for cell in row_cells:
+                if cell.value is not None:
+                    cell.border = thin_border
+        
+        # Save the file
+        filepath = os.path.join(REPORTS_FOLDER, filename)
+        wb.save(filepath)
+        print(f"📄 Individual Excel report saved to: {filepath}")
+        return filepath
+    except Exception as e:
+        print(f"❌ Error creating individual Excel report: {str(e)}")
+        traceback.print_exc()
+        filepath = os.path.join(REPORTS_FOLDER, f"individual_fallback_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
+        wb = Workbook()
+        ws = wb.active
+        ws['A1'] = "Resume Analysis Report (Groq)"
+        ws['A2'] = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        ws['A3'] = f"Candidate: {analysis_data.get('candidate_name', 'Unknown')}"
+        ws['A4'] = f"Score: {analysis_data.get('overall_score', 0)}/100"
+        wb.save(filepath)
+        return filepath
+
+def create_comprehensive_batch_report(analyses, job_description, filename="batch_resume_analysis.xlsx"):
+    """Create a comprehensive batch Excel report with professional formatting"""
+    try:
+        wb = Workbook()
+        
+        # ================== CANDIDATE COMPARISON SHEET ==================
+        ws_comparison = wb.active
+        ws_comparison.title = "Candidate Comparison"
+        
+        # Define styles
+        title_font = Font(bold=True, size=16, color="FFFFFF")
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        subheader_font = Font(bold=True, color="000000", size=10)
+        normal_font = Font(size=10)
+        bold_font = Font(bold=True, size=10)
+        
+        # Color scheme
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")  # Blue
+        subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")  # Light Blue
+        even_row_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+        odd_row_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        
+        # Border styles
+        thin_border = Border(
+            left=Side(style='thin', color='000000'),
+            right=Side(style='thin', color='000000'),
+            top=Side(style='thin', color='000000'),
+            bottom=Side(style='thin', color='000000')
+        )
+        
+        thick_border = Border(
+            left=Side(style='medium', color='000000'),
+            right=Side(style='medium', color='000000'),
+            top=Side(style='medium', color='000000'),
+            bottom=Side(style='medium', color='000000')
+        )
+        
+        # Title Section
+        ws_comparison.merge_cells('A1:K1')
+        title_cell = ws_comparison['A1']
+        title_cell.value = "RESUME ANALYSIS REPORT - BATCH COMPARISON"
+        title_cell.font = title_font
+        title_cell.fill = header_fill
+        title_cell.alignment = Alignment(horizontal='center', vertical='center')
+        title_cell.border = thick_border
+        
+        # Report Info Section
+        info_row = 3
+        info_data = [
+            ("Report Date:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            ("Total Candidates:", len(analyses)),
+            ("AI Model:", f"Groq {GROQ_MODEL}"),
+            ("Job Description:", job_description[:100] + "..." if len(job_description) > 100 else job_description),
+        ]
+        
+        for i, (label, value) in enumerate(info_data):
+            ws_comparison.cell(row=info_row, column=1 + i*3, value=label).font = bold_font
+            ws_comparison.cell(row=info_row, column=2 + i*3, value=value).font = normal_font
+            if i < len(info_data) - 1:
+                ws_comparison.merge_cells(start_row=info_row, start_column=2 + i*3, end_row=info_row, end_column=3 + i*3)
+        
+        # Candidate Comparison Table Headers
+        start_row = 5
+        headers = [
+            ("Rank", 8),
+            ("Candidate Name", 25),
+            ("ATS Score", 12),
+            ("Recommendation", 20),
+            ("Skills Matched", 30),
+            ("Skills Missing", 30),
+            ("Experience Summary", 50),
+            ("Education Summary", 50),
+            ("Key Strengths", 30),
+            ("Areas for Improvement", 30),
+            ("File Name", 20)
+        ]
+        
+        # Write headers
+        for col, (header, width) in enumerate(headers, start=1):
+            cell = ws_comparison.cell(row=start_row, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = thin_border
+            ws_comparison.column_dimensions[get_column_letter(col)].width = width
+        
+        # Write candidate data
+        for idx, analysis in enumerate(analyses):
+            row = start_row + idx + 1
+            row_fill = even_row_fill if idx % 2 == 0 else odd_row_fill
+            
+            # Rank
+            cell = ws_comparison.cell(row=row, column=1, value=analysis.get('rank', '-'))
+            cell.font = bold_font
+            cell.alignment = Alignment(horizontal='center')
+            cell.fill = row_fill
+            cell.border = thin_border
+            
+            # Candidate Name
+            cell = ws_comparison.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
+            cell.font = normal_font
+            cell.fill = row_fill
+            cell.border = thin_border
+            
+            # ATS Score with color coding
+            score = analysis.get('overall_score', 0)
+            cell = ws_comparison.cell(row=row, column=3, value=score)
+            cell.alignment = Alignment(horizontal='center')
+            cell.fill = row_fill
+            cell.border = thin_border
+            if score >= 80:
+                cell.font = Font(bold=True, color="00B050", size=10)  # Green
+            elif score >= 60:
+                cell.font = Font(bold=True, color="FFC000", size=10)  # Orange
+            else:
+                cell.font = Font(bold=True, color="FF0000", size=10)  # Red
+            
+            # Recommendation
+            cell = ws_comparison.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
+            cell.font = normal_font
+            cell.fill = row_fill
+            cell.border = thin_border
+            
+            # Skills Matched (5-8 skills)
+            skills_matched = analysis.get('skills_matched', [])
+            cell = ws_comparison.cell(row=row, column=5, value="\n".join([f"• {skill}" for skill in skills_matched[:8]]))
+            cell.font = Font(size=9)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+            cell.fill = row_fill
+            cell.border = thin_border
+            
+            # Skills Missing (5-8 skills)
+            skills_missing = analysis.get('skills_missing', [])
+            cell = ws_comparison.cell(row=row, column=6, value="\n".join([f"• {skill}" for skill in skills_missing[:8]]))
+            cell.font = Font(size=9, color="FF0000")
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+            cell.fill = row_fill
+            cell.border = thin_border
+            
+            # Experience Summary (Complete sentences)
+            experience = analysis.get('experience_summary', 'No experience summary available.')
+            cell = ws_comparison.cell(row=row, column=7, value=experience)
+            cell.font = Font(size=9)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+            cell.fill = row_fill
+            cell.border = thin_border
+            ws_comparison.row_dimensions[row].height = 60
+            
+            # Education Summary (Complete sentences)
+            education = analysis.get('education_summary', 'No education summary available.')
+            cell = ws_comparison.cell(row=row, column=8, value=education)
+            cell.font = Font(size=9)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+            cell.fill = row_fill
+            cell.border = thin_border
+            
+            # Key Strengths (3 items)
+            strengths = analysis.get('key_strengths', [])
+            cell = ws_comparison.cell(row=row, column=9, value="\n".join([f"• {strength}" for strength in strengths[:3]]))
+            cell.font = Font(size=9, color="00B050")
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+            cell.fill = row_fill
+            cell.border = thin_border
+            
+            # Areas for Improvement (3 items)
+            improvements = analysis.get('areas_for_improvement', [])
+            cell = ws_comparison.cell(row=row, column=10, value="\n".join([f"• {area}" for area in improvements[:3]]))
+            cell.font = Font(size=9, color="FF6600")
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+            cell.fill = row_fill
+            cell.border = thin_border
+            
+            # File Name
+            cell = ws_comparison.cell(row=row, column=11, value=analysis.get('filename', 'N/A'))
+            cell.font = Font(size=9)
+            cell.fill = row_fill
+            cell.border = thin_border
+        
+        # Add summary statistics at the bottom
+        summary_row = start_row + len(analyses) + 2
+        avg_score = round(sum(a.get('overall_score', 0) for a in analyses) / len(analyses), 1) if analyses else 0
+        top_score = max((a.get('overall_score', 0) for a in analyses), default=0)
+        bottom_score = min((a.get('overall_score', 0) for a in analyses), default=0)
+        
+        summary_data = [
+            ("Average Score:", f"{avg_score}/100"),
+            ("Highest Score:", f"{top_score}/100"),
+            ("Lowest Score:", f"{bottom_score}/100"),
+            ("Analysis Date:", datetime.now().strftime("%Y-%m-%d"))
+        ]
+        
+        for i, (label, value) in enumerate(summary_data):
+            ws_comparison.cell(row=summary_row, column=1 + i*3, value=label).font = bold_font
+            ws_comparison.cell(row=summary_row, column=2 + i*3, value=value).font = bold_font
+            ws_comparison.cell(row=summary_row, column=2 + i*3).alignment = Alignment(horizontal='center')
+        
+        # ================== INDIVIDUAL CANDIDATE SHEETS ==================
+        for analysis in analyses:
+            candidate_name = analysis.get('candidate_name', f"Candidate_{analysis.get('rank', 'Unknown')}")
+            # Clean sheet name (remove invalid characters)
+            sheet_name = re.sub(r'[\\/*?:[\]]', '_', candidate_name[:31])
+            
+            # Create individual sheet for each candidate
+            ws_candidate = wb.create_sheet(title=sheet_name)
+            
+            # Define professional styles for candidate sheet
+            candidate_title_font = Font(bold=True, size=14, color="FFFFFF")
+            candidate_header_font = Font(bold=True, size=11, color="000000")
+            candidate_label_font = Font(bold=True, size=10, color="000000")
+            candidate_value_font = Font(size=10, color="000000")
+            
+            candidate_title_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            candidate_section_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+            
+            # Title Section
+            ws_candidate.merge_cells('A1:D1')
+            title_cell = ws_candidate['A1']
+            title_cell.value = f"CANDIDATE ANALYSIS REPORT"
+            title_cell.font = candidate_title_font
+            title_cell.fill = candidate_title_fill
+            title_cell.alignment = Alignment(horizontal='center', vertical='center')
+            title_cell.border = thick_border
+            
+            # Candidate Name and Rank
+            ws_candidate.merge_cells('A2:D2')
+            name_cell = ws_candidate['A2']
+            name_cell.value = f"Candidate: {candidate_name} | Rank: #{analysis.get('rank', 'N/A')}"
+            name_cell.font = Font(bold=True, size=12, color="000000")
+            name_cell.alignment = Alignment(horizontal='center')
+            name_cell.border = thin_border
+            
+            row = 4
+            
+            # Basic Information Section
+            ws_candidate.merge_cells(f'A{row}:D{row}')
+            section_cell = ws_candidate[f'A{row}']
+            section_cell.value = "BASIC INFORMATION"
+            section_cell.font = candidate_header_font
+            section_cell.fill = candidate_section_fill
+            section_cell.alignment = Alignment(horizontal='center')
+            section_cell.border = thin_border
+            row += 1
+            
+            basic_info = [
+                ("ATS Score:", f"{analysis.get('overall_score', 0)}/100"),
+                ("Recommendation:", analysis.get('recommendation', 'N/A')),
+                ("Original File:", analysis.get('filename', 'N/A')),
+                ("File Size:", analysis.get('file_size', 'N/A')),
+                ("Analysis Date:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                ("AI Model:", f"Groq {GROQ_MODEL}")
+            ]
+            
+            for i in range(0, len(basic_info), 2):
+                if i < len(basic_info):
+                    # Label
+                    label_cell = ws_candidate.cell(row=row, column=1, value=basic_info[i][0])
+                    label_cell.font = candidate_label_font
+                    label_cell.border = thin_border
+                    # Value
+                    value_cell = ws_candidate.cell(row=row, column=2, value=basic_info[i][1])
+                    value_cell.font = candidate_value_font
+                    value_cell.border = thin_border
+                
+                if i + 1 < len(basic_info):
+                    # Label
+                    label_cell = ws_candidate.cell(row=row, column=3, value=basic_info[i+1][0])
+                    label_cell.font = candidate_label_font
+                    label_cell.border = thin_border
+                    # Value
+                    value_cell = ws_candidate.cell(row=row, column=4, value=basic_info[i+1][1])
+                    value_cell.font = candidate_value_font
+                    value_cell.border = thin_border
+                
+                row += 1
+            
+            row += 1
+            
+            # Skills Analysis Section
+            ws_candidate.merge_cells(f'A{row}:D{row}')
+            section_cell = ws_candidate[f'A{row}']
+            section_cell.value = "SKILLS ANALYSIS (5-8 skills each)"
+            section_cell.font = candidate_header_font
+            section_cell.fill = candidate_section_fill
+            section_cell.alignment = Alignment(horizontal='center')
+            section_cell.border = thin_border
+            row += 1
+            
+            # Skills Matched Header
+            ws_candidate.merge_cells(f'A{row}:B{row}')
+            matched_header = ws_candidate[f'A{row}']
+            matched_header.value = "MATCHED SKILLS"
+            matched_header.font = Font(bold=True, size=10, color="00B050")
+            matched_header.alignment = Alignment(horizontal='center')
+            matched_header.border = thin_border
+            
+            # Skills Missing Header
+            ws_candidate.merge_cells(f'C{row}:D{row}')
+            missing_header = ws_candidate[f'C{row}']
+            missing_header.value = "MISSING SKILLS"
+            missing_header.font = Font(bold=True, size=10, color="FF0000")
+            missing_header.alignment = Alignment(horizontal='center')
+            missing_header.border = thin_border
+            row += 1
+            
+            # Skills lists
+            skills_matched = analysis.get('skills_matched', [])
+            skills_missing = analysis.get('skills_missing', [])
+            max_skills = max(len(skills_matched), len(skills_missing))
+            
+            for i in range(max_skills):
+                if i < len(skills_matched):
+                    cell = ws_candidate.cell(row=row, column=1, value=f"• {skills_matched[i]}")
+                    cell.font = Font(size=10, color="00B050")
+                    cell.border = thin_border
+                    cell = ws_candidate.cell(row=row, column=2, value="")
+                    cell.border = thin_border
+                
+                if i < len(skills_missing):
+                    cell = ws_candidate.cell(row=row, column=3, value=f"• {skills_missing[i]}")
+                    cell.font = Font(size=10, color="FF0000")
+                    cell.border = thin_border
+                    cell = ws_candidate.cell(row=row, column=4, value="")
+                    cell.border = thin_border
+                
+                row += 1
+            
+            row += 1
+            
+            # Experience Summary Section
+            ws_candidate.merge_cells(f'A{row}:D{row}')
+            section_cell = ws_candidate[f'A{row}']
+            section_cell.value = "EXPERIENCE SUMMARY (4-5 complete sentences)"
+            section_cell.font = candidate_header_font
+            section_cell.fill = candidate_section_fill
+            section_cell.alignment = Alignment(horizontal='center')
+            section_cell.border = thin_border
+            row += 1
+            
+            experience = analysis.get('experience_summary', 'No experience summary available.')
+            ws_candidate.merge_cells(f'A{row}:D{row}')
+            exp_cell = ws_candidate[f'A{row}']
+            exp_cell.value = experience
+            exp_cell.font = candidate_value_font
+            exp_cell.alignment = Alignment(wrap_text=True, vertical='top')
+            exp_cell.border = thin_border
+            ws_candidate.row_dimensions[row].height = 60
+            row += 1
+            
+            # Education Summary Section
+            ws_candidate.merge_cells(f'A{row}:D{row}')
+            section_cell = ws_candidate[f'A{row}']
+            section_cell.value = "EDUCATION SUMMARY (4-5 complete sentences)"
+            section_cell.font = candidate_header_font
+            section_cell.fill = candidate_section_fill
+            section_cell.alignment = Alignment(horizontal='center')
+            section_cell.border = thin_border
+            row += 1
+            
+            education = analysis.get('education_summary', 'No education summary available.')
+            ws_candidate.merge_cells(f'A{row}:D{row}')
+            edu_cell = ws_candidate[f'A{row}']
+            edu_cell.value = education
+            edu_cell.font = candidate_value_font
+            edu_cell.alignment = Alignment(wrap_text=True, vertical='top')
+            edu_cell.border = thin_border
+            ws_candidate.row_dimensions[row].height = 60
+            row += 1
+            
+            # Key Strengths Section
+            ws_candidate.merge_cells(f'A{row}:D{row}')
+            section_cell = ws_candidate[f'A{row}']
+            section_cell.value = "KEY STRENGTHS (3)"
+            section_cell.font = candidate_header_font
+            section_cell.fill = candidate_section_fill
+            section_cell.alignment = Alignment(horizontal='center')
+            section_cell.border = thin_border
+            row += 1
+            
+            strengths = analysis.get('key_strengths', [])
+            for strength in strengths[:3]:
+                ws_candidate.merge_cells(f'A{row}:D{row}')
+                cell = ws_candidate.cell(row=row, column=1, value=f"• {strength}")
+                cell.font = Font(size=10, color="00B050")
+                cell.alignment = Alignment(wrap_text=True)
+                cell.border = thin_border
+                row += 1
+            
+            if not strengths:
+                ws_candidate.merge_cells(f'A{row}:D{row}')
+                cell = ws_candidate.cell(row=row, column=1, value="No strengths identified")
+                cell.font = Font(size=10, color="666666")
+                cell.alignment = Alignment(horizontal='center')
+                cell.border = thin_border
+                row += 1
+            
+            row += 1
+            
+            # Areas for Improvement Section
+            ws_candidate.merge_cells(f'A{row}:D{row}')
+            section_cell = ws_candidate[f'A{row}']
+            section_cell.value = "AREAS FOR IMPROVEMENT (3)"
+            section_cell.font = candidate_header_font
+            section_cell.fill = candidate_section_fill
+            section_cell.alignment = Alignment(horizontal='center')
+            section_cell.border = thin_border
+            row += 1
+            
+            improvements = analysis.get('areas_for_improvement', [])
+            for area in improvements[:3]:
+                ws_candidate.merge_cells(f'A{row}:D{row}')
+                cell = ws_candidate.cell(row=row, column=1, value=f"• {area}")
+                cell.font = Font(size=10, color="FF6600")
+                cell.alignment = Alignment(wrap_text=True)
+                cell.border = thin_border
+                row += 1
+            
+            if not improvements:
+                ws_candidate.merge_cells(f'A{row}:D{row}')
+                cell = ws_candidate.cell(row=row, column=1, value="No areas for improvement identified")
+                cell.font = Font(size=10, color="666666")
+                cell.alignment = Alignment(horizontal='center')
+                cell.border = thin_border
+                row += 1
+            
+            # Set column widths for candidate sheet
+            ws_candidate.column_dimensions['A'].width = 20
+            ws_candidate.column_dimensions['B'].width = 25
+            ws_candidate.column_dimensions['C'].width = 20
+            ws_candidate.column_dimensions['D'].width = 25
+        
+        # Save the file
+        filepath = os.path.join(REPORTS_FOLDER, filename)
+        wb.save(filepath)
+        print(f"📊 Professional batch Excel report saved to: {filepath}")
+        return filepath
+        
+    except Exception as e:
+        print(f"❌ Error creating professional batch Excel report: {str(e)}")
+        traceback.print_exc()
+        # Create a minimal report as fallback
+        return create_minimal_batch_report(analyses, job_description, filename)
+
+def create_minimal_batch_report(analyses, job_description, filename):
+    """Create a minimal batch report as fallback"""
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Batch Analysis"
+        
+        # Title
+        ws['A1'] = "Batch Resume Analysis Report"
+        ws['A1'].font = Font(bold=True, size=16)
+        ws.merge_cells('A1:E1')
+        
+        ws['A2'] = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        ws['A3'] = f"Total Candidates: {len(analyses)}"
+        
+        # Headers
+        headers = ["Rank", "Candidate Name", "ATS Score", "Recommendation", "Skills Matched"]
+        for col, header in enumerate(headers, start=1):
+            cell = ws.cell(row=5, column=col, value=header)
+            cell.font = Font(bold=True)
+        
+        # Data
+        for idx, analysis in enumerate(analyses):
+            row = 6 + idx
+            ws.cell(row=row, column=1, value=analysis.get('rank', '-'))
+            ws.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
+            ws.cell(row=row, column=3, value=analysis.get('overall_score', 0))
+            ws.cell(row=row, column=4, value=analysis.get('recommendation', 'N/A'))
+            skills = analysis.get('skills_matched', [])
+            ws.cell(row=row, column=5, value=", ".join(skills[:8]))
+        
+        # Auto-size columns
+        for column in ws.columns:
+            max_length = 0
+            column_letter = get_column_letter(column[0].column)
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        filepath = os.path.join(REPORTS_FOLDER, filename)
+        wb.save(filepath)
+        print(f"📊 Minimal batch report saved to: {filepath}")
+        return filepath
+    except Exception as e:
+        print(f"❌ Error creating minimal batch report: {str(e)}")
+        traceback.print_exc()
+        return None
+
+def get_score_grade_text(score):
+    """Get text description for score"""
+    if score >= 90:
+        return "Excellent Match 🎯"
+    elif score >= 80:
+        return "Great Match ✨"
+    elif score >= 70:
+        return "Good Match 👍"
+    elif score >= 60:
+        return "Fair Match 📊"
+    else:
+        return "Needs Improvement 📈"
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_report(filename):
@@ -1541,13 +2200,43 @@ def download_report(filename):
         print(f"❌ Download error: {traceback.format_exc()}")
         return jsonify({'error': f'Download failed: {str(e)}'}), 500
 
+@app.route('/download-individual/<analysis_id>', methods=['GET'])
+def download_individual_report(analysis_id):
+    """Download individual candidate report"""
+    update_activity()
+    
+    try:
+        print(f"📥 Download individual request for analysis ID: {analysis_id}")
+        
+        filename = f"individual_{analysis_id}.xlsx"
+        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
+        
+        file_path = os.path.join(REPORTS_FOLDER, safe_filename)
+        
+        if not os.path.exists(file_path):
+            print(f"❌ Individual report not found: {file_path}")
+            return jsonify({'error': 'Individual report not found'}), 404
+        
+        download_name = f"candidate_report_{analysis_id}.xlsx"
+        
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=download_name,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        
+    except Exception as e:
+        print(f"❌ Individual download error: {traceback.format_exc()}")
+        return jsonify({'error': f'Download failed: {str(e)}'}), 500
+
 @app.route('/warmup', methods=['GET'])
 def force_warmup():
     """Force warm-up Groq API"""
     update_activity()
     
     try:
-        available_keys = len(GROQ_API_KEYS)
+        available_keys = sum(1 for key in GROQ_API_KEYS if key)
         if available_keys == 0:
             return jsonify({
                 'status': 'error',
@@ -1580,7 +2269,7 @@ def quick_check():
     update_activity()
     
     try:
-        available_keys = len(GROQ_API_KEYS)
+        available_keys = sum(1 for key in GROQ_API_KEYS if key)
         if available_keys == 0:
             return jsonify({
                 'available': False, 
@@ -1599,26 +2288,23 @@ def quick_check():
                 'model': GROQ_MODEL
             })
         
-        working_keys = 0
         for i, api_key in enumerate(GROQ_API_KEYS):
-            try:
-                start_time = time.time()
-                
-                response = call_groq_api_with_retry(
-                    prompt="Say 'ready'",
-                    api_key=api_key,
-                    key_index=i,
-                    max_tokens=10
-                )
-                
-                response_time = time.time() - start_time
-                
-                if isinstance(response, dict) and 'error' in response:
-                    continue
-                elif response and 'ready' in str(response).lower():
-                    working_keys += 1
+            if api_key and not key_usage[i]['cooling']:
+                try:
+                    start_time = time.time()
                     
-                    if working_keys == 1:
+                    response = call_groq_api(
+                        prompt="Say 'ready'",
+                        api_key=api_key,
+                        max_tokens=10,
+                        timeout=15
+                    )
+                    
+                    response_time = time.time() - start_time
+                    
+                    if isinstance(response, dict) and 'error' in response:
+                        continue
+                    elif response and 'ready' in str(response).lower():
                         return jsonify({
                             'available': True,
                             'response_time': f"{response_time:.2f}s",
@@ -1626,30 +2312,18 @@ def quick_check():
                             'model': GROQ_MODEL,
                             'warmup_complete': warmup_complete,
                             'available_keys': available_keys,
-                            'working_keys': working_keys,
                             'tested_key': f"Key {i+1}",
                             'max_batch_size': MAX_BATCH_SIZE,
-                            'processing_method': 'sequential_with_rate_limiting',
-                            'rate_limit': f"{RATE_LIMIT_CONFIG['requests_per_minute']} requests/min/key",
+                            'processing_method': 'round_robin_parallel',
                             'skills_analysis': '5-8 skills per category'
                         })
-            except:
-                continue
-        
-        if working_keys > 0:
-            return jsonify({
-                'available': True,
-                'reason': f'{working_keys}/{available_keys} keys working',
-                'available_keys': available_keys,
-                'working_keys': working_keys,
-                'warmup_complete': warmup_complete
-            })
+                except:
+                    continue
         
         return jsonify({
             'available': False,
-            'reason': 'All keys failed',
+            'reason': 'All keys failed or are cooling',
             'available_keys': available_keys,
-            'working_keys': 0,
             'warmup_complete': warmup_complete
         })
             
@@ -1658,7 +2332,7 @@ def quick_check():
         return jsonify({
             'available': False,
             'reason': error_msg[:100],
-            'available_keys': len(GROQ_API_KEYS),
+            'available_keys': sum(1 for key in GROQ_API_KEYS if key),
             'ai_provider': 'groq',
             'model': GROQ_MODEL,
             'warmup_complete': warmup_complete
@@ -1669,7 +2343,7 @@ def ping():
     """Simple ping to keep service awake"""
     update_activity()
     
-    available_keys = len(GROQ_API_KEYS)
+    available_keys = sum(1 for key in GROQ_API_KEYS if key)
     
     return jsonify({
         'status': 'pong',
@@ -1682,7 +2356,7 @@ def ping():
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
         'keep_alive_active': True,
         'max_batch_size': MAX_BATCH_SIZE,
-        'processing_method': 'sequential_with_rate_limiting',
+        'processing_method': 'round_robin_parallel',
         'skills_analysis': '5-8 skills per category'
     })
 
@@ -1699,10 +2373,12 @@ def health_check():
         key_status.append({
             'key': f'Key {i+1}',
             'configured': bool(api_key),
-            'status': 'configured'
+            'usage': key_usage[i]['count'],
+            'cooling': key_usage[i]['cooling'],
+            'last_used': key_usage[i]['last_used'].isoformat() if key_usage[i]['last_used'] else None
         })
     
-    available_keys = len(GROQ_API_KEYS)
+    available_keys = sum(1 for key in GROQ_API_KEYS if key)
     
     return jsonify({
         'status': 'Service is running', 
@@ -1716,24 +2392,21 @@ def health_check():
         'resume_previews_folder_exists': os.path.exists(RESUME_PREVIEW_FOLDER),
         'resume_previews_stored': len(resume_storage),
         'inactive_minutes': inactive_minutes,
-        'version': '2.7.0',
+        'version': '2.5.2',
         'key_status': key_status,
         'available_keys': available_keys,
         'configuration': {
             'max_batch_size': MAX_BATCH_SIZE,
-            'rate_limit': f"{RATE_LIMIT_CONFIG['requests_per_minute']} requests/min/key",
-            'max_concurrent_per_key': RATE_LIMIT_CONFIG['max_concurrent_per_key'],
-            'request_delay': RATE_LIMIT_CONFIG['request_delay'],
+            'max_concurrent_requests': MAX_CONCURRENT_REQUESTS,
             'max_retries': MAX_RETRIES,
             'min_skills_to_show': MIN_SKILLS_TO_SHOW,
             'max_skills_to_show': MAX_SKILLS_TO_SHOW
         },
-        'processing_method': 'sequential_with_rate_limiting',
-        'performance_target': '10 resumes in 30-40 seconds',
+        'processing_method': 'round_robin_parallel',
+        'performance_target': '10 resumes in 10-15 seconds',
         'skills_analysis': '5-8 skills per category',
-        'summaries': 'Experience summary only (no education)',
-        'insights': '3 strengths & 3 improvements',
-        'report_features': 'Filename first + Years of Experience column'
+        'summaries': 'Complete 4-5 sentences each',
+        'insights': '3 strengths & 3 improvements'
     })
 
 def cleanup_on_exit():
@@ -1743,6 +2416,7 @@ def cleanup_on_exit():
     print("\n🛑 Shutting down service...")
     
     try:
+        # Clean up temporary files
         for folder in [UPLOAD_FOLDER, RESUME_PREVIEW_FOLDER]:
             for filename in os.listdir(folder):
                 filepath = os.path.join(folder, filename)
@@ -1752,12 +2426,13 @@ def cleanup_on_exit():
     except:
         pass
 
+# Periodic cleanup
 def periodic_cleanup():
     """Periodically clean up old resume previews"""
     while service_running:
         try:
-            time.sleep(300)
-            # Cleanup logic here
+            time.sleep(300)  # Run every 5 minutes
+            cleanup_resume_previews()
         except Exception as e:
             print(f"⚠️ Periodic cleanup error: {str(e)}")
 
@@ -1765,37 +2440,41 @@ atexit.register(cleanup_on_exit)
 
 if __name__ == '__main__':
     print("\n" + "="*50)
-    print("🚀 Resume Analyzer Backend Starting (Groq with Rate Limiting)...")
+    print("🚀 Resume Analyzer Backend Starting (Groq Parallel)...")
     print("="*50)
     port = int(os.environ.get('PORT', 5002))
     print(f"📍 Server: http://localhost:{port}")
-    print(f"⚡ AI Provider: Groq (Advanced Rate Limiting)")
+    print(f"⚡ AI Provider: Groq (Parallel Processing)")
     print(f"🤖 Model: {GROQ_MODEL}")
     
-    available_keys = len(GROQ_API_KEYS)
-    print(f"🔑 API Keys: {available_keys} configured")
+    available_keys = sum(1 for key in GROQ_API_KEYS if key)
+    print(f"🔑 API Keys: {available_keys}/3 configured")
     
     for i, key in enumerate(GROQ_API_KEYS):
-        print(f"  Key {i+1}: ✅ Configured")
+        status = "✅ Configured" if key else "❌ Not configured"
+        print(f"  Key {i+1}: {status}")
     
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
     print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
-    print(f"✅ Advanced Rate Limiting: Enabled")
-    print(f"✅ Rate Limit: {RATE_LIMIT_CONFIG['requests_per_minute']} requests/min/key")
+    print(f"✅ Round-robin Parallel Processing: Enabled")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
-    print(f"✅ Processing Method: Sequential with delays")
-    print(f"✅ Request Delay: {RATE_LIMIT_CONFIG['request_delay']}s")
-    print(f"✅ Batch Delay: {RATE_LIMIT_CONFIG['batch_delay']}s")
-    print(f"✅ Max Retries: {MAX_RETRIES}")
-    print(f"✅ Exponential Backoff: Enabled")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
-    print(f"✅ Experience Summary Only: No education summary")
-    print(f"✅ Filename First: Filename column instead of candidate name")
-    print(f"✅ Years of Experience: New column added")
-    print(f"✅ Report Structure: 1 comparison sheet + individual candidate sheets")
-    print(f"✅ Performance: ~10 resumes in 30-40 seconds (safe mode)")
+    print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
+    print(f"✅ Insights: 3 strengths & 3 improvements")
+    print(f"✅ Resume Preview: Enabled with PDF conversion")
+    print(f"✅ Performance: ~10 resumes in 10-15 seconds")
+    print(f"✅ Excel Reports: Individual + Professional Batch")
     print("="*50 + "\n")
+    
+    # Check for required dependencies
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+        print("✅ PDF generation library available")
+    except ImportError:
+        print("⚠️  Warning: reportlab not installed. Install with: pip install reportlab")
+        print("   PDF previews for non-PDF files will be limited")
     
     if available_keys == 0:
         print("⚠️  WARNING: No Groq API keys found!")
