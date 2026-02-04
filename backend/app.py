@@ -1438,8 +1438,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
         info_data = [
             ("Report Date:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             ("Total Candidates:", len(analyses)),
-            ("AI Model:", f"Groq {GROQ_MODEL}"),
-            ("Job Description:", job_description[:100] + "..." if len(job_description) > 100 else job_description),
         ]
         
         for i, (label, value) in enumerate(info_data):
@@ -1484,10 +1482,10 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             cell.alignment = Alignment(horizontal='center')
             cell.fill = row_fill
             cell.border = thin_border
-            
-            # Candidate Name
-            cell = ws_comparison.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
-            cell.font = normal_font
+
+            # File Name
+            cell = ws_comparison.cell(row=row, column=11, value=analysis.get('filename', 'N/A'))
+            cell.font = Font(size=9)
             cell.fill = row_fill
             cell.border = thin_border
             
@@ -1535,13 +1533,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             cell.border = thin_border
             ws_comparison.row_dimensions[row].height = 60
             
-            # Education Summary (Complete sentences)
-            education = analysis.get('education_summary', 'No education summary available.')
-            cell = ws_comparison.cell(row=row, column=8, value=education)
-            cell.font = Font(size=9)
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
-            cell.fill = row_fill
-            cell.border = thin_border
             
             # Key Strengths (3 items)
             strengths = analysis.get('key_strengths', [])
@@ -1556,12 +1547,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             cell = ws_comparison.cell(row=row, column=10, value="\n".join([f"• {area}" for area in improvements[:3]]))
             cell.font = Font(size=9, color="FF6600")
             cell.alignment = Alignment(wrap_text=True, vertical='top')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            # File Name
-            cell = ws_comparison.cell(row=row, column=11, value=analysis.get('filename', 'N/A'))
-            cell.font = Font(size=9)
             cell.fill = row_fill
             cell.border = thin_border
         
