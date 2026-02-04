@@ -2016,7 +2016,7 @@ function App() {
                 <Brain className="logo-icon" />
               </div>
               <div className="logo-text">
-                <h1>AI Resume Analyzer (Groq)</h1>
+                <h1>AI Resume Analyzer </h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
                   <span className="groq-badge">⚡ Groq</span>
