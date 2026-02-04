@@ -1450,16 +1450,14 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
         start_row = 5
         headers = [
             ("Rank", 8),
-            ("Candidate Name", 25),
+            ("File Name", 20),
             ("ATS Score", 12),
             ("Recommendation", 20),
             ("Skills Matched", 30),
             ("Skills Missing", 30),
             ("Experience Summary", 50),
-            ("Education Summary", 50),
             ("Key Strengths", 30),
-            ("Areas for Improvement", 30),
-            ("File Name", 20)
+            ("Areas for Improvement", 30)
         ]
         
         # Write headers
