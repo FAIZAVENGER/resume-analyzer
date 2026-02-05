@@ -72,7 +72,7 @@ function App() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [aiStatus, setAiStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState('checking');
-  const [groqWarmup, setGroqWarmup] = useState(false);
+  const [openaiWarmup, setOpenaiWarmup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -83,7 +83,7 @@ function App() {
   const [serviceStatus, setServiceStatus] = useState({
     enhancedFallback: true,
     validKeys: 0,
-    totalKeys: 0
+    totalKeys: 1
   });
   
   // View management for navigation
@@ -166,15 +166,15 @@ function App() {
         setServiceStatus({
           enhancedFallback: healthResponse.data.ai_provider_configured || false,
           validKeys: availableKeys,
-          totalKeys: 3
+          totalKeys: 1
         });
         
-        setGroqWarmup(healthResponse.data.ai_warmup_complete || false);
+        setOpenaiWarmup(healthResponse.data.ai_warmup_complete || false);
         setModelInfo(healthResponse.data.model_info || { name: healthResponse.data.model });
         setBackendStatus('ready');
       }
       
-      await forceGroqWarmup();
+      await forceOpenAIWarmup();
       
       setupPeriodicChecks();
       
@@ -222,10 +222,10 @@ function App() {
     }
   };
 
-  const forceGroqWarmup = async () => {
+  const forceOpenAIWarmup = async () => {
     try {
       setAiStatus('warming');
-      setLoadingMessage('Warming up Groq API...');
+      setLoadingMessage('Warming up OpenAI API...');
       
       const response = await axios.get(`${API_BASE_URL}/warmup`, {
         timeout: 15000
@@ -233,26 +233,26 @@ function App() {
       
       if (response.data.warmup_complete) {
         setAiStatus('available');
-        setGroqWarmup(true);
-        console.log('✅ Groq API warmed up successfully');
+        setOpenaiWarmup(true);
+        console.log('✅ OpenAI API warmed up successfully');
       } else {
         setAiStatus('warming');
-        console.log('⚠️ Groq API still warming up');
+        console.log('⚠️ OpenAI API still warming up');
         
-        setTimeout(() => checkGroqStatus(), 5000);
+        setTimeout(() => checkOpenAIStatus(), 5000);
       }
       
       setLoadingMessage('');
       
     } catch (error) {
-      console.log('⚠️ Groq API warm-up failed:', error.message);
+      console.log('⚠️ OpenAI API warm-up failed:', error.message);
       setAiStatus('unavailable');
       
-      setTimeout(() => checkGroqStatus(), 3000);
+      setTimeout(() => checkOpenAIStatus(), 3000);
     }
   };
 
-  const checkGroqStatus = async () => {
+  const checkOpenAIStatus = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/quick-check`, {
         timeout: 10000
@@ -260,20 +260,20 @@ function App() {
       
       if (response.data.available) {
         setAiStatus('available');
-        setGroqWarmup(true);
+        setOpenaiWarmup(true);
         if (response.data.model) {
           setModelInfo(response.data.model_info || { name: response.data.model });
         }
       } else if (response.data.warmup_complete) {
         setAiStatus('available');
-        setGroqWarmup(true);
+        setOpenaiWarmup(true);
       } else {
         setAiStatus('warming');
-        setGroqWarmup(false);
+        setOpenaiWarmup(false);
       }
       
     } catch (error) {
-      console.log('Groq API status check failed:', error.message);
+      console.log('OpenAI API status check failed:', error.message);
       setAiStatus('unavailable');
     }
   };
@@ -285,7 +285,7 @@ function App() {
       });
       
       setBackendStatus('ready');
-      setGroqWarmup(response.data.ai_warmup_complete || false);
+      setOpenaiWarmup(response.data.ai_warmup_complete || false);
       if (response.data.model_info || response.data.model) {
         setModelInfo(response.data.model_info || { name: response.data.model });
       }
@@ -315,7 +315,7 @@ function App() {
     
     const statusCheckInterval = setInterval(() => {
       if (aiStatus === 'warming' || aiStatus === 'checking') {
-        checkGroqStatus();
+        checkOpenAIStatus();
       }
     }, 30000);
     
@@ -449,10 +449,10 @@ function App() {
         });
       }, 500);
 
-      if (aiStatus === 'available' && groqWarmup) {
-        setLoadingMessage('Groq AI analysis...');
+      if (aiStatus === 'available' && openaiWarmup) {
+        setLoadingMessage('OpenAI AI analysis...');
       } else {
-        setLoadingMessage('Enhanced analysis (Warming up Groq)...');
+        setLoadingMessage('Enhanced analysis (Warming up OpenAI)...');
       }
       setProgress(20);
 
@@ -499,9 +499,9 @@ function App() {
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('Rate limit reached. Groq API has limits. Please try again later.');
+        setError('Rate limit reached. OpenAI API has limits. Please try again later.');
       } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
-        setError('Groq API rate limit exceeded. Please wait a minute and try again.');
+        setError('OpenAI API rate limit exceeded. Please wait a minute and try again.');
         setAiStatus('unavailable');
       } else {
         setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
@@ -538,7 +538,7 @@ function App() {
     setLoadingMessage(`Starting batch analysis of ${resumeFiles.length} resumes...`);
 
     const formData = new FormData();
-    formData.append('jobDescription', jobDescription);
+    formData.append('jobDescription', job_description);
     
     resumeFiles.forEach((file, index) => {
       formData.append('resumes', file);
@@ -594,7 +594,7 @@ function App() {
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('Groq API rate limit reached. Please try again later or reduce batch size.');
+        setError('OpenAI API rate limit reached. Please try again later or reduce batch size.');
       } else {
         setError(err.response?.data?.error || 'An error occurred during batch analysis.');
       }
@@ -676,19 +676,19 @@ function App() {
   const getAiStatusMessage = () => {
     switch(aiStatus) {
       case 'checking': return { 
-        text: 'Checking Groq...', 
+        text: 'Checking OpenAI...', 
         color: '#ffd166', 
         icon: <Brain size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       case 'warming': return { 
-        text: 'Groq Warming', 
+        text: 'OpenAI Warming', 
         color: '#ff9800', 
         icon: <Thermometer size={16} />,
         bgColor: 'rgba(255, 152, 0, 0.1)'
       };
       case 'available': return { 
-        text: 'Groq Ready ⚡', 
+        text: 'OpenAI Ready ⚡', 
         color: '#00ff9d', 
         icon: <Brain size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
@@ -727,10 +727,10 @@ function App() {
 
   const handleForceWarmup = async () => {
     setIsWarmingUp(true);
-    setLoadingMessage('Forcing Groq API warm-up...');
+    setLoadingMessage('Forcing OpenAI API warm-up...');
     
     try {
-      await forceGroqWarmup();
+      await forceOpenAIWarmup();
       setLoadingMessage('');
     } catch (error) {
       console.log('Force warm-up failed:', error);
@@ -740,9 +740,9 @@ function App() {
   };
 
   const getModelDisplayName = (modelInfo) => {
-    if (!modelInfo) return 'Groq AI';
+    if (!modelInfo) return 'OpenAI GPT';
     if (typeof modelInfo === 'string') return modelInfo;
-    return modelInfo.name || 'Groq AI';
+    return modelInfo.name || 'OpenAI GPT';
   };
 
   // Format summary to show complete sentences
@@ -786,10 +786,10 @@ function App() {
             {aiStatusInfo.icon} {aiStatusInfo.text}
           </span>
           <span className="status-badge always-active">
-            <ZapIcon size={14} /> Parallel Processing
+            <Brain size={14} /> OpenAI GPT
           </span>
           <span className="status-badge keys">
-            <Key size={14} /> {getAvailableKeysCount()}/3 Keys
+            <Key size={14} /> {getAvailableKeysCount()}/1 Key
           </span>
           {modelInfo && (
             <span className="status-badge model">
@@ -995,7 +995,7 @@ function App() {
               <div className="stat-icon">
                 <Brain size={14} />
               </div>
-              <span>Groq AI analysis</span>
+              <span>OpenAI GPT analysis</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
@@ -1007,7 +1007,7 @@ function App() {
               <div className="stat-icon">
                 <Activity size={14} />
               </div>
-              <span>Parallel Processing</span>
+              <span>Sequential Processing</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
@@ -1083,7 +1083,7 @@ function App() {
               <span className="loading-message">{loadingMessage}</span>
               <span className="loading-subtext">
                 {batchMode 
-                  ? `Processing ${resumeFiles.length} resume(s) with ${getAvailableKeysCount()} keys...` 
+                  ? `Processing ${resumeFiles.length} resume(s) with OpenAI...` 
                   : `Using ${getModelDisplayName(modelInfo)}...`}
               </span>
             </div>
@@ -1093,9 +1093,9 @@ function App() {
               <span>•</span>
               <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
               <span>•</span>
-              <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
+              <span>OpenAI: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
               <span>•</span>
-              <span>Keys: {getAvailableKeysCount()}/3</span>
+              <span>Key: {getAvailableKeysCount()}/1</span>
               {modelInfo && (
                 <>
                   <span>•</span>
@@ -1112,7 +1112,7 @@ function App() {
             
             <div className="loading-note info">
               <Info size={14} />
-              <span>Groq AI offers 128K context length for comprehensive resume analysis</span>
+              <span>OpenAI GPT offers comprehensive resume analysis</span>
             </div>
           </div>
         </div>
@@ -1144,7 +1144,7 @@ function App() {
                 <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                 <span className="button-subtext">
                   {batchMode 
-                    ? `${resumeFiles.length} resume(s) • ${getAvailableKeysCount()} keys • ~${Math.ceil(resumeFiles.length/3)}s` 
+                    ? `${resumeFiles.length} resume(s) • 1 key • ~${Math.ceil(resumeFiles.length*3)}s` 
                     : `${getModelDisplayName(modelInfo)} • Single`}
                 </span>
               </div>
@@ -1159,15 +1159,15 @@ function App() {
           <>
             <div className="tip">
               <Brain size={16} />
-              <span>Groq AI with 128K context length for comprehensive analysis</span>
+              <span>OpenAI GPT with advanced analysis capabilities</span>
             </div>
             <div className="tip">
               <Activity size={16} />
-              <span>Process up to 10 resumes in parallel with {getAvailableKeysCount()} API keys</span>
+              <span>Process up to 10 resumes sequentially with OpenAI API</span>
             </div>
             <div className="tip">
               <Zap size={16} />
-              <span>~10-15 seconds for 10 resumes (Round-robin parallel processing)</span>
+              <span>~30-45 seconds for 10 resumes (Sequential processing)</span>
             </div>
             <div className="tip">
               <Download size={16} />
@@ -1178,11 +1178,11 @@ function App() {
           <>
             <div className="tip">
               <Brain size={16} />
-              <span>Groq AI offers ultra-fast resume analysis</span>
+              <span>OpenAI GPT offers comprehensive resume analysis</span>
             </div>
             <div className="tip">
               <Thermometer size={16} />
-              <span>Groq API automatically warms up when idle</span>
+              <span>OpenAI API automatically warms up when idle</span>
             </div>
             <div className="tip">
               <Activity size={16} />
@@ -1210,7 +1210,7 @@ function App() {
             <span>New Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>⚡ Resume Analysis Results (Groq)</h2>
+            <h2>⚡ Resume Analysis Results (OpenAI)</h2>
             <p>{analysis.candidate_name}</p>
           </div>
           <div className="navigation-actions">
@@ -1298,7 +1298,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                Powered by Groq AI
+                Powered by OpenAI
               </p>
             </div>
           </div>
@@ -1306,7 +1306,7 @@ function App() {
             <p className="recommendation-text">{analysis.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>Groq AI Analysis</span>
+              <span>OpenAI GPT Analysis</span>
             </div>
           </div>
         </div>
@@ -1503,7 +1503,7 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>⚡ Batch Analysis Results (Groq Parallel)</h2>
+          <h2>⚡ Batch Analysis Results (OpenAI)</h2>
           <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
         </div>
         <div className="navigation-actions">
@@ -1550,7 +1550,7 @@ function App() {
         
         <div className="stat-card">
           <div className="stat-icon success">
-            <Zap size={24} />
+            <Brain size={24} />
           </div>
           <div className="stat-content">
             <div className="stat-value">{batchAnalysis?.available_keys || 0}</div>
@@ -1780,7 +1780,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                Powered by Groq AI
+                Powered by OpenAI
               </p>
             </div>
           </div>
@@ -1788,7 +1788,7 @@ function App() {
             <p className="recommendation-text">{candidate.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>Groq AI Analysis</span>
+              <span>OpenAI GPT Analysis</span>
             </div>
           </div>
         </div>
@@ -2003,10 +2003,10 @@ function App() {
                 <Brain className="logo-icon" />
               </div>
               <div className="logo-text">
-                <h1>AI Resume Analyzer (Groq)</h1>
+                <h1>AI Resume Analyzer (OpenAI)</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
-                  <span className="groq-badge">⚡ Groq</span>
+                  <span className="openai-badge">🤖 OpenAI</span>
                   <span className="divider">•</span>
                   <span className="tagline">5-8 Skills Analysis • Experience Summary • Years of Experience</span>
                 </div>
@@ -2072,7 +2072,7 @@ function App() {
             {/* Key Status */}
             <div className="feature key-status">
               <Key size={16} />
-              <span>{getAvailableKeysCount()}/3 Keys</span>
+              <span>{getAvailableKeysCount()}/1 Key</span>
             </div>
             
             {/* Model Info */}
@@ -2137,7 +2137,7 @@ function App() {
             <div className="quota-panel-header">
               <div className="quota-title">
                 <Activity size={20} />
-                <h3>Groq Service Status</h3>
+                <h3>OpenAI Service Status</h3>
               </div>
               <button 
                 className="close-quota"
@@ -2157,17 +2157,17 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">Groq API Status</div>
+                <div className="summary-label">OpenAI API Status</div>
                 <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
-                  {aiStatus === 'available' ? '⚡ Ready' : 
+                  {aiStatus === 'available' ? '🤖 Ready' : 
                    aiStatus === 'warming' ? '🔥 Warming' : 
                    '⚠️ Enhanced Mode'}
                 </div>
               </div>
               <div className="summary-item">
                 <div className="summary-label">Available Keys</div>
-                <div className={`summary-value ${getAvailableKeysCount() >= 2 ? 'success' : getAvailableKeysCount() === 1 ? 'warning' : 'error'}`}>
-                  🔑 {getAvailableKeysCount()}/3 keys
+                <div className={`summary-value ${getAvailableKeysCount() >= 1 ? 'success' : 'error'}`}>
+                  🔑 {getAvailableKeysCount()}/1 key
                 </div>
               </div>
               <div className="summary-item">
@@ -2191,25 +2191,22 @@ function App() {
               <div className="summary-item">
                 <div className="summary-label">Performance</div>
                 <div className="summary-value success">
-                  🚀 ~10-15s for 10 resumes
+                  🚀 ~30-45s for 10 resumes
                 </div>
               </div>
             </div>
             
-            <div className="key-distribution">
-              <h4>Key Distribution Strategy</h4>
-              <div className="distribution-grid">
-                <div className="distribution-item">
-                  <div className="distribution-key">🔑 Key 1</div>
-                  <div className="distribution-resumes">Resumes: 1, 4, 7, 10</div>
-                </div>
-                <div className="distribution-item">
-                  <div className="distribution-key">🔑 Key 2</div>
-                  <div className="distribution-resumes">Resumes: 2, 5, 8</div>
-                </div>
-                <div className="distribution-item">
-                  <div className="distribution-key">🔑 Key 3</div>
-                  <div className="distribution-resumes">Resumes: 3, 6, 9</div>
+            <div className="processing-info">
+              <h4>Processing Method</h4>
+              <div className="processing-details">
+                <div className="processing-item">
+                  <div className="processing-icon">
+                    <Activity size={18} />
+                  </div>
+                  <div>
+                    <div className="processing-title">Sequential Processing</div>
+                    <div className="processing-desc">Resumes processed one by one with single OpenAI key</div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2248,11 +2245,11 @@ function App() {
               </div>
               <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
                 <div className="indicator-dot"></div>
-                <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
+                <span>OpenAI: {aiStatus === 'available' ? 'Ready 🤖' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
               </div>
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                <span>Keys: {getAvailableKeysCount()}/3</span>
+                <span>Key: {getAvailableKeysCount()}/1</span>
               </div>
               {modelInfo && (
                 <div className="status-indicator active">
@@ -2295,14 +2292,14 @@ function App() {
             {aiStatus === 'warming' && (
               <div className="wakeup-message">
                 <Thermometer size={16} />
-                <span>Groq API is warming up. This ensures high-quality responses.</span>
+                <span>OpenAI API is warming up. This ensures high-quality responses.</span>
               </div>
             )}
             
             {batchMode && getAvailableKeysCount() > 0 && (
-              <div className="multi-key-message">
-                <Zap size={16} />
-                <span>Parallel mode: Processing {resumeFiles.length} resumes with {getAvailableKeysCount()} keys</span>
+              <div className="sequential-message">
+                <Activity size={16} />
+                <span>Sequential mode: Processing {resumeFiles.length} resumes with OpenAI</span>
               </div>
             )}
           </div>
@@ -2318,24 +2315,24 @@ function App() {
           <div className="footer-brand">
             <div className="footer-logo">
               <Brain size={20} />
-              <span>AI Resume Analyzer (Groq)</span>
+              <span>AI Resume Analyzer (OpenAI)</span>
             </div>
             <p className="footer-tagline">
-              Groq AI • 3-key parallel processing • 5-8 skills analysis • Experience summary • Years of experience
+              OpenAI GPT • Sequential processing • 5-8 skills analysis • Experience summary • Years of experience
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
               <h4>Features</h4>
-              <a href="#">Groq AI</a>
+              <a href="#">OpenAI GPT</a>
               <a href="#">5-8 Skills Analysis</a>
               <a href="#">Experience Summary</a>
               <a href="#">Years of Experience</a>
             </div>
             <div className="footer-section">
               <h4>Service</h4>
-              <a href="#">3-Key Parallel</a>
+              <a href="#">1-Key Processing</a>
               <a href="#">Auto Warm-up</a>
               <a href="#">Excel Reports</a>
               <a href="#">Candidate Comparison</a>
@@ -2353,7 +2350,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + OpenAI. Excel reports with candidate name & experience summary.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
@@ -2361,11 +2358,11 @@ function App() {
             </span>
             <span className="stat">
               <Brain size={12} />
-              Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming'}
+              OpenAI: {aiStatus === 'available' ? 'Ready 🤖' : 'Warming'}
             </span>
             <span className="stat">
               <Key size={12} />
-              Keys: {getAvailableKeysCount()}/3
+              Key: {getAvailableKeysCount()}/1
             </span>
             <span className="stat">
               <Cpu size={12} />
