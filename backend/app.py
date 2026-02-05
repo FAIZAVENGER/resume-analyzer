@@ -359,7 +359,7 @@ def cleanup_orphaned_files():
     except Exception as e:
         print(f"⚠️ Error cleaning up orphaned files: {str(e)}")
 
-def call_openai_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45, retry_count=0):
+def call_openai_api(prompt, api_key, max_tokens=8000, temperature=0.1, timeout=45, retry_count=0):
     """Call OpenAI API with optimized settings"""
     if not api_key:
         print(f"❌ No OpenAI API key provided")
