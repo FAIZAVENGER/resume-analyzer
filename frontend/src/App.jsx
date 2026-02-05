@@ -83,7 +83,7 @@ function App() {
   const [serviceStatus, setServiceStatus] = useState({
     enhancedFallback: true,
     validKeys: 0,
-    totalKeys: 1
+    totalKeys: 0
   });
   
   // View management for navigation
@@ -166,7 +166,7 @@ function App() {
         setServiceStatus({
           enhancedFallback: healthResponse.data.ai_provider_configured || false,
           validKeys: availableKeys,
-          totalKeys: 1
+          totalKeys: 3
         });
         
         setOpenaiWarmup(healthResponse.data.ai_warmup_complete || false);
@@ -538,7 +538,7 @@ function App() {
     setLoadingMessage(`Starting batch analysis of ${resumeFiles.length} resumes...`);
 
     const formData = new FormData();
-    formData.append('jobDescription', job_description);
+    formData.append('jobDescription', jobDescription);
     
     resumeFiles.forEach((file, index) => {
       formData.append('resumes', file);
@@ -688,7 +688,7 @@ function App() {
         bgColor: 'rgba(255, 152, 0, 0.1)'
       };
       case 'available': return { 
-        text: 'OpenAI Ready ⚡', 
+        text: 'OpenAI Ready 🤖', 
         color: '#00ff9d', 
         icon: <Brain size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
@@ -740,9 +740,9 @@ function App() {
   };
 
   const getModelDisplayName = (modelInfo) => {
-    if (!modelInfo) return 'OpenAI GPT';
+    if (!modelInfo) return 'OpenAI GPT-4o-mini';
     if (typeof modelInfo === 'string') return modelInfo;
-    return modelInfo.name || 'OpenAI GPT';
+    return modelInfo.name || 'OpenAI GPT-4o-mini';
   };
 
   // Format summary to show complete sentences
@@ -786,10 +786,10 @@ function App() {
             {aiStatusInfo.icon} {aiStatusInfo.text}
           </span>
           <span className="status-badge always-active">
-            <Brain size={14} /> OpenAI GPT
+            <ZapIcon size={14} /> Parallel Processing
           </span>
           <span className="status-badge keys">
-            <Key size={14} /> {getAvailableKeysCount()}/1 Key
+            <Key size={14} /> {getAvailableKeysCount()}/3 Keys
           </span>
           {modelInfo && (
             <span className="status-badge model">
@@ -995,7 +995,7 @@ function App() {
               <div className="stat-icon">
                 <Brain size={14} />
               </div>
-              <span>OpenAI GPT analysis</span>
+              <span>OpenAI AI analysis</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
@@ -1007,7 +1007,7 @@ function App() {
               <div className="stat-icon">
                 <Activity size={14} />
               </div>
-              <span>Sequential Processing</span>
+              <span>Parallel Processing</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
@@ -1083,7 +1083,7 @@ function App() {
               <span className="loading-message">{loadingMessage}</span>
               <span className="loading-subtext">
                 {batchMode 
-                  ? `Processing ${resumeFiles.length} resume(s) with OpenAI...` 
+                  ? `Processing ${resumeFiles.length} resume(s) with ${getAvailableKeysCount()} keys...` 
                   : `Using ${getModelDisplayName(modelInfo)}...`}
               </span>
             </div>
@@ -1093,9 +1093,9 @@ function App() {
               <span>•</span>
               <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
               <span>•</span>
-              <span>OpenAI: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
+              <span>OpenAI: {aiStatus === 'available' ? 'Ready 🤖' : 'Warming...'}</span>
               <span>•</span>
-              <span>Key: {getAvailableKeysCount()}/1</span>
+              <span>Keys: {getAvailableKeysCount()}/3</span>
               {modelInfo && (
                 <>
                   <span>•</span>
@@ -1112,7 +1112,7 @@ function App() {
             
             <div className="loading-note info">
               <Info size={14} />
-              <span>OpenAI GPT offers comprehensive resume analysis</span>
+              <span>OpenAI offers comprehensive resume analysis with high accuracy</span>
             </div>
           </div>
         </div>
@@ -1144,7 +1144,7 @@ function App() {
                 <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                 <span className="button-subtext">
                   {batchMode 
-                    ? `${resumeFiles.length} resume(s) • 1 key • ~${Math.ceil(resumeFiles.length*3)}s` 
+                    ? `${resumeFiles.length} resume(s) • ${getAvailableKeysCount()} keys • ~${Math.ceil(resumeFiles.length/3)}s` 
                     : `${getModelDisplayName(modelInfo)} • Single`}
                 </span>
               </div>
@@ -1159,15 +1159,15 @@ function App() {
           <>
             <div className="tip">
               <Brain size={16} />
-              <span>OpenAI GPT with advanced analysis capabilities</span>
+              <span>OpenAI with GPT-4o-mini for comprehensive analysis</span>
             </div>
             <div className="tip">
               <Activity size={16} />
-              <span>Process up to 10 resumes sequentially with OpenAI API</span>
+              <span>Process up to 10 resumes in parallel with {getAvailableKeysCount()} API keys</span>
             </div>
             <div className="tip">
               <Zap size={16} />
-              <span>~30-45 seconds for 10 resumes (Sequential processing)</span>
+              <span>~10-15 seconds for 10 resumes (Round-robin parallel processing)</span>
             </div>
             <div className="tip">
               <Download size={16} />
@@ -1178,7 +1178,7 @@ function App() {
           <>
             <div className="tip">
               <Brain size={16} />
-              <span>OpenAI GPT offers comprehensive resume analysis</span>
+              <span>OpenAI offers high-quality resume analysis</span>
             </div>
             <div className="tip">
               <Thermometer size={16} />
@@ -1210,7 +1210,7 @@ function App() {
             <span>New Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>⚡ Resume Analysis Results (OpenAI)</h2>
+            <h2>🤖 Resume Analysis Results (OpenAI)</h2>
             <p>{analysis.candidate_name}</p>
           </div>
           <div className="navigation-actions">
@@ -1306,7 +1306,7 @@ function App() {
             <p className="recommendation-text">{analysis.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>OpenAI GPT Analysis</span>
+              <span>OpenAI Analysis</span>
             </div>
           </div>
         </div>
@@ -1503,7 +1503,7 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>⚡ Batch Analysis Results (OpenAI)</h2>
+          <h2>🤖 Batch Analysis Results (OpenAI Parallel)</h2>
           <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
         </div>
         <div className="navigation-actions">
@@ -1550,7 +1550,7 @@ function App() {
         
         <div className="stat-card">
           <div className="stat-icon success">
-            <Brain size={24} />
+            <Zap size={24} />
           </div>
           <div className="stat-content">
             <div className="stat-value">{batchAnalysis?.available_keys || 0}</div>
@@ -1788,7 +1788,7 @@ function App() {
             <p className="recommendation-text">{candidate.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>OpenAI GPT Analysis</span>
+              <span>OpenAI Analysis</span>
             </div>
           </div>
         </div>
@@ -2072,7 +2072,7 @@ function App() {
             {/* Key Status */}
             <div className="feature key-status">
               <Key size={16} />
-              <span>{getAvailableKeysCount()}/1 Key</span>
+              <span>{getAvailableKeysCount()}/3 Keys</span>
             </div>
             
             {/* Model Info */}
@@ -2166,8 +2166,8 @@ function App() {
               </div>
               <div className="summary-item">
                 <div className="summary-label">Available Keys</div>
-                <div className={`summary-value ${getAvailableKeysCount() >= 1 ? 'success' : 'error'}`}>
-                  🔑 {getAvailableKeysCount()}/1 key
+                <div className={`summary-value ${getAvailableKeysCount() >= 2 ? 'success' : getAvailableKeysCount() === 1 ? 'warning' : 'error'}`}>
+                  🔑 {getAvailableKeysCount()}/3 keys
                 </div>
               </div>
               <div className="summary-item">
@@ -2191,22 +2191,25 @@ function App() {
               <div className="summary-item">
                 <div className="summary-label">Performance</div>
                 <div className="summary-value success">
-                  🚀 ~30-45s for 10 resumes
+                  🚀 ~10-15s for 10 resumes
                 </div>
               </div>
             </div>
             
-            <div className="processing-info">
-              <h4>Processing Method</h4>
-              <div className="processing-details">
-                <div className="processing-item">
-                  <div className="processing-icon">
-                    <Activity size={18} />
-                  </div>
-                  <div>
-                    <div className="processing-title">Sequential Processing</div>
-                    <div className="processing-desc">Resumes processed one by one with single OpenAI key</div>
-                  </div>
+            <div className="key-distribution">
+              <h4>Key Distribution Strategy</h4>
+              <div className="distribution-grid">
+                <div className="distribution-item">
+                  <div className="distribution-key">🔑 Key 1</div>
+                  <div className="distribution-resumes">Resumes: 1, 4, 7, 10</div>
+                </div>
+                <div className="distribution-item">
+                  <div className="distribution-key">🔑 Key 2</div>
+                  <div className="distribution-resumes">Resumes: 2, 5, 8</div>
+                </div>
+                <div className="distribution-item">
+                  <div className="distribution-key">🔑 Key 3</div>
+                  <div className="distribution-resumes">Resumes: 3, 6, 9</div>
                 </div>
               </div>
             </div>
@@ -2249,7 +2252,7 @@ function App() {
               </div>
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                <span>Key: {getAvailableKeysCount()}/1</span>
+                <span>Keys: {getAvailableKeysCount()}/3</span>
               </div>
               {modelInfo && (
                 <div className="status-indicator active">
@@ -2297,9 +2300,9 @@ function App() {
             )}
             
             {batchMode && getAvailableKeysCount() > 0 && (
-              <div className="sequential-message">
-                <Activity size={16} />
-                <span>Sequential mode: Processing {resumeFiles.length} resumes with OpenAI</span>
+              <div className="multi-key-message">
+                <Zap size={16} />
+                <span>Parallel mode: Processing {resumeFiles.length} resumes with {getAvailableKeysCount()} keys</span>
               </div>
             )}
           </div>
@@ -2318,21 +2321,21 @@ function App() {
               <span>AI Resume Analyzer (OpenAI)</span>
             </div>
             <p className="footer-tagline">
-              OpenAI GPT • Sequential processing • 5-8 skills analysis • Experience summary • Years of experience
+              OpenAI GPT-4o-mini • 3-key parallel processing • 5-8 skills analysis • Experience summary • Years of experience
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
               <h4>Features</h4>
-              <a href="#">OpenAI GPT</a>
+              <a href="#">OpenAI AI</a>
               <a href="#">5-8 Skills Analysis</a>
               <a href="#">Experience Summary</a>
               <a href="#">Years of Experience</a>
             </div>
             <div className="footer-section">
               <h4>Service</h4>
-              <a href="#">1-Key Processing</a>
+              <a href="#">3-Key Parallel</a>
               <a href="#">Auto Warm-up</a>
               <a href="#">Excel Reports</a>
               <a href="#">Candidate Comparison</a>
@@ -2362,7 +2365,7 @@ function App() {
             </span>
             <span className="stat">
               <Key size={12} />
-              Key: {getAvailableKeysCount()}/1
+              Keys: {getAvailableKeysCount()}/3
             </span>
             <span className="stat">
               <Cpu size={12} />
