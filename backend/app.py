@@ -37,7 +37,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 # Configure OpenAI API Key (single key)
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_MODEL = "gpt-4-turbo-preview"  # or "gpt-3.5-turbo"
+OPENAI_MODEL = "gpt-5-mini"  # or "gpt-3.5-turbo"
 
 # Track API status
 warmup_complete = False
