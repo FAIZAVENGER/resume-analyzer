@@ -34,15 +34,10 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Configure Groq API Keys (3 keys for parallel processing)
-GROQ_API_KEYS = [
-    os.getenv('GROQ_API_KEY_1'),
-    os.getenv('GROQ_API_KEY_2'),
-    os.getenv('GROQ_API_KEY_3')
-]
-
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+# Configure OpenAI API Key (single key)
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_MODEL = "gpt-4-turbo-preview"  # or "gpt-3.5-turbo"
 
 # Track API status
 warmup_complete = False
@@ -65,7 +60,7 @@ score_cache = {}
 cache_lock = threading.Lock()
 
 # Batch processing configuration
-MAX_CONCURRENT_REQUESTS = 3
+MAX_CONCURRENT_REQUESTS = 1  # Reduced since we're using single key
 MAX_BATCH_SIZE = 10
 MIN_SKILLS_TO_SHOW = 5  # Minimum skills to show
 MAX_SKILLS_TO_SHOW = 8  # Maximum skills to show (5-8 range)
@@ -76,9 +71,9 @@ RETRY_DELAY_BASE = 3
 
 # Track key usage
 key_usage = {
-    0: {'count': 0, 'last_used': None, 'cooling': False},
-    1: {'count': 0, 'last_used': None, 'cooling': False},
-    2: {'count': 0, 'last_used': None, 'cooling': False}
+    'count': 0,
+    'last_used': None,
+    'cooling': False
 }
 
 # Memory optimization
@@ -92,31 +87,21 @@ def update_activity():
     global last_activity_time
     last_activity_time = datetime.now()
 
-def get_available_key(resume_index=None):
-    """Get the next available Groq API key using round-robin strategy"""
-    if not any(GROQ_API_KEYS):
-        return None, None
-    
-    if resume_index is not None:
-        key_index = resume_index % 3
-        if GROQ_API_KEYS[key_index]:
-            return GROQ_API_KEYS[key_index], key_index + 1
-    
-    for i, key in enumerate(GROQ_API_KEYS):
-        if key and not key_usage[i]['cooling']:
-            return key, i + 1
-    
-    return None, None
+def get_available_key():
+    """Get the OpenAI API key"""
+    if not OPENAI_API_KEY:
+        return None
+    return OPENAI_API_KEY
 
-def mark_key_cooling(key_index, duration=30):
-    """Mark a key as cooling down"""
-    key_usage[key_index]['cooling'] = True
-    key_usage[key_index]['last_used'] = datetime.now()
+def mark_key_cooling(duration=30):
+    """Mark the key as cooling down"""
+    key_usage['cooling'] = True
+    key_usage['last_used'] = datetime.now()
     
     def reset_cooling():
         time.sleep(duration)
-        key_usage[key_index]['cooling'] = False
-        print(f"✅ Key {key_index + 1} cooling completed")
+        key_usage['cooling'] = False
+        print(f"✅ OpenAI key cooling completed")
     
     threading.Thread(target=reset_cooling, daemon=True).start()
 
@@ -374,10 +359,10 @@ def cleanup_orphaned_files():
     except Exception as e:
         print(f"⚠️ Error cleaning up orphaned files: {str(e)}")
 
-def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45, retry_count=0):
-    """Call Groq API with optimized settings"""
+def call_openai_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45, retry_count=0):
+    """Call OpenAI API with optimized settings"""
     if not api_key:
-        print(f"❌ No Groq API key provided")
+        print(f"❌ No OpenAI API key provided")
         return {'error': 'no_api_key', 'status': 500}
     
     headers = {
@@ -386,7 +371,7 @@ def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45,
     }
     
     payload = {
-        'model': GROQ_MODEL,
+        'model': OPENAI_MODEL,
         'messages': [
             {
                 'role': 'user',
@@ -403,7 +388,7 @@ def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45,
     try:
         start_time = time.time()
         response = requests.post(
-            GROQ_API_URL,
+            OPENAI_API_URL,
             headers=headers,
             json=payload,
             timeout=timeout
@@ -415,134 +400,115 @@ def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45,
             data = response.json()
             if 'choices' in data and len(data['choices']) > 0:
                 result = data['choices'][0]['message']['content']
-                print(f"✅ Groq API response in {response_time:.2f}s")
+                print(f"✅ OpenAI API response in {response_time:.2f}s")
                 return result
             else:
-                print(f"❌ Unexpected Groq API response format")
+                print(f"❌ Unexpected OpenAI API response format")
                 return {'error': 'invalid_response', 'status': response.status_code}
         
         if response.status_code == 429:
-            print(f"❌ Rate limit exceeded for Groq API")
+            print(f"❌ Rate limit exceeded for OpenAI API")
             
             if retry_count < MAX_RETRIES:
                 wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(5, 10)
                 print(f"⏳ Rate limited, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
                 time.sleep(wait_time)
-                return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
+                return call_openai_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
             return {'error': 'rate_limit', 'status': 429}
         
         elif response.status_code == 503:
-            print(f"❌ Service unavailable for Groq API")
+            print(f"❌ Service unavailable for OpenAI API")
             
             if retry_count < 2:
                 wait_time = 15 + random.uniform(5, 10)
                 print(f"⏳ Service unavailable, retrying in {wait_time:.1f}s")
                 time.sleep(wait_time)
-                return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
+                return call_openai_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
             return {'error': 'service_unavailable', 'status': 503}
         
         else:
-            print(f"❌ Groq API Error {response.status_code}: {response.text[:100]}")
+            print(f"❌ OpenAI API Error {response.status_code}: {response.text[:100]}")
             return {'error': f'api_error_{response.status_code}', 'status': response.status_code}
             
     except requests.exceptions.Timeout:
-        print(f"❌ Groq API timeout after {timeout}s")
+        print(f"❌ OpenAI API timeout after {timeout}s")
         
         if retry_count < 2:
             wait_time = 10 + random.uniform(5, 10)
             print(f"⏳ Timeout, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/3)")
             time.sleep(wait_time)
-            return call_groq_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
+            return call_openai_api(prompt, api_key, max_tokens, temperature, timeout, retry_count + 1)
         return {'error': 'timeout', 'status': 408}
     
     except Exception as e:
-        print(f"❌ Groq API Exception: {str(e)}")
+        print(f"❌ OpenAI API Exception: {str(e)}")
         return {'error': str(e), 'status': 500}
 
-def warmup_groq_service():
-    """Warm up Groq service connection"""
+def warmup_openai_service():
+    """Warm up OpenAI service connection"""
     global warmup_complete
     
-    available_keys = sum(1 for key in GROQ_API_KEYS if key)
-    if available_keys == 0:
-        print("⚠️ Skipping Groq warm-up: No API keys configured")
+    if not OPENAI_API_KEY:
+        print("⚠️ Skipping OpenAI warm-up: No API key configured")
         return False
     
     try:
-        print(f"🔥 Warming up Groq connection with {available_keys} keys...")
-        print(f"📊 Using model: {GROQ_MODEL}")
+        print(f"🔥 Warming up OpenAI connection...")
+        print(f"📊 Using model: {OPENAI_MODEL}")
         
-        warmup_results = []
+        print(f"  Testing OpenAI API...")
+        start_time = time.time()
         
-        for i, api_key in enumerate(GROQ_API_KEYS):
-            if api_key:
-                print(f"  Testing key {i+1}...")
-                start_time = time.time()
-                
-                response = call_groq_api(
-                    prompt="Hello, are you ready? Respond with just 'ready'.",
-                    api_key=api_key,
-                    max_tokens=10,
-                    temperature=0.1,
-                    timeout=15
-                )
-                
-                if isinstance(response, dict) and 'error' in response:
-                    print(f"    ⚠️ Key {i+1} failed: {response.get('error')}")
-                    warmup_results.append(False)
-                elif response and 'ready' in response.lower():
-                    elapsed = time.time() - start_time
-                    print(f"    ✅ Key {i+1} warmed up in {elapsed:.2f}s")
-                    warmup_results.append(True)
-                else:
-                    print(f"    ⚠️ Key {i+1} warm-up failed: Unexpected response")
-                    warmup_results.append(False)
-                
-                if i < available_keys - 1:
-                    time.sleep(1)
+        response = call_openai_api(
+            prompt="Hello, are you ready? Respond with just 'ready'.",
+            api_key=OPENAI_API_KEY,
+            max_tokens=10,
+            temperature=0.1,
+            timeout=15
+        )
         
-        success = any(warmup_results)
-        if success:
-            print(f"✅ Groq service warmed up successfully")
+        if isinstance(response, dict) and 'error' in response:
+            print(f"    ⚠️ OpenAI API failed: {response.get('error')}")
+            return False
+        elif response and 'ready' in response.lower():
+            elapsed = time.time() - start_time
+            print(f"    ✅ OpenAI API warmed up in {elapsed:.2f}s")
             warmup_complete = True
+            return True
         else:
-            print(f"⚠️ Groq warm-up failed on all keys")
-            
-        return success
+            print(f"    ⚠️ OpenAI API warm-up failed: Unexpected response")
+            return False
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
-        threading.Timer(30.0, warmup_groq_service).start()
+        threading.Timer(30.0, warmup_openai_service).start()
         return False
 
 def keep_service_warm():
-    """Periodically send requests to keep Groq service responsive"""
+    """Periodically send requests to keep OpenAI service responsive"""
     global service_running
     
     while service_running:
         try:
             time.sleep(180)
             
-            available_keys = sum(1 for key in GROQ_API_KEYS if key)
-            if available_keys > 0 and warmup_complete:
-                print(f"♨️ Keeping Groq warm with {available_keys} keys...")
+            if OPENAI_API_KEY and warmup_complete:
+                print(f"♨️ Keeping OpenAI warm...")
                 
-                for i, api_key in enumerate(GROQ_API_KEYS):
-                    if api_key and not key_usage[i]['cooling']:
-                        try:
-                            response = call_groq_api(
-                                prompt="Ping - just say 'pong'",
-                                api_key=api_key,
-                                max_tokens=5,
-                                timeout=20
-                            )
-                            if response and 'pong' in str(response).lower():
-                                print(f"  ✅ Key {i+1} keep-alive successful")
-                            else:
-                                print(f"  ⚠️ Key {i+1} keep-alive got unexpected response")
-                        except Exception as e:
-                            print(f"  ⚠️ Key {i+1} keep-alive failed: {str(e)}")
-                        break
+                if not key_usage['cooling']:
+                    try:
+                        response = call_openai_api(
+                            prompt="Ping - just say 'pong'",
+                            api_key=OPENAI_API_KEY,
+                            max_tokens=5,
+                            timeout=20
+                        )
+                        if response and 'pong' in str(response).lower():
+                            print(f"  ✅ OpenAI keep-alive successful")
+                        else:
+                            print(f"  ⚠️ OpenAI keep-alive got unexpected response")
+                    except Exception as e:
+                        print(f"  ⚠️ OpenAI keep-alive failed: {str(e)}")
                     
         except Exception as e:
             print(f"⚠️ Keep-warm thread error: {str(e)}")
@@ -630,11 +596,11 @@ def extract_text_from_txt(file_path):
         print(f"❌ TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
-def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None, api_key=None, key_index=None):
-    """Use Groq API to analyze resume against job description"""
+def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None, api_key=None):
+    """Use OpenAI API to analyze resume against job description"""
     
     if not api_key:
-        print(f"❌ No Groq API key provided for analysis.")
+        print(f"❌ No OpenAI API key provided for analysis.")
         return generate_fallback_analysis(filename, "No API key available")
     
     resume_text = resume_text[:3000]  # Increased from 2500
@@ -676,10 +642,10 @@ IMPORTANT:
 7. Ensure proper sentence endings with periods."""
 
     try:
-        print(f"⚡ Sending to Groq API (Key {key_index})...")
+        print(f"⚡ Sending to OpenAI API...")
         start_time = time.time()
         
-        response = call_groq_api(
+        response = call_openai_api(
             prompt=prompt,
             api_key=api_key,
             max_tokens=1500,  # Increased to ensure complete sentences
@@ -689,16 +655,15 @@ IMPORTANT:
         
         if isinstance(response, dict) and 'error' in response:
             error_type = response.get('error')
-            print(f"❌ Groq API error: {error_type}")
+            print(f"❌ OpenAI API error: {error_type}")
             
             if 'rate_limit' in error_type or '429' in str(error_type):
-                if key_index:
-                    mark_key_cooling(key_index - 1, 30)
+                mark_key_cooling(30)
             
             return generate_fallback_analysis(filename, f"API Error: {error_type}", partial_success=True)
         
         elapsed_time = time.time() - start_time
-        print(f"✅ Groq API response in {elapsed_time:.2f} seconds (Key {key_index})")
+        print(f"✅ OpenAI API response in {elapsed_time:.2f} seconds")
         
         result_text = response.strip()
         
@@ -735,21 +700,21 @@ IMPORTANT:
             else:
                 analysis['overall_score'] = 70
         
-        analysis['ai_provider'] = "groq"
+        analysis['ai_provider'] = "openai"
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
-        analysis['ai_model'] = GROQ_MODEL
+        analysis['ai_model'] = OPENAI_MODEL
         analysis['response_time'] = f"{elapsed_time:.2f}s"
-        analysis['key_used'] = f"Key {key_index}"
+        analysis['key_used'] = "OpenAI Key"
         
         if analysis_id:
             analysis['analysis_id'] = analysis_id
         
-        print(f"✅ Analysis completed: {analysis['candidate_name']} (Score: {analysis['overall_score']}) (Key {key_index})")
+        print(f"✅ Analysis completed: {analysis['candidate_name']} (Score: {analysis['overall_score']})")
         
         return analysis
         
     except Exception as e:
-        print(f"❌ Groq Analysis Error: {str(e)}")
+        print(f"❌ OpenAI Analysis Error: {str(e)}")
         return generate_fallback_analysis(filename, f"Analysis Error: {str(e)[:100]}")
     
 def validate_analysis(analysis, filename):
@@ -863,25 +828,25 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "recommendation": "Needs Full Analysis",
             "key_strengths": ['Technical proficiency', 'Communication abilities', 'Problem-solving approach'],
             "areas_for_improvement": ['Advanced technical skills needed', 'Cloud platform experience required', 'Industry-specific knowledge'],
-            "ai_provider": "groq",
+            "ai_provider": "openai",
             "ai_status": "Partial",
-            "ai_model": GROQ_MODEL,
+            "ai_model": OPENAI_MODEL,
         }
     else:
         return {
             "candidate_name": candidate_name,
             "skills_matched": ['Basic Programming', 'Communication Skills', 'Problem Solving', 'Teamwork', 'Technical Knowledge', 'Learning Ability'],
             "skills_missing": ['Advanced Technical Skills', 'Industry Experience', 'Specialized Knowledge', 'Certifications', 'Project Management'],
-            "experience_summary": 'Professional experience analysis will be available once the Groq AI service is fully initialized. The candidate appears to have relevant background based on initial file processing. Additional details will be available with full analysis.',
+            "experience_summary": 'Professional experience analysis will be available once the OpenAI service is fully initialized. The candidate appears to have relevant background based on initial file processing. Additional details will be available with full analysis.',
             "education_summary": 'Educational background analysis will be available shortly upon service initialization. Academic qualifications assessment is pending full AI processing. Further details will be provided with complete analysis.',
             "years_of_experience": "Not specified",
             "overall_score": 50,
             "recommendation": "Service Warming Up - Please Retry",
             "key_strengths": ['Fast learning capability', 'Strong work ethic', 'Good communication'],
             "areas_for_improvement": ['Service initialization required', 'Complete analysis pending', 'Detailed assessment needed'],
-            "ai_provider": "groq",
+            "ai_provider": "openai",
             "ai_status": "Warming up",
-            "ai_model": GROQ_MODEL,
+            "ai_model": OPENAI_MODEL,
         }
 
 def process_single_resume(args):
@@ -903,11 +868,11 @@ def process_single_resume(args):
             print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
             time.sleep(delay)
         
-        api_key, key_index = get_available_key(index)
+        api_key = get_available_key()
         if not api_key:
             return {
                 'filename': resume_file.filename,
-                'error': 'No available API key',
+                'error': 'No OpenAI API key configured',
                 'status': 'failed',
                 'index': index
             }
@@ -949,16 +914,15 @@ def process_single_resume(args):
                 'index': index
             }
         
-        key_usage[key_index - 1]['count'] += 1
-        key_usage[key_index - 1]['last_used'] = datetime.now()
+        key_usage['count'] += 1
+        key_usage['last_used'] = datetime.now()
         
         analysis = analyze_resume_with_ai(
             resume_text, 
             job_description, 
             resume_file.filename, 
             analysis_id,
-            api_key,
-            key_index
+            api_key
         )
         
         analysis['filename'] = resume_file.filename
@@ -971,7 +935,7 @@ def process_single_resume(args):
         
         analysis['analysis_id'] = analysis_id
         analysis['processing_order'] = index + 1
-        analysis['key_used'] = f"Key {key_index}"
+        analysis['key_used'] = "OpenAI Key"
         
         # Add resume preview info
         analysis['resume_stored'] = preview_filename is not None
@@ -988,7 +952,7 @@ def process_single_resume(args):
         if os.path.exists(file_path):
             os.remove(file_path)
         
-        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')} (Key {key_index})")
+        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
         
         return {
             'analysis': analysis,
@@ -1016,13 +980,13 @@ def home():
     
     warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
     
-    available_keys = sum(1 for key in GROQ_API_KEYS if key)
+    available_keys = 1 if OPENAI_API_KEY else 0
     
     return '''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Resume Analyzer API (Groq Parallel)</title>
+        <title>Resume Analyzer API (OpenAI)</title>
         <style>
             body { font-family: Arial, sans-serif; margin: 40px; padding: 0; background: #f5f5f5; }
             .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
@@ -1039,8 +1003,8 @@ def home():
     </head>
     <body>
         <div class="container">
-            <h1>🚀 Resume Analyzer API (Groq Parallel)</h1>
-            <p>AI-powered resume analysis using Groq API with 3-key parallel processing</p>
+            <h1>🚀 Resume Analyzer API (OpenAI)</h1>
+            <p>AI-powered resume analysis using OpenAI API</p>
             
             <div class="status ''' + ('ready' if warmup_complete else 'warming') + '''">
                 <strong>Status:</strong> ''' + warmup_status + '''
@@ -1048,14 +1012,14 @@ def home():
             
             <div class="key-status">
                 <strong>API Keys:</strong>
-                ''' + ''.join([f'<span class="key ' + ('key-active' if key else 'key-inactive') + f'">Key {i+1}: ' + ('✅' if key else '❌') + '</span>' for i, key in enumerate(GROQ_API_KEYS)]) + '''
+                <span class="key ''' + ('key-active' if OPENAI_API_KEY else 'key-inactive') + '''">OpenAI Key: ''' + ('✅' if OPENAI_API_KEY else '❌') + '''</span>
             </div>
             
-            <p><strong>Model:</strong> ''' + GROQ_MODEL + '''</p>
-            <p><strong>API Provider:</strong> Groq (Parallel Processing)</p>
+            <p><strong>Model:</strong> ''' + OPENAI_MODEL + '''</p>
+            <p><strong>API Provider:</strong> OpenAI</p>
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
-            <p><strong>Processing:</strong> Round-robin with 3 keys, ~10-15s for 10 resumes</p>
-            <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/3</p>
+            <p><strong>Processing:</strong> Sequential with single OpenAI key</p>
+            <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/1</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
             
             <h2>📡 Endpoints</h2>
@@ -1072,7 +1036,7 @@ def home():
                 <strong>GET /ping</strong> - Keep-alive ping
             </div>
             <div class="endpoint">
-                <strong>GET /quick-check</strong> - Check Groq API availability
+                <strong>GET /quick-check</strong> - Check OpenAI API availability
             </div>
             <div class="endpoint">
                 <strong>GET /resume-preview/&lt;analysis_id&gt;</strong> - Get resume preview (PDF)
@@ -1126,9 +1090,9 @@ def analyze_resume():
             print(f"❌ File too large: {file_size} bytes")
             return jsonify({'error': 'File size too large. Maximum size is 15MB.'}), 400
         
-        api_key, key_index = get_available_key()
+        api_key = get_available_key()
         if not api_key:
-            return jsonify({'error': 'No available Groq API key'}), 500
+            return jsonify({'error': 'No OpenAI API key configured'}), 500
         
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
@@ -1151,7 +1115,7 @@ def analyze_resume():
         if resume_text.startswith('Error'):
             return jsonify({'error': resume_text}), 500
         
-        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key, key_index)
+        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key)
         
         # Create single Excel report
         excel_filename = f"single_analysis_{analysis_id}.xlsx"
@@ -1162,12 +1126,12 @@ def analyze_resume():
             os.remove(file_path)
         
         analysis['excel_filename'] = os.path.basename(excel_path)
-        analysis['ai_model'] = GROQ_MODEL
-        analysis['ai_provider'] = "groq"
+        analysis['ai_model'] = OPENAI_MODEL
+        analysis['ai_provider'] = "openai"
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['response_time'] = analysis.get('response_time', 'N/A')
         analysis['analysis_id'] = analysis_id
-        analysis['key_used'] = f"Key {key_index}"
+        analysis['key_used'] = "OpenAI Key"
         
         # Add resume preview info
         analysis['resume_stored'] = preview_filename is not None
@@ -1192,7 +1156,7 @@ def analyze_resume():
 
 @app.route('/analyze-batch', methods=['POST'])
 def analyze_resume_batch():
-    """Analyze multiple resumes with parallel processing"""
+    """Analyze multiple resumes with sequential processing"""
     update_activity()
     
     try:
@@ -1222,22 +1186,20 @@ def analyze_resume_batch():
             print(f"❌ Too many files: {len(resume_files)} (max: {MAX_BATCH_SIZE})")
             return jsonify({'error': f'Maximum {MAX_BATCH_SIZE} resumes allowed per batch'}), 400
         
-        available_keys = sum(1 for key in GROQ_API_KEYS if key)
-        if available_keys == 0:
-            print("❌ No Groq API keys configured")
-            return jsonify({'error': 'No Groq API keys configured'}), 500
+        if not OPENAI_API_KEY:
+            print("❌ No OpenAI API key configured")
+            return jsonify({'error': 'No OpenAI API key configured'}), 500
         
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         
-        for i in range(3):
-            key_usage[i]['count'] = 0
-            key_usage[i]['last_used'] = None
+        key_usage['count'] = 0
+        key_usage['last_used'] = None
         
         all_analyses = []
         errors = []
         
-        print(f"🔄 Processing {len(resume_files)} resumes with {available_keys} keys...")
-        print(f"📊 Using round-robin distribution: Key 1→1,4,7,10 | Key 2→2,5,8 | Key 3→3,6,9")
+        print(f"🔄 Processing {len(resume_files)} resumes with OpenAI API...")
+        print(f"📊 Using sequential processing with single OpenAI key")
         
         for index, resume_file in enumerate(resume_files):
             if resume_file.filename == '':
@@ -1262,9 +1224,8 @@ def analyze_resume_batch():
                     'index': result.get('index')
                 })
             
-            for i in range(3):
-                if key_usage[i]['count'] >= 4:
-                    mark_key_cooling(i, 15)
+            if key_usage['count'] >= 4:
+                mark_key_cooling(15)
         
         all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
         
@@ -1284,14 +1245,11 @@ def analyze_resume_batch():
                 # Create a minimal report
                 batch_excel_path = create_minimal_batch_report(all_analyses, job_description, excel_filename)
         
-        key_stats = []
-        for i in range(3):
-            if GROQ_API_KEYS[i]:
-                key_stats.append({
-                    'key': f'Key {i+1}',
-                    'used': key_usage[i]['count'],
-                    'status': 'cooling' if key_usage[i]['cooling'] else 'available'
-                })
+        key_stats = [{
+            'key': 'OpenAI Key',
+            'used': key_usage['count'],
+            'status': 'cooling' if key_usage['cooling'] else 'available'
+        }]
         
         total_time = time.time() - start_time
         batch_summary = {
@@ -1303,13 +1261,13 @@ def analyze_resume_batch():
             'batch_excel_filename': os.path.basename(batch_excel_path) if batch_excel_path else None,
             'batch_id': batch_id,
             'analyses': all_analyses,
-            'model_used': GROQ_MODEL,
-            'ai_provider': "groq",
+            'model_used': OPENAI_MODEL,
+            'ai_provider': "openai",
             'ai_status': "Warmed up" if warmup_complete else "Warming up",
             'processing_time': f"{total_time:.2f}s",
-            'processing_method': 'round_robin_parallel',
+            'processing_method': 'sequential',
             'key_statistics': key_stats,
-            'available_keys': available_keys,
+            'available_keys': 1 if OPENAI_API_KEY else 0,
             'success_rate': f"{(len(all_analyses) / len(resume_files)) * 100:.1f}%" if resume_files else "0%",
             'performance': f"{len(all_analyses)/total_time:.2f} resumes/second" if total_time > 0 else "N/A"
         }
@@ -1442,7 +1400,7 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         ws['B3'].font = value_font
         
         ws['A4'] = "AI Model:"
-        ws['B4'] = f"Groq {GROQ_MODEL}"
+        ws['B4'] = f"OpenAI {OPENAI_MODEL}"
         ws['A4'].font = label_font
         ws['B4'].font = value_font
         
@@ -1673,7 +1631,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
         info_data = [
             ("Report Date:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             ("Total Candidates:", len(analyses)),
-            ("AI Model:", f"Groq {GROQ_MODEL}"),
+            ("AI Model:", f"OpenAI {OPENAI_MODEL}"),
             ("Job Description:", job_description[:100] + "..." if len(job_description) > 100 else job_description),
         ]
         
@@ -1871,7 +1829,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ws_candidate['B3'].font = candidate_value_font
             
             ws_candidate['A4'] = "AI Model:"
-            ws_candidate['B4'] = f"Groq {GROQ_MODEL}"
+            ws_candidate['B4'] = f"OpenAI {OPENAI_MODEL}"
             ws_candidate['A4'].font = candidate_label_font
             ws_candidate['B4'].font = candidate_value_font
             
@@ -2198,27 +2156,26 @@ def download_single_report(analysis_id):
 
 @app.route('/warmup', methods=['GET'])
 def force_warmup():
-    """Force warm-up Groq API"""
+    """Force warm-up OpenAI API"""
     update_activity()
     
     try:
-        available_keys = sum(1 for key in GROQ_API_KEYS if key)
-        if available_keys == 0:
+        if not OPENAI_API_KEY:
             return jsonify({
                 'status': 'error',
-                'message': 'No Groq API keys configured',
+                'message': 'No OpenAI API key configured',
                 'warmup_complete': False
             })
         
-        result = warmup_groq_service()
+        result = warmup_openai_service()
         
         return jsonify({
             'status': 'success' if result else 'error',
-            'message': f'Groq API warmed up successfully with {available_keys} keys' if result else 'Warm-up failed',
+            'message': f'OpenAI API warmed up successfully' if result else 'Warm-up failed',
             'warmup_complete': warmup_complete,
-            'ai_provider': 'groq',
-            'model': GROQ_MODEL,
-            'available_keys': available_keys,
+            'ai_provider': 'openai',
+            'model': OPENAI_MODEL,
+            'available_keys': 1,
             'timestamp': datetime.now().isoformat()
         })
         
@@ -2231,15 +2188,14 @@ def force_warmup():
 
 @app.route('/quick-check', methods=['GET'])
 def quick_check():
-    """Quick endpoint to check if Groq API is responsive"""
+    """Quick endpoint to check if OpenAI API is responsive"""
     update_activity()
     
     try:
-        available_keys = sum(1 for key in GROQ_API_KEYS if key)
-        if available_keys == 0:
+        if not OPENAI_API_KEY:
             return jsonify({
                 'available': False, 
-                'reason': 'No Groq API keys configured',
+                'reason': 'No OpenAI API key configured',
                 'available_keys': 0,
                 'warmup_complete': warmup_complete
             })
@@ -2247,60 +2203,61 @@ def quick_check():
         if not warmup_complete:
             return jsonify({
                 'available': False,
-                'reason': 'Groq API is warming up',
-                'available_keys': available_keys,
+                'reason': 'OpenAI API is warming up',
+                'available_keys': 1,
                 'warmup_complete': False,
-                'ai_provider': 'groq',
-                'model': GROQ_MODEL
+                'ai_provider': 'openai',
+                'model': OPENAI_MODEL
             })
         
-        for i, api_key in enumerate(GROQ_API_KEYS):
-            if api_key and not key_usage[i]['cooling']:
-                try:
-                    start_time = time.time()
-                    
-                    response = call_groq_api(
-                        prompt="Say 'ready'",
-                        api_key=api_key,
-                        max_tokens=10,
-                        timeout=15
-                    )
-                    
-                    response_time = time.time() - start_time
-                    
-                    if isinstance(response, dict) and 'error' in response:
-                        continue
-                    elif response and 'ready' in str(response).lower():
-                        return jsonify({
-                            'available': True,
-                            'response_time': f"{response_time:.2f}s",
-                            'ai_provider': 'groq',
-                            'model': GROQ_MODEL,
-                            'warmup_complete': warmup_complete,
-                            'available_keys': available_keys,
-                            'tested_key': f"Key {i+1}",
-                            'max_batch_size': MAX_BATCH_SIZE,
-                            'processing_method': 'round_robin_parallel',
-                            'skills_analysis': '5-8 skills per category'
-                        })
-                except:
-                    continue
-        
-        return jsonify({
-            'available': False,
-            'reason': 'All keys failed or are cooling',
-            'available_keys': available_keys,
-            'warmup_complete': warmup_complete
-        })
+        try:
+            start_time = time.time()
+            
+            response = call_openai_api(
+                prompt="Say 'ready'",
+                api_key=OPENAI_API_KEY,
+                max_tokens=10,
+                timeout=15
+            )
+            
+            response_time = time.time() - start_time
+            
+            if isinstance(response, dict) and 'error' in response:
+                return jsonify({
+                    'available': False,
+                    'reason': response.get('error'),
+                    'available_keys': 1,
+                    'warmup_complete': warmup_complete
+                })
+            elif response and 'ready' in str(response).lower():
+                return jsonify({
+                    'available': True,
+                    'response_time': f"{response_time:.2f}s",
+                    'ai_provider': 'openai',
+                    'model': OPENAI_MODEL,
+                    'warmup_complete': warmup_complete,
+                    'available_keys': 1,
+                    'tested_key': "OpenAI Key",
+                    'max_batch_size': MAX_BATCH_SIZE,
+                    'processing_method': 'sequential',
+                    'skills_analysis': '5-8 skills per category'
+                })
+        except:
+            return jsonify({
+                'available': False,
+                'reason': 'OpenAI API failed',
+                'available_keys': 1,
+                'warmup_complete': warmup_complete
+            })
             
     except Exception as e:
         error_msg = str(e)
         return jsonify({
             'available': False,
             'reason': error_msg[:100],
-            'available_keys': sum(1 for key in GROQ_API_KEYS if key),
-            'ai_provider': 'groq',
-            'model': GROQ_MODEL,
+            'available_keys': 1 if OPENAI_API_KEY else 0,
+            'ai_provider': 'openai',
+            'model': OPENAI_MODEL,
             'warmup_complete': warmup_complete
         })
 
@@ -2309,20 +2266,20 @@ def ping():
     """Simple ping to keep service awake"""
     update_activity()
     
-    available_keys = sum(1 for key in GROQ_API_KEYS if key)
+    available_keys = 1 if OPENAI_API_KEY else 0
     
     return jsonify({
         'status': 'pong',
         'timestamp': datetime.now().isoformat(),
-        'service': 'resume-analyzer-groq',
-        'ai_provider': 'groq',
+        'service': 'resume-analyzer-openai',
+        'ai_provider': 'openai',
         'ai_warmup': warmup_complete,
-        'model': GROQ_MODEL,
+        'model': OPENAI_MODEL,
         'available_keys': available_keys,
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
         'keep_alive_active': True,
         'max_batch_size': MAX_BATCH_SIZE,
-        'processing_method': 'round_robin_parallel',
+        'processing_method': 'sequential',
         'skills_analysis': '5-8 skills per category',
         'years_experience': 'Included in analysis'
     })
@@ -2335,24 +2292,22 @@ def health_check():
     inactive_time = datetime.now() - last_activity_time
     inactive_minutes = int(inactive_time.total_seconds() / 60)
     
-    key_status = []
-    for i, api_key in enumerate(GROQ_API_KEYS):
-        key_status.append({
-            'key': f'Key {i+1}',
-            'configured': bool(api_key),
-            'usage': key_usage[i]['count'],
-            'cooling': key_usage[i]['cooling'],
-            'last_used': key_usage[i]['last_used'].isoformat() if key_usage[i]['last_used'] else None
-        })
+    key_status = [{
+        'key': 'OpenAI Key',
+        'configured': bool(OPENAI_API_KEY),
+        'usage': key_usage['count'],
+        'cooling': key_usage['cooling'],
+        'last_used': key_usage['last_used'].isoformat() if key_usage['last_used'] else None
+    }]
     
-    available_keys = sum(1 for key in GROQ_API_KEYS if key)
+    available_keys = 1 if OPENAI_API_KEY else 0
     
     return jsonify({
         'status': 'Service is running', 
         'timestamp': datetime.now().isoformat(),
-        'ai_provider': 'groq',
+        'ai_provider': 'openai',
         'ai_provider_configured': available_keys > 0,
-        'model': GROQ_MODEL,
+        'model': OPENAI_MODEL,
         'ai_warmup_complete': warmup_complete,
         'upload_folder_exists': os.path.exists(UPLOAD_FOLDER),
         'reports_folder_exists': os.path.exists(REPORTS_FOLDER),
@@ -2370,8 +2325,8 @@ def health_check():
             'max_skills_to_show': MAX_SKILLS_TO_SHOW,
             'years_experience_analysis': True
         },
-        'processing_method': 'round_robin_parallel',
-        'performance_target': '10 resumes in 10-15 seconds',
+        'processing_method': 'sequential',
+        'performance_target': '10 resumes in 30-45 seconds',
         'skills_analysis': '5-8 skills per category',
         'summaries': 'Complete 4-5 sentences each',
         'years_experience': 'Included in analysis',
@@ -2410,24 +2365,25 @@ atexit.register(cleanup_on_exit)
 
 if __name__ == '__main__':
     print("\n" + "="*50)
-    print("🚀 Resume Analyzer Backend Starting (Groq Parallel)...")
+    print("🚀 Resume Analyzer Backend Starting (OpenAI)...")
     print("="*50)
     port = int(os.environ.get('PORT', 5002))
     print(f"📍 Server: http://localhost:{port}")
-    print(f"⚡ AI Provider: Groq (Parallel Processing)")
-    print(f"🤖 Model: {GROQ_MODEL}")
+    print(f"⚡ AI Provider: OpenAI")
+    print(f"🤖 Model: {OPENAI_MODEL}")
     
-    available_keys = sum(1 for key in GROQ_API_KEYS if key)
-    print(f"🔑 API Keys: {available_keys}/3 configured")
+    available_keys = 1 if OPENAI_API_KEY else 0
+    print(f"🔑 API Keys: {available_keys}/1 configured")
     
-    for i, key in enumerate(GROQ_API_KEYS):
-        status = "✅ Configured" if key else "❌ Not configured"
-        print(f"  Key {i+1}: {status}")
+    if OPENAI_API_KEY:
+        print("  OpenAI Key: ✅ Configured")
+    else:
+        print("  OpenAI Key: ❌ Not configured")
     
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
     print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
-    print(f"✅ Round-robin Parallel Processing: Enabled")
+    print(f"✅ Sequential Processing: Enabled")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
     print(f"✅ Years of Experience: Included in analysis")
@@ -2435,7 +2391,7 @@ if __name__ == '__main__':
     print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
-    print(f"✅ Performance: ~10 resumes in 10-15 seconds")
+    print(f"✅ Performance: ~10 resumes in 30-45 seconds")
     print(f"✅ Excel Reports: Single & Batch with Individual Sheets")
     print("="*50 + "\n")
     
@@ -2448,15 +2404,15 @@ if __name__ == '__main__':
         print("⚠️  Warning: reportlab not installed. Install with: pip install reportlab")
         print("   PDF previews for non-PDF files will be limited")
     
-    if available_keys == 0:
-        print("⚠️  WARNING: No Groq API keys found!")
-        print("Please set GROQ_API_KEY_1, GROQ_API_KEY_2, GROQ_API_KEY_3 in environment variables")
-        print("Get free API keys from: https://console.groq.com")
+    if not OPENAI_API_KEY:
+        print("⚠️  WARNING: No OpenAI API key found!")
+        print("Please set OPENAI_API_KEY in environment variables")
+        print("Get API keys from: https://platform.openai.com/api-keys")
     
     gc.enable()
     
-    if available_keys > 0:
-        warmup_thread = threading.Thread(target=warmup_groq_service, daemon=True)
+    if OPENAI_API_KEY:
+        warmup_thread = threading.Thread(target=warmup_openai_service, daemon=True)
         warmup_thread.start()
         
         keep_warm_thread = threading.Thread(target=keep_service_warm, daemon=True)
