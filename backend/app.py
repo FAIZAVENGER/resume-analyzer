@@ -34,10 +34,15 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Configure OpenAI API Key (single key)
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+# Configure OpenAI API Keys (3 keys for parallel processing)
+OPENAI_API_KEYS = [
+    os.getenv('OPENAI_API_KEY_1'),
+    os.getenv('OPENAI_API_KEY_2'),
+    os.getenv('OPENAI_API_KEY_3')
+]
+
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_MODEL = "gpt-4-turbo-preview"  # or "gpt-3.5-turbo"
+OPENAI_MODEL = "gpt-4o-mini"  # Updated to GPT-4o-mini
 
 # Track API status
 warmup_complete = False
@@ -60,7 +65,7 @@ score_cache = {}
 cache_lock = threading.Lock()
 
 # Batch processing configuration
-MAX_CONCURRENT_REQUESTS = 1  # Reduced since we're using single key
+MAX_CONCURRENT_REQUESTS = 3
 MAX_BATCH_SIZE = 10
 MIN_SKILLS_TO_SHOW = 5  # Minimum skills to show
 MAX_SKILLS_TO_SHOW = 8  # Maximum skills to show (5-8 range)
@@ -71,9 +76,9 @@ RETRY_DELAY_BASE = 3
 
 # Track key usage
 key_usage = {
-    'count': 0,
-    'last_used': None,
-    'cooling': False
+    0: {'count': 0, 'last_used': None, 'cooling': False},
+    1: {'count': 0, 'last_used': None, 'cooling': False},
+    2: {'count': 0, 'last_used': None, 'cooling': False}
 }
 
 # Memory optimization
@@ -87,21 +92,31 @@ def update_activity():
     global last_activity_time
     last_activity_time = datetime.now()
 
-def get_available_key():
-    """Get the OpenAI API key"""
-    if not OPENAI_API_KEY:
-        return None
-    return OPENAI_API_KEY
+def get_available_key(resume_index=None):
+    """Get the next available OpenAI API key using round-robin strategy"""
+    if not any(OPENAI_API_KEYS):
+        return None, None
+    
+    if resume_index is not None:
+        key_index = resume_index % 3
+        if OPENAI_API_KEYS[key_index]:
+            return OPENAI_API_KEYS[key_index], key_index + 1
+    
+    for i, key in enumerate(OPENAI_API_KEYS):
+        if key and not key_usage[i]['cooling']:
+            return key, i + 1
+    
+    return None, None
 
-def mark_key_cooling(duration=30):
-    """Mark the key as cooling down"""
-    key_usage['cooling'] = True
-    key_usage['last_used'] = datetime.now()
+def mark_key_cooling(key_index, duration=30):
+    """Mark a key as cooling down"""
+    key_usage[key_index]['cooling'] = True
+    key_usage[key_index]['last_used'] = datetime.now()
     
     def reset_cooling():
         time.sleep(duration)
-        key_usage['cooling'] = False
-        print(f"✅ OpenAI key cooling completed")
+        key_usage[key_index]['cooling'] = False
+        print(f"✅ Key {key_index + 1} cooling completed")
     
     threading.Thread(target=reset_cooling, daemon=True).start()
 
@@ -448,36 +463,52 @@ def warmup_openai_service():
     """Warm up OpenAI service connection"""
     global warmup_complete
     
-    if not OPENAI_API_KEY:
-        print("⚠️ Skipping OpenAI warm-up: No API key configured")
+    available_keys = sum(1 for key in OPENAI_API_KEYS if key)
+    if available_keys == 0:
+        print("⚠️ Skipping OpenAI warm-up: No API keys configured")
         return False
     
     try:
-        print(f"🔥 Warming up OpenAI connection...")
+        print(f"🔥 Warming up OpenAI connection with {available_keys} keys...")
         print(f"📊 Using model: {OPENAI_MODEL}")
         
-        print(f"  Testing OpenAI API...")
-        start_time = time.time()
+        warmup_results = []
         
-        response = call_openai_api(
-            prompt="Hello, are you ready? Respond with just 'ready'.",
-            api_key=OPENAI_API_KEY,
-            max_tokens=10,
-            temperature=0.1,
-            timeout=15
-        )
+        for i, api_key in enumerate(OPENAI_API_KEYS):
+            if api_key:
+                print(f"  Testing key {i+1}...")
+                start_time = time.time()
+                
+                response = call_openai_api(
+                    prompt="Hello, are you ready? Respond with just 'ready'.",
+                    api_key=api_key,
+                    max_tokens=10,
+                    temperature=0.1,
+                    timeout=15
+                )
+                
+                if isinstance(response, dict) and 'error' in response:
+                    print(f"    ⚠️ Key {i+1} failed: {response.get('error')}")
+                    warmup_results.append(False)
+                elif response and 'ready' in response.lower():
+                    elapsed = time.time() - start_time
+                    print(f"    ✅ Key {i+1} warmed up in {elapsed:.2f}s")
+                    warmup_results.append(True)
+                else:
+                    print(f"    ⚠️ Key {i+1} warm-up failed: Unexpected response")
+                    warmup_results.append(False)
+                
+                if i < available_keys - 1:
+                    time.sleep(1)
         
-        if isinstance(response, dict) and 'error' in response:
-            print(f"    ⚠️ OpenAI API failed: {response.get('error')}")
-            return False
-        elif response and 'ready' in response.lower():
-            elapsed = time.time() - start_time
-            print(f"    ✅ OpenAI API warmed up in {elapsed:.2f}s")
+        success = any(warmup_results)
+        if success:
+            print(f"✅ OpenAI service warmed up successfully")
             warmup_complete = True
-            return True
         else:
-            print(f"    ⚠️ OpenAI API warm-up failed: Unexpected response")
-            return False
+            print(f"⚠️ OpenAI warm-up failed on all keys")
+            
+        return success
         
     except Exception as e:
         print(f"⚠️ Warm-up attempt failed: {str(e)}")
@@ -492,23 +523,26 @@ def keep_service_warm():
         try:
             time.sleep(180)
             
-            if OPENAI_API_KEY and warmup_complete:
-                print(f"♨️ Keeping OpenAI warm...")
+            available_keys = sum(1 for key in OPENAI_API_KEYS if key)
+            if available_keys > 0 and warmup_complete:
+                print(f"♨️ Keeping OpenAI warm with {available_keys} keys...")
                 
-                if not key_usage['cooling']:
-                    try:
-                        response = call_openai_api(
-                            prompt="Ping - just say 'pong'",
-                            api_key=OPENAI_API_KEY,
-                            max_tokens=5,
-                            timeout=20
-                        )
-                        if response and 'pong' in str(response).lower():
-                            print(f"  ✅ OpenAI keep-alive successful")
-                        else:
-                            print(f"  ⚠️ OpenAI keep-alive got unexpected response")
-                    except Exception as e:
-                        print(f"  ⚠️ OpenAI keep-alive failed: {str(e)}")
+                for i, api_key in enumerate(OPENAI_API_KEYS):
+                    if api_key and not key_usage[i]['cooling']:
+                        try:
+                            response = call_openai_api(
+                                prompt="Ping - just say 'pong'",
+                                api_key=api_key,
+                                max_tokens=5,
+                                timeout=20
+                            )
+                            if response and 'pong' in str(response).lower():
+                                print(f"  ✅ Key {i+1} keep-alive successful")
+                            else:
+                                print(f"  ⚠️ Key {i+1} keep-alive got unexpected response")
+                        except Exception as e:
+                            print(f"  ⚠️ Key {i+1} keep-alive failed: {str(e)}")
+                        break
                     
         except Exception as e:
             print(f"⚠️ Keep-warm thread error: {str(e)}")
@@ -596,7 +630,7 @@ def extract_text_from_txt(file_path):
         print(f"❌ TXT Error: {traceback.format_exc()}")
         return f"Error reading TXT: {str(e)}"
 
-def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None, api_key=None):
+def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis_id=None, api_key=None, key_index=None):
     """Use OpenAI API to analyze resume against job description"""
     
     if not api_key:
@@ -642,7 +676,7 @@ IMPORTANT:
 7. Ensure proper sentence endings with periods."""
 
     try:
-        print(f"⚡ Sending to OpenAI API...")
+        print(f"⚡ Sending to OpenAI API (Key {key_index})...")
         start_time = time.time()
         
         response = call_openai_api(
@@ -658,12 +692,13 @@ IMPORTANT:
             print(f"❌ OpenAI API error: {error_type}")
             
             if 'rate_limit' in error_type or '429' in str(error_type):
-                mark_key_cooling(30)
+                if key_index:
+                    mark_key_cooling(key_index - 1, 30)
             
             return generate_fallback_analysis(filename, f"API Error: {error_type}", partial_success=True)
         
         elapsed_time = time.time() - start_time
-        print(f"✅ OpenAI API response in {elapsed_time:.2f} seconds")
+        print(f"✅ OpenAI API response in {elapsed_time:.2f} seconds (Key {key_index})")
         
         result_text = response.strip()
         
@@ -704,12 +739,12 @@ IMPORTANT:
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['ai_model'] = OPENAI_MODEL
         analysis['response_time'] = f"{elapsed_time:.2f}s"
-        analysis['key_used'] = "OpenAI Key"
+        analysis['key_used'] = f"Key {key_index}"
         
         if analysis_id:
             analysis['analysis_id'] = analysis_id
         
-        print(f"✅ Analysis completed: {analysis['candidate_name']} (Score: {analysis['overall_score']})")
+        print(f"✅ Analysis completed: {analysis['candidate_name']} (Score: {analysis['overall_score']}) (Key {key_index})")
         
         return analysis
         
@@ -837,7 +872,7 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "candidate_name": candidate_name,
             "skills_matched": ['Basic Programming', 'Communication Skills', 'Problem Solving', 'Teamwork', 'Technical Knowledge', 'Learning Ability'],
             "skills_missing": ['Advanced Technical Skills', 'Industry Experience', 'Specialized Knowledge', 'Certifications', 'Project Management'],
-            "experience_summary": 'Professional experience analysis will be available once the OpenAI service is fully initialized. The candidate appears to have relevant background based on initial file processing. Additional details will be available with full analysis.',
+            "experience_summary": 'Professional experience analysis will be available once the OpenAI API service is fully initialized. The candidate appears to have relevant background based on initial file processing. Additional details will be available with full analysis.',
             "education_summary": 'Educational background analysis will be available shortly upon service initialization. Academic qualifications assessment is pending full AI processing. Further details will be provided with complete analysis.',
             "years_of_experience": "Not specified",
             "overall_score": 50,
@@ -868,11 +903,11 @@ def process_single_resume(args):
             print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
             time.sleep(delay)
         
-        api_key = get_available_key()
+        api_key, key_index = get_available_key(index)
         if not api_key:
             return {
                 'filename': resume_file.filename,
-                'error': 'No OpenAI API key configured',
+                'error': 'No available API key',
                 'status': 'failed',
                 'index': index
             }
@@ -914,15 +949,16 @@ def process_single_resume(args):
                 'index': index
             }
         
-        key_usage['count'] += 1
-        key_usage['last_used'] = datetime.now()
+        key_usage[key_index - 1]['count'] += 1
+        key_usage[key_index - 1]['last_used'] = datetime.now()
         
         analysis = analyze_resume_with_ai(
             resume_text, 
             job_description, 
             resume_file.filename, 
             analysis_id,
-            api_key
+            api_key,
+            key_index
         )
         
         analysis['filename'] = resume_file.filename
@@ -935,7 +971,7 @@ def process_single_resume(args):
         
         analysis['analysis_id'] = analysis_id
         analysis['processing_order'] = index + 1
-        analysis['key_used'] = "OpenAI Key"
+        analysis['key_used'] = f"Key {key_index}"
         
         # Add resume preview info
         analysis['resume_stored'] = preview_filename is not None
@@ -952,7 +988,7 @@ def process_single_resume(args):
         if os.path.exists(file_path):
             os.remove(file_path)
         
-        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')}")
+        print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score')} (Key {key_index})")
         
         return {
             'analysis': analysis,
@@ -980,13 +1016,13 @@ def home():
     
     warmup_status = "✅ Ready" if warmup_complete else "🔥 Warming up..."
     
-    available_keys = 1 if OPENAI_API_KEY else 0
+    available_keys = sum(1 for key in OPENAI_API_KEYS if key)
     
     return '''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Resume Analyzer API (OpenAI)</title>
+        <title>Resume Analyzer API (OpenAI Parallel)</title>
         <style>
             body { font-family: Arial, sans-serif; margin: 40px; padding: 0; background: #f5f5f5; }
             .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
@@ -1003,8 +1039,8 @@ def home():
     </head>
     <body>
         <div class="container">
-            <h1>🚀 Resume Analyzer API (OpenAI)</h1>
-            <p>AI-powered resume analysis using OpenAI API</p>
+            <h1>🚀 Resume Analyzer API (OpenAI Parallel)</h1>
+            <p>AI-powered resume analysis using OpenAI API with 3-key parallel processing</p>
             
             <div class="status ''' + ('ready' if warmup_complete else 'warming') + '''">
                 <strong>Status:</strong> ''' + warmup_status + '''
@@ -1012,14 +1048,14 @@ def home():
             
             <div class="key-status">
                 <strong>API Keys:</strong>
-                <span class="key ''' + ('key-active' if OPENAI_API_KEY else 'key-inactive') + '''">OpenAI Key: ''' + ('✅' if OPENAI_API_KEY else '❌') + '''</span>
+                ''' + ''.join([f'<span class="key ' + ('key-active' if key else 'key-inactive') + f'">Key {i+1}: ' + ('✅' if key else '❌') + '</span>' for i, key in enumerate(OPENAI_API_KEYS)]) + '''
             </div>
             
             <p><strong>Model:</strong> ''' + OPENAI_MODEL + '''</p>
-            <p><strong>API Provider:</strong> OpenAI</p>
+            <p><strong>API Provider:</strong> OpenAI (Parallel Processing)</p>
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
-            <p><strong>Processing:</strong> Sequential with single OpenAI key</p>
-            <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/1</p>
+            <p><strong>Processing:</strong> Round-robin with 3 keys, ~10-15s for 10 resumes</p>
+            <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/3</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
             
             <h2>📡 Endpoints</h2>
@@ -1090,9 +1126,9 @@ def analyze_resume():
             print(f"❌ File too large: {file_size} bytes")
             return jsonify({'error': 'File size too large. Maximum size is 15MB.'}), 400
         
-        api_key = get_available_key()
+        api_key, key_index = get_available_key()
         if not api_key:
-            return jsonify({'error': 'No OpenAI API key configured'}), 500
+            return jsonify({'error': 'No available OpenAI API key'}), 500
         
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
@@ -1115,7 +1151,7 @@ def analyze_resume():
         if resume_text.startswith('Error'):
             return jsonify({'error': resume_text}), 500
         
-        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key)
+        analysis = analyze_resume_with_ai(resume_text, job_description, resume_file.filename, analysis_id, api_key, key_index)
         
         # Create single Excel report
         excel_filename = f"single_analysis_{analysis_id}.xlsx"
@@ -1131,7 +1167,7 @@ def analyze_resume():
         analysis['ai_status'] = "Warmed up" if warmup_complete else "Warming up"
         analysis['response_time'] = analysis.get('response_time', 'N/A')
         analysis['analysis_id'] = analysis_id
-        analysis['key_used'] = "OpenAI Key"
+        analysis['key_used'] = f"Key {key_index}"
         
         # Add resume preview info
         analysis['resume_stored'] = preview_filename is not None
@@ -1156,7 +1192,7 @@ def analyze_resume():
 
 @app.route('/analyze-batch', methods=['POST'])
 def analyze_resume_batch():
-    """Analyze multiple resumes with sequential processing"""
+    """Analyze multiple resumes with parallel processing"""
     update_activity()
     
     try:
@@ -1186,20 +1222,22 @@ def analyze_resume_batch():
             print(f"❌ Too many files: {len(resume_files)} (max: {MAX_BATCH_SIZE})")
             return jsonify({'error': f'Maximum {MAX_BATCH_SIZE} resumes allowed per batch'}), 400
         
-        if not OPENAI_API_KEY:
-            print("❌ No OpenAI API key configured")
-            return jsonify({'error': 'No OpenAI API key configured'}), 500
+        available_keys = sum(1 for key in OPENAI_API_KEYS if key)
+        if available_keys == 0:
+            print("❌ No OpenAI API keys configured")
+            return jsonify({'error': 'No OpenAI API keys configured'}), 500
         
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         
-        key_usage['count'] = 0
-        key_usage['last_used'] = None
+        for i in range(3):
+            key_usage[i]['count'] = 0
+            key_usage[i]['last_used'] = None
         
         all_analyses = []
         errors = []
         
-        print(f"🔄 Processing {len(resume_files)} resumes with OpenAI API...")
-        print(f"📊 Using sequential processing with single OpenAI key")
+        print(f"🔄 Processing {len(resume_files)} resumes with {available_keys} keys...")
+        print(f"📊 Using round-robin distribution: Key 1→1,4,7,10 | Key 2→2,5,8 | Key 3→3,6,9")
         
         for index, resume_file in enumerate(resume_files):
             if resume_file.filename == '':
@@ -1224,8 +1262,9 @@ def analyze_resume_batch():
                     'index': result.get('index')
                 })
             
-            if key_usage['count'] >= 4:
-                mark_key_cooling(15)
+            for i in range(3):
+                if key_usage[i]['count'] >= 4:
+                    mark_key_cooling(i, 15)
         
         all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
         
@@ -1245,11 +1284,14 @@ def analyze_resume_batch():
                 # Create a minimal report
                 batch_excel_path = create_minimal_batch_report(all_analyses, job_description, excel_filename)
         
-        key_stats = [{
-            'key': 'OpenAI Key',
-            'used': key_usage['count'],
-            'status': 'cooling' if key_usage['cooling'] else 'available'
-        }]
+        key_stats = []
+        for i in range(3):
+            if OPENAI_API_KEYS[i]:
+                key_stats.append({
+                    'key': f'Key {i+1}',
+                    'used': key_usage[i]['count'],
+                    'status': 'cooling' if key_usage[i]['cooling'] else 'available'
+                })
         
         total_time = time.time() - start_time
         batch_summary = {
@@ -1265,9 +1307,9 @@ def analyze_resume_batch():
             'ai_provider': "openai",
             'ai_status': "Warmed up" if warmup_complete else "Warming up",
             'processing_time': f"{total_time:.2f}s",
-            'processing_method': 'sequential',
+            'processing_method': 'round_robin_parallel',
             'key_statistics': key_stats,
-            'available_keys': 1 if OPENAI_API_KEY else 0,
+            'available_keys': available_keys,
             'success_rate': f"{(len(all_analyses) / len(resume_files)) * 100:.1f}%" if resume_files else "0%",
             'performance': f"{len(all_analyses)/total_time:.2f} resumes/second" if total_time > 0 else "N/A"
         }
@@ -2160,10 +2202,11 @@ def force_warmup():
     update_activity()
     
     try:
-        if not OPENAI_API_KEY:
+        available_keys = sum(1 for key in OPENAI_API_KEYS if key)
+        if available_keys == 0:
             return jsonify({
                 'status': 'error',
-                'message': 'No OpenAI API key configured',
+                'message': 'No OpenAI API keys configured',
                 'warmup_complete': False
             })
         
@@ -2171,11 +2214,11 @@ def force_warmup():
         
         return jsonify({
             'status': 'success' if result else 'error',
-            'message': f'OpenAI API warmed up successfully' if result else 'Warm-up failed',
+            'message': f'OpenAI API warmed up successfully with {available_keys} keys' if result else 'Warm-up failed',
             'warmup_complete': warmup_complete,
             'ai_provider': 'openai',
             'model': OPENAI_MODEL,
-            'available_keys': 1,
+            'available_keys': available_keys,
             'timestamp': datetime.now().isoformat()
         })
         
@@ -2192,10 +2235,11 @@ def quick_check():
     update_activity()
     
     try:
-        if not OPENAI_API_KEY:
+        available_keys = sum(1 for key in OPENAI_API_KEYS if key)
+        if available_keys == 0:
             return jsonify({
                 'available': False, 
-                'reason': 'No OpenAI API key configured',
+                'reason': 'No OpenAI API keys configured',
                 'available_keys': 0,
                 'warmup_complete': warmup_complete
             })
@@ -2204,58 +2248,57 @@ def quick_check():
             return jsonify({
                 'available': False,
                 'reason': 'OpenAI API is warming up',
-                'available_keys': 1,
+                'available_keys': available_keys,
                 'warmup_complete': False,
                 'ai_provider': 'openai',
                 'model': OPENAI_MODEL
             })
         
-        try:
-            start_time = time.time()
-            
-            response = call_openai_api(
-                prompt="Say 'ready'",
-                api_key=OPENAI_API_KEY,
-                max_tokens=10,
-                timeout=15
-            )
-            
-            response_time = time.time() - start_time
-            
-            if isinstance(response, dict) and 'error' in response:
-                return jsonify({
-                    'available': False,
-                    'reason': response.get('error'),
-                    'available_keys': 1,
-                    'warmup_complete': warmup_complete
-                })
-            elif response and 'ready' in str(response).lower():
-                return jsonify({
-                    'available': True,
-                    'response_time': f"{response_time:.2f}s",
-                    'ai_provider': 'openai',
-                    'model': OPENAI_MODEL,
-                    'warmup_complete': warmup_complete,
-                    'available_keys': 1,
-                    'tested_key': "OpenAI Key",
-                    'max_batch_size': MAX_BATCH_SIZE,
-                    'processing_method': 'sequential',
-                    'skills_analysis': '5-8 skills per category'
-                })
-        except:
-            return jsonify({
-                'available': False,
-                'reason': 'OpenAI API failed',
-                'available_keys': 1,
-                'warmup_complete': warmup_complete
-            })
+        for i, api_key in enumerate(OPENAI_API_KEYS):
+            if api_key and not key_usage[i]['cooling']:
+                try:
+                    start_time = time.time()
+                    
+                    response = call_openai_api(
+                        prompt="Say 'ready'",
+                        api_key=api_key,
+                        max_tokens=10,
+                        timeout=15
+                    )
+                    
+                    response_time = time.time() - start_time
+                    
+                    if isinstance(response, dict) and 'error' in response:
+                        continue
+                    elif response and 'ready' in str(response).lower():
+                        return jsonify({
+                            'available': True,
+                            'response_time': f"{response_time:.2f}s",
+                            'ai_provider': 'openai',
+                            'model': OPENAI_MODEL,
+                            'warmup_complete': warmup_complete,
+                            'available_keys': available_keys,
+                            'tested_key': f"Key {i+1}",
+                            'max_batch_size': MAX_BATCH_SIZE,
+                            'processing_method': 'round_robin_parallel',
+                            'skills_analysis': '5-8 skills per category'
+                        })
+                except:
+                    continue
+        
+        return jsonify({
+            'available': False,
+            'reason': 'All keys failed or are cooling',
+            'available_keys': available_keys,
+            'warmup_complete': warmup_complete
+        })
             
     except Exception as e:
         error_msg = str(e)
         return jsonify({
             'available': False,
             'reason': error_msg[:100],
-            'available_keys': 1 if OPENAI_API_KEY else 0,
+            'available_keys': sum(1 for key in OPENAI_API_KEYS if key),
             'ai_provider': 'openai',
             'model': OPENAI_MODEL,
             'warmup_complete': warmup_complete
@@ -2266,7 +2309,7 @@ def ping():
     """Simple ping to keep service awake"""
     update_activity()
     
-    available_keys = 1 if OPENAI_API_KEY else 0
+    available_keys = sum(1 for key in OPENAI_API_KEYS if key)
     
     return jsonify({
         'status': 'pong',
@@ -2279,7 +2322,7 @@ def ping():
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
         'keep_alive_active': True,
         'max_batch_size': MAX_BATCH_SIZE,
-        'processing_method': 'sequential',
+        'processing_method': 'round_robin_parallel',
         'skills_analysis': '5-8 skills per category',
         'years_experience': 'Included in analysis'
     })
@@ -2292,15 +2335,17 @@ def health_check():
     inactive_time = datetime.now() - last_activity_time
     inactive_minutes = int(inactive_time.total_seconds() / 60)
     
-    key_status = [{
-        'key': 'OpenAI Key',
-        'configured': bool(OPENAI_API_KEY),
-        'usage': key_usage['count'],
-        'cooling': key_usage['cooling'],
-        'last_used': key_usage['last_used'].isoformat() if key_usage['last_used'] else None
-    }]
+    key_status = []
+    for i, api_key in enumerate(OPENAI_API_KEYS):
+        key_status.append({
+            'key': f'Key {i+1}',
+            'configured': bool(api_key),
+            'usage': key_usage[i]['count'],
+            'cooling': key_usage[i]['cooling'],
+            'last_used': key_usage[i]['last_used'].isoformat() if key_usage[i]['last_used'] else None
+        })
     
-    available_keys = 1 if OPENAI_API_KEY else 0
+    available_keys = sum(1 for key in OPENAI_API_KEYS if key)
     
     return jsonify({
         'status': 'Service is running', 
@@ -2325,8 +2370,8 @@ def health_check():
             'max_skills_to_show': MAX_SKILLS_TO_SHOW,
             'years_experience_analysis': True
         },
-        'processing_method': 'sequential',
-        'performance_target': '10 resumes in 30-45 seconds',
+        'processing_method': 'round_robin_parallel',
+        'performance_target': '10 resumes in 10-15 seconds',
         'skills_analysis': '5-8 skills per category',
         'summaries': 'Complete 4-5 sentences each',
         'years_experience': 'Included in analysis',
@@ -2365,25 +2410,24 @@ atexit.register(cleanup_on_exit)
 
 if __name__ == '__main__':
     print("\n" + "="*50)
-    print("🚀 Resume Analyzer Backend Starting (OpenAI)...")
+    print("🚀 Resume Analyzer Backend Starting (OpenAI Parallel)...")
     print("="*50)
     port = int(os.environ.get('PORT', 5002))
     print(f"📍 Server: http://localhost:{port}")
-    print(f"⚡ AI Provider: OpenAI")
+    print(f"⚡ AI Provider: OpenAI (Parallel Processing)")
     print(f"🤖 Model: {OPENAI_MODEL}")
     
-    available_keys = 1 if OPENAI_API_KEY else 0
-    print(f"🔑 API Keys: {available_keys}/1 configured")
+    available_keys = sum(1 for key in OPENAI_API_KEYS if key)
+    print(f"🔑 API Keys: {available_keys}/3 configured")
     
-    if OPENAI_API_KEY:
-        print("  OpenAI Key: ✅ Configured")
-    else:
-        print("  OpenAI Key: ❌ Not configured")
+    for i, key in enumerate(OPENAI_API_KEYS):
+        status = "✅ Configured" if key else "❌ Not configured"
+        print(f"  Key {i+1}: {status}")
     
     print(f"📁 Upload folder: {UPLOAD_FOLDER}")
     print(f"📁 Reports folder: {REPORTS_FOLDER}")
     print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
-    print(f"✅ Sequential Processing: Enabled")
+    print(f"✅ Round-robin Parallel Processing: Enabled")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
     print(f"✅ Years of Experience: Included in analysis")
@@ -2391,7 +2435,7 @@ if __name__ == '__main__':
     print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
-    print(f"✅ Performance: ~10 resumes in 30-45 seconds")
+    print(f"✅ Performance: ~10 resumes in 10-15 seconds")
     print(f"✅ Excel Reports: Single & Batch with Individual Sheets")
     print("="*50 + "\n")
     
@@ -2404,14 +2448,14 @@ if __name__ == '__main__':
         print("⚠️  Warning: reportlab not installed. Install with: pip install reportlab")
         print("   PDF previews for non-PDF files will be limited")
     
-    if not OPENAI_API_KEY:
-        print("⚠️  WARNING: No OpenAI API key found!")
-        print("Please set OPENAI_API_KEY in environment variables")
+    if available_keys == 0:
+        print("⚠️  WARNING: No OpenAI API keys found!")
+        print("Please set OPENAI_API_KEY_1, OPENAI_API_KEY_2, OPENAI_API_KEY_3 in environment variables")
         print("Get API keys from: https://platform.openai.com/api-keys")
     
     gc.enable()
     
-    if OPENAI_API_KEY:
+    if available_keys > 0:
         warmup_thread = threading.Thread(target=warmup_openai_service, daemon=True)
         warmup_thread.start()
         
