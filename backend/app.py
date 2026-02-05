@@ -37,7 +37,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 # Configure OpenAI API Key (single key)
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')  # Default to gpt-4o-mini
+OPENAI_MODEL = "gpt-4-turbo-preview"  # or "gpt-3.5-turbo"
 
 # Track API status
 warmup_complete = False
@@ -81,9 +81,6 @@ service_running = True
 
 # Resume storage tracking
 resume_storage = {}
-
-# Models that don't support max_tokens parameter
-MODELS_WITHOUT_MAX_TOKENS = ['gpt-5-mini', 'gpt-4.5-mini', 'gpt-5']
 
 def update_activity():
     """Update last activity timestamp"""
@@ -362,7 +359,7 @@ def cleanup_orphaned_files():
     except Exception as e:
         print(f"⚠️ Error cleaning up orphaned files: {str(e)}")
 
-def call_openai_api(prompt, api_key, max_tokens=8000, temperature=0.1, timeout=45, retry_count=0):
+def call_openai_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45, retry_count=0):
     """Call OpenAI API with optimized settings"""
     if not api_key:
         print(f"❌ No OpenAI API key provided")
@@ -373,7 +370,6 @@ def call_openai_api(prompt, api_key, max_tokens=8000, temperature=0.1, timeout=4
         'Content-Type': 'application/json'
     }
     
-    # Prepare payload based on model
     payload = {
         'model': OPENAI_MODEL,
         'messages': [
@@ -382,17 +378,12 @@ def call_openai_api(prompt, api_key, max_tokens=8000, temperature=0.1, timeout=4
                 'content': prompt
             }
         ],
+        'max_tokens': max_tokens,
         'temperature': temperature,
         'top_p': 0.9,
         'stream': False,
         'stop': None
     }
-    
-    # Only include max_tokens for models that support it
-    if OPENAI_MODEL not in MODELS_WITHOUT_MAX_TOKENS:
-        payload['max_tokens'] = max_tokens
-    else:
-        print(f"📝 Note: {OPENAI_MODEL} doesn't support max_tokens parameter")
     
     try:
         start_time = time.time()
@@ -436,8 +427,7 @@ def call_openai_api(prompt, api_key, max_tokens=8000, temperature=0.1, timeout=4
             return {'error': 'service_unavailable', 'status': 503}
         
         else:
-            error_text = response.text[:200] if response.text else 'No error text'
-            print(f"❌ OpenAI API Error {response.status_code}: {error_text}")
+            print(f"❌ OpenAI API Error {response.status_code}: {response.text[:100]}")
             return {'error': f'api_error_{response.status_code}', 'status': response.status_code}
             
     except requests.exceptions.Timeout:
@@ -469,11 +459,8 @@ def warmup_openai_service():
         print(f"  Testing OpenAI API...")
         start_time = time.time()
         
-        # Create a simple warmup prompt
-        warmup_prompt = "Hello, are you ready? Respond with just 'ready'."
-        
         response = call_openai_api(
-            prompt=warmup_prompt,
+            prompt="Hello, are you ready? Respond with just 'ready'.",
             api_key=OPENAI_API_KEY,
             max_tokens=10,
             temperature=0.1,
@@ -489,7 +476,7 @@ def warmup_openai_service():
             warmup_complete = True
             return True
         else:
-            print(f"    ⚠️ OpenAI API warm-up failed: Unexpected response: {response[:50] if response else 'None'}")
+            print(f"    ⚠️ OpenAI API warm-up failed: Unexpected response")
             return False
         
     except Exception as e:
@@ -658,13 +645,10 @@ IMPORTANT:
         print(f"⚡ Sending to OpenAI API...")
         start_time = time.time()
         
-        # Adjust max_tokens based on model
-        max_tokens_value = 8000 if OPENAI_MODEL not in MODELS_WITHOUT_MAX_TOKENS else None
-        
         response = call_openai_api(
             prompt=prompt,
             api_key=api_key,
-            max_tokens=max_tokens_value,
+            max_tokens=1500,  # Increased to ensure complete sentences
             temperature=0.1,
             timeout=60
         )
