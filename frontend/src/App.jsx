@@ -1649,7 +1649,6 @@ function App() {
                 View Full Details
                 <ChevronRight size={16} />
               </button>
-              {/* REMOVED: Individual download icon from each card */}
             </div>
           </div>
         ))}
@@ -1702,17 +1701,6 @@ function App() {
           <div className="navigation-title">
             <h2>Candidate Details</h2>
             <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
-          </div>
-          <div className="navigation-actions">
-            {candidate.analysis_id && (
-              <button 
-                className="download-report-btn" 
-                onClick={() => handleIndividualDownload(candidate.analysis_id)}
-              >
-                <DownloadCloud size={18} />
-                <span>Download Report</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -1971,19 +1959,10 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Candidate Analysis Complete</h3>
-            <p>Download individual report or go back to rankings</p>
+            <p>Go back to rankings or download the full batch report</p>
           </div>
           <div className="action-buttons">
-            {candidate.analysis_id && (
-              <button 
-                className="download-button" 
-                onClick={() => handleIndividualDownload(candidate.analysis_id)}
-              >
-                <DownloadCloud size={20} />
-                <span>Download Individual Report</span>
-              </button>
-            )}
-            <button className="reset-button" onClick={navigateBack}>
+            <button className="download-button" onClick={navigateBack}>
               <ArrowLeft size={20} />
               <span>Back to Rankings</span>
             </button>
