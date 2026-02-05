@@ -648,7 +648,7 @@ IMPORTANT:
         response = call_openai_api(
             prompt=prompt,
             api_key=api_key,
-            max_tokens=1500,  # Increased to ensure complete sentences
+            max_tokens=8000,  # Increased to ensure complete sentences
             temperature=0.1,
             timeout=60
         )
