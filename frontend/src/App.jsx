@@ -72,7 +72,7 @@ function App() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [aiStatus, setAiStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState('checking');
-  const [openaiWarmup, setOpenaiWarmup] = useState(false);
+  const [groqWarmup, setGroqWarmup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -169,12 +169,12 @@ function App() {
           totalKeys: 3
         });
         
-        setOpenaiWarmup(healthResponse.data.ai_warmup_complete || false);
+        setGroqWarmup(healthResponse.data.ai_warmup_complete || false);
         setModelInfo(healthResponse.data.model_info || { name: healthResponse.data.model });
         setBackendStatus('ready');
       }
       
-      await forceOpenAIWarmup();
+      await forceGroqWarmup();
       
       setupPeriodicChecks();
       
@@ -222,10 +222,10 @@ function App() {
     }
   };
 
-  const forceOpenAIWarmup = async () => {
+  const forceGroqWarmup = async () => {
     try {
       setAiStatus('warming');
-      setLoadingMessage('Warming up OpenAI API...');
+      setLoadingMessage('Warming up Groq API...');
       
       const response = await axios.get(`${API_BASE_URL}/warmup`, {
         timeout: 15000
@@ -233,26 +233,26 @@ function App() {
       
       if (response.data.warmup_complete) {
         setAiStatus('available');
-        setOpenaiWarmup(true);
-        console.log('✅ OpenAI API warmed up successfully');
+        setGroqWarmup(true);
+        console.log('✅ Groq API warmed up successfully');
       } else {
         setAiStatus('warming');
-        console.log('⚠️ OpenAI API still warming up');
+        console.log('⚠️ Groq API still warming up');
         
-        setTimeout(() => checkOpenAIStatus(), 5000);
+        setTimeout(() => checkGroqStatus(), 5000);
       }
       
       setLoadingMessage('');
       
     } catch (error) {
-      console.log('⚠️ OpenAI API warm-up failed:', error.message);
+      console.log('⚠️ Groq API warm-up failed:', error.message);
       setAiStatus('unavailable');
       
-      setTimeout(() => checkOpenAIStatus(), 3000);
+      setTimeout(() => checkGroqStatus(), 3000);
     }
   };
 
-  const checkOpenAIStatus = async () => {
+  const checkGroqStatus = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/quick-check`, {
         timeout: 10000
@@ -260,20 +260,20 @@ function App() {
       
       if (response.data.available) {
         setAiStatus('available');
-        setOpenaiWarmup(true);
+        setGroqWarmup(true);
         if (response.data.model) {
           setModelInfo(response.data.model_info || { name: response.data.model });
         }
       } else if (response.data.warmup_complete) {
         setAiStatus('available');
-        setOpenaiWarmup(true);
+        setGroqWarmup(true);
       } else {
         setAiStatus('warming');
-        setOpenaiWarmup(false);
+        setGroqWarmup(false);
       }
       
     } catch (error) {
-      console.log('OpenAI API status check failed:', error.message);
+      console.log('Groq API status check failed:', error.message);
       setAiStatus('unavailable');
     }
   };
@@ -285,7 +285,7 @@ function App() {
       });
       
       setBackendStatus('ready');
-      setOpenaiWarmup(response.data.ai_warmup_complete || false);
+      setGroqWarmup(response.data.ai_warmup_complete || false);
       if (response.data.model_info || response.data.model) {
         setModelInfo(response.data.model_info || { name: response.data.model });
       }
@@ -315,7 +315,7 @@ function App() {
     
     const statusCheckInterval = setInterval(() => {
       if (aiStatus === 'warming' || aiStatus === 'checking') {
-        checkOpenAIStatus();
+        checkGroqStatus();
       }
     }, 30000);
     
@@ -449,10 +449,10 @@ function App() {
         });
       }, 500);
 
-      if (aiStatus === 'available' && openaiWarmup) {
-        setLoadingMessage('OpenAI AI analysis...');
+      if (aiStatus === 'available' && groqWarmup) {
+        setLoadingMessage('Groq AI analysis...');
       } else {
-        setLoadingMessage('Enhanced analysis (Warming up OpenAI)...');
+        setLoadingMessage('Enhanced analysis (Warming up Groq)...');
       }
       setProgress(20);
 
@@ -499,9 +499,9 @@ function App() {
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('Rate limit reached. OpenAI API has limits. Please try again later.');
+        setError('Rate limit reached. Groq API has limits. Please try again later.');
       } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
-        setError('OpenAI API rate limit exceeded. Please wait a minute and try again.');
+        setError('Groq API rate limit exceeded. Please wait a minute and try again.');
         setAiStatus('unavailable');
       } else {
         setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
@@ -594,7 +594,7 @@ function App() {
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('OpenAI API rate limit reached. Please try again later or reduce batch size.');
+        setError('Groq API rate limit reached. Please try again later or reduce batch size.');
       } else {
         setError(err.response?.data?.error || 'An error occurred during batch analysis.');
       }
@@ -676,19 +676,19 @@ function App() {
   const getAiStatusMessage = () => {
     switch(aiStatus) {
       case 'checking': return { 
-        text: 'Checking OpenAI...', 
+        text: 'Checking Groq...', 
         color: '#ffd166', 
         icon: <Brain size={16} />,
         bgColor: 'rgba(255, 209, 102, 0.1)'
       };
       case 'warming': return { 
-        text: 'OpenAI Warming', 
+        text: 'Groq Warming', 
         color: '#ff9800', 
         icon: <Thermometer size={16} />,
         bgColor: 'rgba(255, 152, 0, 0.1)'
       };
       case 'available': return { 
-        text: 'OpenAI Ready 🤖', 
+        text: 'Groq Ready ⚡', 
         color: '#00ff9d', 
         icon: <Brain size={16} />,
         bgColor: 'rgba(0, 255, 157, 0.1)'
@@ -727,10 +727,10 @@ function App() {
 
   const handleForceWarmup = async () => {
     setIsWarmingUp(true);
-    setLoadingMessage('Forcing OpenAI API warm-up...');
+    setLoadingMessage('Forcing Groq API warm-up...');
     
     try {
-      await forceOpenAIWarmup();
+      await forceGroqWarmup();
       setLoadingMessage('');
     } catch (error) {
       console.log('Force warm-up failed:', error);
@@ -740,9 +740,9 @@ function App() {
   };
 
   const getModelDisplayName = (modelInfo) => {
-    if (!modelInfo) return 'OpenAI GPT-4o-mini';
+    if (!modelInfo) return 'Groq AI';
     if (typeof modelInfo === 'string') return modelInfo;
-    return modelInfo.name || 'OpenAI GPT-4o-mini';
+    return modelInfo.name || 'Groq AI';
   };
 
   // Format summary to show complete sentences
@@ -995,7 +995,7 @@ function App() {
               <div className="stat-icon">
                 <Brain size={14} />
               </div>
-              <span>OpenAI AI analysis</span>
+              <span>Groq AI analysis</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
@@ -1093,7 +1093,7 @@ function App() {
               <span>•</span>
               <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
               <span>•</span>
-              <span>OpenAI: {aiStatus === 'available' ? 'Ready 🤖' : 'Warming...'}</span>
+              <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
               <span>•</span>
               <span>Keys: {getAvailableKeysCount()}/3</span>
               {modelInfo && (
@@ -1112,7 +1112,7 @@ function App() {
             
             <div className="loading-note info">
               <Info size={14} />
-              <span>OpenAI offers comprehensive resume analysis with high accuracy</span>
+              <span>Groq AI offers 128K context length for comprehensive resume analysis</span>
             </div>
           </div>
         </div>
@@ -1159,7 +1159,7 @@ function App() {
           <>
             <div className="tip">
               <Brain size={16} />
-              <span>OpenAI with GPT-4o-mini for comprehensive analysis</span>
+              <span>Groq AI with 128K context length for comprehensive analysis</span>
             </div>
             <div className="tip">
               <Activity size={16} />
@@ -1178,11 +1178,11 @@ function App() {
           <>
             <div className="tip">
               <Brain size={16} />
-              <span>OpenAI offers high-quality resume analysis</span>
+              <span>Groq AI offers ultra-fast resume analysis</span>
             </div>
             <div className="tip">
               <Thermometer size={16} />
-              <span>OpenAI API automatically warms up when idle</span>
+              <span>Groq API automatically warms up when idle</span>
             </div>
             <div className="tip">
               <Activity size={16} />
@@ -1210,7 +1210,7 @@ function App() {
             <span>New Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>🤖 Resume Analysis Results (OpenAI)</h2>
+            <h2>⚡ Resume Analysis Results (Groq)</h2>
             <p>{analysis.candidate_name}</p>
           </div>
           <div className="navigation-actions">
@@ -1298,7 +1298,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                Powered by OpenAI
+                Powered by Groq AI
               </p>
             </div>
           </div>
@@ -1306,7 +1306,7 @@ function App() {
             <p className="recommendation-text">{analysis.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>OpenAI Analysis</span>
+              <span>Groq AI Analysis</span>
             </div>
           </div>
         </div>
@@ -1503,7 +1503,7 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>🤖 Batch Analysis Results (OpenAI Parallel)</h2>
+          <h2>⚡ Batch Analysis Results (Groq Parallel)</h2>
           <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
         </div>
         <div className="navigation-actions">
@@ -1780,7 +1780,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                Powered by OpenAI
+                Powered by Groq AI
               </p>
             </div>
           </div>
@@ -1788,7 +1788,7 @@ function App() {
             <p className="recommendation-text">{candidate.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>OpenAI Analysis</span>
+              <span>Groq AI Analysis</span>
             </div>
           </div>
         </div>
@@ -2003,10 +2003,10 @@ function App() {
                 <Brain className="logo-icon" />
               </div>
               <div className="logo-text">
-                <h1>AI Resume Analyzer (OpenAI)</h1>
+                <h1>AI Resume Analyzer (Groq)</h1>
                 <div className="logo-subtitle">
                   <span className="powered-by">Powered by</span>
-                  <span className="openai-badge">🤖 OpenAI</span>
+                  <span className="groq-badge">⚡ Groq</span>
                   <span className="divider">•</span>
                   <span className="tagline">5-8 Skills Analysis • Experience Summary • Years of Experience</span>
                 </div>
@@ -2137,7 +2137,7 @@ function App() {
             <div className="quota-panel-header">
               <div className="quota-title">
                 <Activity size={20} />
-                <h3>OpenAI Service Status</h3>
+                <h3>Groq Service Status</h3>
               </div>
               <button 
                 className="close-quota"
@@ -2157,9 +2157,9 @@ function App() {
                 </div>
               </div>
               <div className="summary-item">
-                <div className="summary-label">OpenAI API Status</div>
+                <div className="summary-label">Groq API Status</div>
                 <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
-                  {aiStatus === 'available' ? '🤖 Ready' : 
+                  {aiStatus === 'available' ? '⚡ Ready' : 
                    aiStatus === 'warming' ? '🔥 Warming' : 
                    '⚠️ Enhanced Mode'}
                 </div>
@@ -2248,7 +2248,7 @@ function App() {
               </div>
               <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
                 <div className="indicator-dot"></div>
-                <span>OpenAI: {aiStatus === 'available' ? 'Ready 🤖' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
+                <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
               </div>
               <div className="status-indicator active">
                 <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
@@ -2295,7 +2295,7 @@ function App() {
             {aiStatus === 'warming' && (
               <div className="wakeup-message">
                 <Thermometer size={16} />
-                <span>OpenAI API is warming up. This ensures high-quality responses.</span>
+                <span>Groq API is warming up. This ensures high-quality responses.</span>
               </div>
             )}
             
@@ -2318,17 +2318,17 @@ function App() {
           <div className="footer-brand">
             <div className="footer-logo">
               <Brain size={20} />
-              <span>AI Resume Analyzer (OpenAI)</span>
+              <span>AI Resume Analyzer (Groq)</span>
             </div>
             <p className="footer-tagline">
-              OpenAI GPT-4o-mini • 3-key parallel processing • 5-8 skills analysis • Experience summary • Years of experience
+              Groq AI • 3-key parallel processing • 5-8 skills analysis • Experience summary • Years of experience
             </p>
           </div>
           
           <div className="footer-links">
             <div className="footer-section">
               <h4>Features</h4>
-              <a href="#">OpenAI AI</a>
+              <a href="#">Groq AI</a>
               <a href="#">5-8 Skills Analysis</a>
               <a href="#">Experience Summary</a>
               <a href="#">Years of Experience</a>
@@ -2353,7 +2353,7 @@ function App() {
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + OpenAI. Excel reports with candidate name & experience summary.</p>
+          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
           <div className="footer-stats">
             <span className="stat">
               <CloudLightning size={12} />
@@ -2361,7 +2361,7 @@ function App() {
             </span>
             <span className="stat">
               <Brain size={12} />
-              OpenAI: {aiStatus === 'available' ? 'Ready 🤖' : 'Warming'}
+              Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming'}
             </span>
             <span className="stat">
               <Key size={12} />
