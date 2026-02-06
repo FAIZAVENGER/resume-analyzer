@@ -30,7 +30,6 @@ from pathlib import Path
 from queue import Queue, Empty
 from collections import defaultdict
 import uuid
-import redis
 import pickle
 
 # Load environment variables
