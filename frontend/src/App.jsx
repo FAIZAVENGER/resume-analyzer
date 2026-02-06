@@ -994,7 +994,6 @@ function App() {
           </div>
 
           {/* Demo Credentials */}
-          </div>
         </form>
 
         <div className="login-footer">
