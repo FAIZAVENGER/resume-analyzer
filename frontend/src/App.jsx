@@ -992,40 +992,6 @@ function App() {
               <span>Advanced Analytics</span>
             </div>
           </div>
-
-          {/* Demo Credentials */}
-          <div className="demo-credentials">
-            <p className="demo-title">Demo Credentials</p>
-            <div className="credentials-list">
-              <div className="credential">
-                <span className="cred-label">Email:</span>
-                <span className="cred-value">resugo@gmail.com</span>
-                <button
-                  type="button"
-                  className="copy-btn"
-                  onClick={() => {
-                    navigator.clipboard.writeText('resugo@gmail.com');
-                    alert('Email copied to clipboard!');
-                  }}
-                >
-                  <Copy size={14} />
-                </button>
-              </div>
-              <div className="credential">
-                <span className="cred-label">Password:</span>
-                <span className="cred-value">ResuGo#</span>
-                <button
-                  type="button"
-                  className="copy-btn"
-                  onClick={() => {
-                    navigator.clipboard.writeText('ResuGo#');
-                    alert('Password copied to clipboard!');
-                  }}
-                >
-                  <Copy size={14} />
-                </button>
-              </div>
-            </div>
           </div>
         </form>
 
