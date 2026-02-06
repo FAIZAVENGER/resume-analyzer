@@ -57,6 +57,7 @@ import {
 import './App.css';
 import logoImage from './leadsoc.png';
 import Login from './Login';
+import './Login.css';
 
 function App() {
   // Authentication state
