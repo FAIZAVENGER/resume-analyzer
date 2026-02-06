@@ -5987,59 +5987,7 @@ html, body {
   color: #00ff9d;
 }
 
-.demo-credentials {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  padding: 1.5rem;
-  margin-top: 1.5rem;
-}
 
-.demo-title {
-  font-size: 0.875rem;
-  color: #94a3b8;
-  margin-bottom: 1rem;
-  text-align: center;
-}
-
-.credentials-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.credential {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-}
-
-.cred-label {
-  font-size: 0.75rem;
-  color: #94a3b8;
-  min-width: 80px;
-}
-
-.cred-value {
-  font-family: 'Courier New', monospace;
-  font-size: 0.875rem;
-  color: #00ff9d;
-  flex: 1;
-  margin: 0 1rem;
-}
-
-.copy-btn {
-  background: rgba(0, 255, 157, 0.1);
-  border: 1px solid rgba(0, 255, 157, 0.3);
-  border-radius: 6px;
-  color: #00ff9d;
-  padding: 0.25rem 0.5rem;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
 
 .copy-btn:hover {
   background: rgba(0, 255, 157, 0.2);
