@@ -52,7 +52,17 @@ import {
   Potato, Tomato, Pumpkin, Radish,
   HotPepper, Garlic, Basil, Sprout,
   Bone, Skull, Ghost, Smile, Frown,
-  Meh, Laugh, Angry, Surprised
+  Meh, Laugh, Angry, Surprised,
+  Users as UsersIcon,
+  Cpu as CpuIcon,
+  ZapOff,
+  Server as ServerIcon,
+  Network,
+  GitPullRequest,
+  Layers,
+  PieChart,
+  Activity as ActivityIcon,
+  Target as TargetIcon
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -86,6 +96,13 @@ function App() {
     totalKeys: 0
   });
   
+  // Multi-user states
+  const [queueStatus, setQueueStatus] = useState(null);
+  const [systemStatus, setSystemStatus] = useState(null);
+  const [batchId, setBatchId] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
+  const [checkingQueue, setCheckingQueue] = useState(false);
+  
   // View management for navigation
   const [currentView, setCurrentView] = useState('main');
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(null);
@@ -95,6 +112,7 @@ function App() {
   const keepAliveInterval = useRef(null);
   const backendWakeInterval = useRef(null);
   const warmupCheckInterval = useRef(null);
+  const queueCheckInterval = useRef(null);
 
   // Navigation functions
   const navigateToSingleResults = () => {
@@ -120,6 +138,9 @@ function App() {
     setResumeFile(null);
     setResumeFiles([]);
     setJobDescription('');
+    setQueueStatus(null);
+    setBatchId(null);
+    setSessionId(null);
     window.scrollTo(0, 0);
   };
 
@@ -145,6 +166,9 @@ function App() {
       }
       if (warmupCheckInterval.current) {
         clearInterval(warmupCheckInterval.current);
+      }
+      if (queueCheckInterval.current) {
+        clearInterval(queueCheckInterval.current);
       }
     };
   }, []);
@@ -172,6 +196,9 @@ function App() {
         setGroqWarmup(healthResponse.data.ai_warmup_complete || false);
         setModelInfo(healthResponse.data.model_info || { name: healthResponse.data.model });
         setBackendStatus('ready');
+        
+        // Get system status for multi-user info
+        checkSystemStatus();
       }
       
       await forceGroqWarmup();
@@ -302,6 +329,52 @@ function App() {
     }
   };
 
+  const checkSystemStatus = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/system-status`, {
+        timeout: 8000
+      });
+      
+      if (response.data) {
+        setSystemStatus(response.data);
+        console.log('✅ System status updated');
+      }
+    } catch (error) {
+      console.log('System status check failed:', error.message);
+    }
+  };
+
+  const checkQueueStatus = async (batchIdToCheck) => {
+    if (!batchIdToCheck) return;
+    
+    try {
+      setCheckingQueue(true);
+      const response = await axios.get(`${API_BASE_URL}/queue-status/${batchIdToCheck}`, {
+        timeout: 8000
+      });
+      
+      if (response.data) {
+        setQueueStatus(response.data);
+        
+        // If batch is complete, navigate to results
+        if (response.data.success && response.data.analyses) {
+          setBatchAnalysis(response.data);
+          setCurrentView('batch-results');
+          setCheckingQueue(false);
+          
+          // Clear queue check interval
+          if (queueCheckInterval.current) {
+            clearInterval(queueCheckInterval.current);
+          }
+        }
+      }
+    } catch (error) {
+      console.log('Queue status check failed:', error.message);
+    } finally {
+      setCheckingQueue(false);
+    }
+  };
+
   const setupPeriodicChecks = () => {
     backendWakeInterval.current = setInterval(() => {
       axios.get(`${API_BASE_URL}/ping`, { timeout: 5000 })
@@ -320,6 +393,11 @@ function App() {
     }, 30000);
     
     keepAliveInterval.current = statusCheckInterval;
+    
+    // Check system status every 2 minutes
+    setInterval(() => {
+      checkSystemStatus();
+    }, 120000);
   };
 
   const handleDrag = (e) => {
@@ -386,7 +464,7 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10));
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 8)); // Max 8 resumes
       setError('');
     }
   };
@@ -410,6 +488,9 @@ function App() {
     setResumeFiles([]);
     setBatchAnalysis(null);
     setError('');
+    setQueueStatus(null);
+    setBatchId(null);
+    setSessionId(null);
   };
 
   const handleAnalyze = async () => {
@@ -485,6 +566,7 @@ function App() {
       navigateToSingleResults();
 
       await checkBackendHealth();
+      await checkSystemStatus();
 
       setTimeout(() => {
         setProgress(0);
@@ -499,9 +581,9 @@ function App() {
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('Rate limit reached. Groq API has limits. Please try again later.');
+        setError('Rate limit reached. Please try again later or use batch mode with queue.');
       } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
-        setError('Groq API rate limit exceeded. Please wait a minute and try again.');
+        setError('Rate limit exceeded. Please wait a minute and try again.');
         setAiStatus('unavailable');
       } else {
         setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
@@ -573,18 +655,31 @@ function App() {
 
       clearInterval(progressInterval);
       setBatchProgress(95);
-      setLoadingMessage('Batch analysis complete!');
-
-      await new Promise(resolve => setTimeout(resolve, 800));
       
-      setBatchAnalysis(response.data);
+      if (response.data.success) {
+        setLoadingMessage('Batch submitted to queue! Checking status...');
+        setBatchId(response.data.batch_id);
+        setSessionId(response.data.session_id);
+        setQueueStatus(response.data);
+        
+        // Start checking queue status
+        if (queueCheckInterval.current) {
+          clearInterval(queueCheckInterval.current);
+        }
+        
+        queueCheckInterval.current = setInterval(() => {
+          checkQueueStatus(response.data.batch_id);
+        }, 10000); // Check every 10 seconds
+        
+        // Check immediately
+        setTimeout(() => {
+          checkQueueStatus(response.data.batch_id);
+        }, 2000);
+      } else {
+        setError(response.data.error || 'Failed to submit batch to queue');
+      }
+      
       setBatchProgress(100);
-      navigateToBatchResults();
-
-      setTimeout(() => {
-        setBatchProgress(0);
-        setLoadingMessage('');
-      }, 800);
 
     } catch (err) {
       if (progressInterval) clearInterval(progressInterval);
@@ -594,7 +689,7 @@ function App() {
         setBackendStatus('sleeping');
         wakeUpBackend();
       } else if (err.response?.status === 429) {
-        setError('Groq API rate limit reached. Please try again later or reduce batch size.');
+        setError('Rate limit reached. Please try again later or reduce batch size.');
       } else {
         setError(err.response?.data?.error || 'An error occurred during batch analysis.');
       }
@@ -749,27 +844,86 @@ function App() {
   const formatSummary = (text) => {
     if (!text) return "No summary available.";
     
-    // Remove any trailing ellipsis or incomplete text
     let cleanText = text.trim();
     
-    // If text ends with ellipsis or incomplete sentence, find the last complete sentence
     if (cleanText.includes('...') || !cleanText.endsWith('.') || cleanText.endsWith('..')) {
-      // Split by sentences
       const sentences = cleanText.split(/[.!?]+/).filter(s => s.trim().length > 0);
-      
-      // Take only complete sentences (4-5 sentences)
       const completeSentences = sentences.slice(0, 5);
-      
-      // Join with periods and ensure proper ending
       cleanText = completeSentences.join('. ') + '.';
     }
     
-    // Ensure proper sentence endings
     if (!cleanText.endsWith('.') && !cleanText.endsWith('!') && !cleanText.endsWith('?')) {
       cleanText = cleanText + '.';
     }
     
     return cleanText;
+  };
+
+  // Multi-user queue status rendering
+  const renderQueueStatus = () => {
+    if (!queueStatus || !batchId) return null;
+    
+    return (
+      <div className="queue-status-container glass">
+        <div className="queue-status-header">
+          <Activity size={24} />
+          <h3>Batch Queue Status</h3>
+        </div>
+        
+        <div className="queue-status-content">
+          <div className="queue-info-grid">
+            <div className="queue-info-item">
+              <span className="queue-label">Batch ID:</span>
+              <span className="queue-value">{batchId}</span>
+            </div>
+            <div className="queue-info-item">
+              <span className="queue-label">Session:</span>
+              <span className="queue-value">{sessionId}</span>
+            </div>
+            <div className="queue-info-item">
+              <span className="queue-label">Queue Position:</span>
+              <span className="queue-value">#{queueStatus.queue_position || 'Unknown'}</span>
+            </div>
+            <div className="queue-info-item">
+              <span className="queue-label">Estimated Wait:</span>
+              <span className="queue-value">{queueStatus.estimated_wait_minutes || 'Unknown'} minutes</span>
+            </div>
+            {systemStatus && (
+              <>
+                <div className="queue-info-item">
+                  <span className="queue-label">Active Users:</span>
+                  <span className="queue-value">{systemStatus.queue_status?.active_users || 0}/{systemStatus.multi_user_capacity?.max_concurrent_users || 5}</span>
+                </div>
+                <div className="queue-info-item">
+                  <span className="queue-label">Queue Size:</span>
+                  <span className="queue-value">{systemStatus.queue_status?.queue_size || 0} batches</span>
+                </div>
+              </>
+            )}
+          </div>
+          
+          {checkingQueue ? (
+            <div className="queue-checking">
+              <Loader size={16} className="spinner" />
+              <span>Checking queue status...</span>
+            </div>
+          ) : (
+            <button 
+              className="refresh-queue-btn"
+              onClick={() => checkQueueStatus(batchId)}
+            >
+              <RefreshCw size={16} />
+              Refresh Status
+            </button>
+          )}
+          
+          <div className="queue-note">
+            <Info size={14} />
+            <span>Your batch is being processed in the enhanced multi-user queue. Results will appear here automatically.</span>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // Render functions for different views
@@ -786,23 +940,28 @@ function App() {
             {aiStatusInfo.icon} {aiStatusInfo.text}
           </span>
           <span className="status-badge always-active">
-            <ZapIcon size={14} /> Rate Limit Protection
+            <UsersIcon size={14} /> Multi-User Ready
           </span>
           <span className="status-badge keys">
             <Key size={14} /> {getAvailableKeysCount()}/3 Keys
           </span>
           {modelInfo && (
             <span className="status-badge model">
-              <Cpu size={14} /> {getModelDisplayName(modelInfo)}
+              <CpuIcon size={14} /> {getModelDisplayName(modelInfo)}
+            </span>
+          )}
+          {systemStatus && (
+            <span className="status-badge capacity">
+              <Users size={14} /> {systemStatus.queue_status?.active_users || 0}/5 Users
             </span>
           )}
         </div>
         
-        {/* Rate Limit Warning */}
-        {(backendStatus === 'ready' && aiStatus === 'available') && (
-          <div className="rate-limit-warning glass" style={{
-            background: 'rgba(255, 209, 102, 0.1)',
-            border: '1px solid rgba(255, 209, 102, 0.3)',
+        {/* Multi-User Capacity Info */}
+        {systemStatus && (
+          <div className="multi-user-info glass" style={{
+            background: 'rgba(0, 123, 255, 0.1)',
+            border: '1px solid rgba(0, 123, 255, 0.3)',
             padding: '0.75rem 1rem',
             borderRadius: '8px',
             marginTop: '1rem',
@@ -810,9 +969,9 @@ function App() {
             alignItems: 'center',
             gap: '0.5rem'
           }}>
-            <AlertTriangle size={16} color="#ffd166" />
+            <Users size={16} color="#007bff" />
             <span style={{ fontSize: '0.9rem' }}>
-              <strong>Rate Limit Protection:</strong> Staggered delays ensure you won't hit limits. 10 resumes take ~20-30s (safer).
+              <strong>Enhanced Multi-User System:</strong> Supports 5 users simultaneously × 8 resumes each
             </span>
           </div>
         )}
@@ -824,6 +983,8 @@ function App() {
             onClick={() => {
               setBatchMode(false);
               setResumeFiles([]);
+              setQueueStatus(null);
+              setBatchId(null);
             }}
             style={{
               padding: '0.75rem 1.5rem',
@@ -859,10 +1020,13 @@ function App() {
               gap: '0.5rem'
             }}
           >
-            <Users size={16} /> Multiple Resumes (Up to 10)
+            <Users size={16} /> Multiple Resumes (Up to 8)
           </button>
         </div>
       </div>
+      
+      {/* Queue Status Display */}
+      {queueStatus && renderQueueStatus()}
       
       <div className="upload-grid">
         {/* Left Column - File Upload */}
@@ -873,10 +1037,10 @@ function App() {
               {batchMode ? <Users className="header-icon" /> : <FileText className="header-icon" />}
             </div>
             <div>
-              <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
+              <h2>{batchMode ? 'Upload Resumes (Multi-User)' : 'Upload Resume'}</h2>
               <p className="card-subtitle">
                 {batchMode 
-                  ? 'Upload multiple resumes (Max 10, 15MB each)' 
+                  ? 'Upload multiple resumes (Max 8 per user, 15MB each)' 
                   : 'Supported: PDF, DOC, DOCX, TXT (Max 15MB)'}
               </p>
             </div>
@@ -991,7 +1155,7 @@ function App() {
                       <span className="upload-text">
                         Drag & drop multiple files or click to browse
                       </span>
-                      <span className="upload-hint">Max 10 files, 15MB each</span>
+                      <span className="upload-hint">Max 8 files, 15MB each</span>
                     </>
                   )}
                 </div>
@@ -1018,21 +1182,21 @@ function App() {
             </div>
             <div className="stat">
               <div className="stat-icon">
-                <Cpu size={14} />
+                <CpuIcon size={14} />
               </div>
               <span>{getModelDisplayName(modelInfo)}</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
-                <Activity size={14} />
+                <UsersIcon size={14} />
               </div>
-              <span>Rate Limit Protection</span>
+              <span>Multi-User Ready</span>
             </div>
             <div className="stat">
               <div className="stat-icon">
-                <Users size={14} />
+                <ActivityIcon size={14} />
               </div>
-              <span>Up to 10 resumes</span>
+              <span>Queue System</span>
             </div>
           </div>
         </div>
@@ -1091,7 +1255,7 @@ function App() {
           <div className="loading-container">
             <div className="loading-header">
               <Loader className="spinner" />
-              <h3>{batchMode ? 'Batch Analysis' : 'Analysis in Progress'}</h3>
+              <h3>{batchMode ? 'Multi-User Batch Analysis' : 'Analysis in Progress'}</h3>
             </div>
             
             <div className="progress-container">
@@ -1102,7 +1266,7 @@ function App() {
               <span className="loading-message">{loadingMessage}</span>
               <span className="loading-subtext">
                 {batchMode 
-                  ? `Processing ${resumeFiles.length} resume(s) with rate limit protection...` 
+                  ? `Processing ${resumeFiles.length} resume(s) with enhanced multi-user system...` 
                   : `Using ${getModelDisplayName(modelInfo)}...`}
               </span>
             </div>
@@ -1121,19 +1285,19 @@ function App() {
                   <span>Model: {getModelDisplayName(modelInfo)}</span>
                 </>
               )}
-              {batchMode && (
+              {batchMode && systemStatus && (
                 <>
                   <span>•</span>
-                  <span>Batch Size: {resumeFiles.length}</span>
+                  <span>Active Users: {systemStatus.queue_status?.active_users || 0}/5</span>
                   <span>•</span>
-                  <span>Rate Protection: Active</span>
+                  <span>Queue: {systemStatus.queue_status?.queue_size || 0} batches</span>
                 </>
               )}
             </div>
             
             <div className="loading-note info">
               <Info size={14} />
-              <span>Rate limit protection ensures stable operation. 10 resumes take ~20-30s.</span>
+              <span>Enhanced multi-user system ensures stable operation for 5 users simultaneously.</span>
             </div>
           </div>
         </div>
@@ -1145,17 +1309,28 @@ function App() {
         disabled={loading || batchLoading || 
                  (batchMode ? resumeFiles.length === 0 : !resumeFile) || 
                  !jobDescription.trim() || 
-                 backendStatus === 'sleeping'}
+                 backendStatus === 'sleeping' ||
+                 (batchMode && queueStatus)}
       >
         {(loading || batchLoading) ? (
           <div className="button-loading-content">
             <Loader className="spinner" />
-            <span>{batchMode ? 'Analyzing Batch...' : 'Analyzing...'}</span>
+            <span>{batchMode ? 'Submitting to Queue...' : 'Analyzing...'}</span>
           </div>
         ) : backendStatus === 'sleeping' ? (
           <div className="button-waking-content">
             <Activity className="spinner" />
             <span>Waking Backend...</span>
+          </div>
+        ) : batchMode && queueStatus ? (
+          <div className="button-queue-content">
+            <ActivityIcon size={20} />
+            <div className="button-text">
+              <span>Already in Queue</span>
+              <span className="button-subtext">
+                Position: #{queueStatus.queue_position} • Check status above
+              </span>
+            </div>
           </div>
         ) : (
           <>
@@ -1165,8 +1340,8 @@ function App() {
                 <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                 <span className="button-subtext">
                   {batchMode 
-                    ? `${resumeFiles.length} resume(s) • Rate Protection • ~${Math.ceil(resumeFiles.length * 2)}-${Math.ceil(resumeFiles.length * 3)}s` 
-                    : `${getModelDisplayName(modelInfo)} • Single`}
+                    ? `${resumeFiles.length} resume(s) • Multi-User Queue • Enhanced System` 
+                    : `${getModelDisplayName(modelInfo)} • Single • Immediate`}
                 </span>
               </div>
             </div>
@@ -1179,20 +1354,20 @@ function App() {
         {batchMode ? (
           <>
             <div className="tip">
-              <Brain size={16} />
-              <span>Groq AI with 128K context length for comprehensive analysis</span>
+              <UsersIcon size={16} />
+              <span>Enhanced multi-user system supports 5 users simultaneously</span>
             </div>
             <div className="tip">
-              <Activity size={16} />
-              <span>Rate limit protection with staggered delays prevents API limits</span>
+              <ActivityIcon size={16} />
+              <span>Queue-based processing with automatic load balancing</span>
             </div>
             <div className="tip">
-              <Zap size={16} />
-              <span>~20-30 seconds for 10 resumes (Slower but SAFE from rate limits)</span>
+              <ShieldCheck size={16} />
+              <span>Advanced rate limit protection with token tracking</span>
             </div>
             <div className="tip">
               <Download size={16} />
-              <span>Download comprehensive Excel report with candidate name & experience summary</span>
+              <span>Download comprehensive Excel reports with candidate analysis</span>
             </div>
           </>
         ) : (
@@ -1207,10 +1382,10 @@ function App() {
             </div>
             <div className="tip">
               <Activity size={16} />
-              <span>Backend stays awake with automatic pings every 3 minutes</span>
+              <span>Backend stays awake with automatic pings</span>
             </div>
             <div className="tip">
-              <Cpu size={16} />
+              <CpuIcon size={16} />
               <span>Using: {getModelDisplayName(modelInfo)}</span>
             </div>
           </>
@@ -1231,7 +1406,7 @@ function App() {
             <span>New Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>⚡ Resume Analysis Results (Groq)</h2>
+            <h2>⚡ Resume Analysis Results (Enhanced Multi-User)</h2>
             <p>{analysis.candidate_name}</p>
           </div>
           <div className="navigation-actions">
@@ -1319,7 +1494,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                Powered by Groq AI
+                Powered by Enhanced Groq AI
               </p>
             </div>
           </div>
@@ -1327,7 +1502,7 @@ function App() {
             <p className="recommendation-text">{analysis.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>Groq AI Analysis</span>
+              <span>Enhanced Multi-User Analysis</span>
             </div>
           </div>
         </div>
@@ -1524,7 +1699,7 @@ function App() {
           <span>Back to Analysis</span>
         </button>
         <div className="navigation-title">
-          <h2>⚡ Batch Analysis Results (Groq with Rate Protection)</h2>
+          <h2>⚡ Batch Analysis Results (Enhanced Multi-User)</h2>
           <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
         </div>
         <div className="navigation-actions">
@@ -1535,21 +1710,22 @@ function App() {
         </div>
       </div>
 
-      {/* Rate Limit Protection Info */}
-      {batchAnalysis?.rate_limit_protection && (
-        <div className="rate-protection-info glass" style={{
-          background: 'rgba(0, 255, 157, 0.1)',
-          border: '1px solid rgba(0, 255, 157, 0.3)',
+      {/* Multi-User System Info */}
+      {batchAnalysis?.processing_method === 'enhanced_multi_user_parallel' && (
+        <div className="multi-user-info-card glass" style={{
+          background: 'rgba(0, 123, 255, 0.1)',
+          border: '1px solid rgba(0, 123, 255, 0.3)',
           padding: '1rem',
           borderRadius: '12px',
           marginBottom: '1.5rem'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <ShieldCheck size={24} color="#00ff9d" />
+            <Users size={24} color="#007bff" />
             <div>
-              <h4 style={{ margin: 0, color: '#00ff9d' }}>Rate Limit Protection Active</h4>
+              <h4 style={{ margin: 0, color: '#007bff' }}>Enhanced Multi-User System Active</h4>
               <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.9rem', opacity: 0.9 }}>
-                {batchAnalysis.rate_limit_protection} • Used sequential processing with staggered delays
+                Parallel processing with load balancing • Session: {batchAnalysis.session_id} • 
+                {batchAnalysis.user_capacity ? ` ${batchAnalysis.user_capacity}` : ''}
               </p>
             </div>
           </div>
@@ -1592,40 +1768,70 @@ function App() {
         
         <div className="stat-card">
           <div className="stat-icon success">
-            <Zap size={24} />
+            <CpuIcon size={24} />
           </div>
           <div className="stat-content">
-            <div className="stat-value">{batchAnalysis?.available_keys || 0}</div>
-            <div className="stat-label">Keys Used</div>
+            <div className="stat-value">{getAvailableKeysCount()}</div>
+            <div className="stat-label">Keys Active</div>
           </div>
         </div>
       </div>
 
-      {/* Key Usage Stats */}
-      {batchAnalysis?.key_statistics && (
-        <div className="key-usage-stats glass" style={{ marginBottom: '1.5rem' }}>
-          <h4>Key Usage Statistics</h4>
+      {/* System Status Info */}
+      {systemStatus && (
+        <div className="system-status-info glass" style={{ marginBottom: '1.5rem' }}>
+          <h4>System Status</h4>
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-            {batchAnalysis.key_statistics.map((stat, idx) => (
-              <div key={idx} style={{
-                padding: '0.75rem',
-                background: stat.status === 'cooling' ? 'rgba(255, 107, 107, 0.1)' : 'rgba(0, 255, 157, 0.1)',
-                borderRadius: '8px',
-                flex: 1,
-                minWidth: '150px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                  <Key size={16} color={stat.status === 'cooling' ? '#ff6b6b' : '#00ff9d'} />
-                  <strong>{stat.key}</strong>
-                </div>
-                <div style={{ fontSize: '0.85rem' }}>
-                  <div>Total: {stat.used}</div>
-                  <div>This minute: {stat.requests_this_minute}</div>
-                  <div>Errors: {stat.errors}</div>
-                  <div>Status: {stat.status}</div>
-                </div>
+            <div style={{
+              padding: '0.75rem',
+              background: 'rgba(0, 255, 157, 0.1)',
+              borderRadius: '8px',
+              flex: 1,
+              minWidth: '150px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <Users size={16} color="#00ff9d" />
+                <strong>Active Users</strong>
               </div>
-            ))}
+              <div style={{ fontSize: '0.85rem' }}>
+                <div>{systemStatus.queue_status?.active_users || 0}/{systemStatus.multi_user_capacity?.max_concurrent_users || 5}</div>
+                <div>Capacity: {systemStatus.multi_user_capacity?.total_concurrent_capacity || 40} resumes</div>
+              </div>
+            </div>
+            
+            <div style={{
+              padding: '0.75rem',
+              background: 'rgba(255, 209, 102, 0.1)',
+              borderRadius: '8px',
+              flex: 1,
+              minWidth: '150px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <ActivityIcon size={16} color="#ffd166" />
+                <strong>Queue Status</strong>
+              </div>
+              <div style={{ fontSize: '0.85rem' }}>
+                <div>Queue: {systemStatus.queue_status?.queue_size || 0} batches</div>
+                <div>Processes: {systemStatus.queue_status?.concurrent_processes || 0}/{systemStatus.queue_status?.max_concurrent_processes || 20}</div>
+              </div>
+            </div>
+            
+            <div style={{
+              padding: '0.75rem',
+              background: 'rgba(0, 123, 255, 0.1)',
+              borderRadius: '8px',
+              flex: 1,
+              minWidth: '150px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <ShieldCheck size={16} color="#007bff" />
+                <strong>Rate Limits</strong>
+              </div>
+              <div style={{ fontSize: '0.85rem' }}>
+                <div>Requests: {systemStatus.global_rate_limit?.requests_this_minute || 0}/{systemStatus.global_rate_limit?.max_requests_per_minute || 600}</div>
+                <div>Tokens: {(systemStatus.global_rate_limit?.tokens_this_minute || 0).toLocaleString()}/{systemStatus.global_rate_limit?.max_tokens_per_minute?.toLocaleString() || '500k'}</div>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1710,26 +1916,54 @@ function App() {
                   </div>
                 </div>
               </div>
-            </div>
-            
-            <div className="batch-card-footer">
-              <button 
-                className="view-details-btn"
-                onClick={() => navigateToCandidateDetail(index)}
-              >
-                View Full Details
-                <ChevronRight size={16} />
-              </button>
+              
+              <div className="batch-card-actions">
+                <button 
+                  className="view-details-btn"
+                  onClick={() => navigateToCandidateDetail(index)}
+                >
+                  <Eye size={16} />
+                  View Details
+                </button>
+                <button 
+                  className="download-individual-btn"
+                  onClick={() => handleIndividualDownload(candidate.analysis_id)}
+                >
+                  <DownloadCloud size={16} />
+                  Download Report
+                </button>
+              </div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Action Buttons */}
+      {/* Errors Section */}
+      {batchAnalysis?.errors && batchAnalysis.errors.length > 0 && (
+        <div className="errors-section glass">
+          <div className="section-title">
+            <AlertOctagon size={24} />
+            <h2>Processing Errors</h2>
+          </div>
+          <div className="errors-list">
+            {batchAnalysis.errors.map((error, index) => (
+              <div key={index} className="error-item">
+                <XCircle size={16} />
+                <div className="error-details">
+                  <span className="error-filename">{error.filename}</span>
+                  <span className="error-message">{error.error}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Action Section */}
       <div className="action-section glass">
         <div className="action-content">
           <h3>Batch Analysis Complete</h3>
-          <p>Download comprehensive Excel report with candidate analysis including candidate name and experience summary</p>
+          <p>Download the comprehensive Excel report or start a new analysis</p>
         </div>
         <div className="action-buttons">
           <button className="download-button" onClick={handleBatchDownload}>
@@ -1738,7 +1972,7 @@ function App() {
           </button>
           <button className="reset-button" onClick={navigateToMain}>
             <RefreshCw size={20} />
-            <span>New Batch Analysis</span>
+            <span>New Analysis</span>
           </button>
         </div>
       </div>
@@ -1746,32 +1980,27 @@ function App() {
   );
 
   const renderCandidateDetailView = () => {
-    const candidate = batchAnalysis?.analyses?.[selectedCandidateIndex];
+    if (!batchAnalysis || selectedCandidateIndex === null) return null;
     
-    if (!candidate) {
-      return (
-        <div className="error-message glass">
-          <AlertCircle size={20} />
-          <span>Candidate not found</span>
-          <button onClick={navigateBack} className="back-button">
-            <ArrowLeft size={16} />
-            Go Back
-          </button>
-        </div>
-      );
-    }
-
+    const candidate = batchAnalysis.analyses[selectedCandidateIndex];
+    
     return (
       <div className="results-section">
         {/* Navigation Header */}
         <div className="navigation-header glass">
-          <button onClick={navigateBack} className="back-button">
+          <button onClick={() => navigateBack()} className="back-button">
             <ArrowLeft size={20} />
-            <span>Back to Rankings</span>
+            <span>Back to Batch</span>
           </button>
           <div className="navigation-title">
-            <h2>Candidate Details</h2>
-            <p>Rank #{candidate.rank} • {candidate.candidate_name}</p>
+            <h2>⚡ Candidate Details - {candidate.candidate_name}</h2>
+            <p>Rank #{candidate.rank} • Batch Session: {batchAnalysis.session_id}</p>
+          </div>
+          <div className="navigation-actions">
+            <button className="download-report-btn" onClick={() => handleIndividualDownload(candidate.analysis_id)}>
+              <DownloadCloud size={18} />
+              <span>Download Report</span>
+            </button>
           </div>
         </div>
 
@@ -1786,11 +2015,12 @@ function App() {
               <div className="candidate-meta">
                 <span className="analysis-date">
                   <Clock size={14} />
-                  Rank: #{candidate.rank}
-                </span>
-                <span className="file-info">
-                  <FileText size={14} />
-                  {candidate.filename} • {candidate.file_size}
+                  {new Date().toLocaleDateString('en-US', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
                 </span>
                 {candidate.years_of_experience && (
                   <span className="experience-badge">
@@ -1798,6 +2028,10 @@ function App() {
                     {candidate.years_of_experience} experience
                   </span>
                 )}
+                <span className="rank-badge">
+                  <AwardIcon size={14} />
+                  Rank #{candidate.rank} of {batchAnalysis.analyses.length}
+                </span>
               </div>
             </div>
           </div>
@@ -1825,7 +2059,7 @@ function App() {
             <div className="score-info">
               <h3 className="score-grade">{getScoreGrade(candidate.overall_score)}</h3>
               <p className="score-description">
-                Based on skill matching and experience relevance
+                Based on skill matching, experience relevance, and qualifications
               </p>
               <div className="score-meta">
                 <span className="meta-item">
@@ -1841,6 +2075,27 @@ function App() {
           </div>
         </div>
 
+        {/* Multi-User Context */}
+        <div className="multi-user-context glass" style={{
+          background: 'rgba(0, 123, 255, 0.1)',
+          border: '1px solid rgba(0, 123, 255, 0.3)',
+          padding: '1rem',
+          borderRadius: '12px',
+          marginBottom: '1.5rem'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <ActivityIcon size={20} color="#007bff" />
+            <div>
+              <h4 style={{ margin: 0, color: '#007bff' }}>Enhanced Multi-User Analysis</h4>
+              <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.9rem', opacity: 0.9 }}>
+                Processed in batch session: {batchAnalysis.session_id} • 
+                Key used: {candidate.key_used || 'N/A'} • 
+                Processing order: {candidate.processing_order || 'N/A'}
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Recommendation Card */}
         <div className="recommendation-card glass" style={{
           background: `linear-gradient(135deg, ${getScoreColor(candidate.overall_score)}15, ${getScoreColor(candidate.overall_score)}08)`,
@@ -1851,7 +2106,7 @@ function App() {
             <div>
               <h3>Analysis Recommendation</h3>
               <p className="recommendation-subtitle">
-                Powered by Groq AI
+                Powered by Enhanced Groq AI
               </p>
             </div>
           </div>
@@ -1859,7 +2114,7 @@ function App() {
             <p className="recommendation-text">{candidate.recommendation}</p>
             <div className="confidence-badge">
               <Brain size={16} />
-              <span>Groq AI Analysis</span>
+              <span>Enhanced Multi-User Analysis</span>
             </div>
           </div>
         </div>
@@ -2026,16 +2281,60 @@ function App() {
           </div>
         </div>
 
+        {/* Technical Details */}
+        <div className="technical-details glass">
+          <div className="section-title">
+            <Settings size={20} />
+            <h2>Technical Details</h2>
+          </div>
+          <div className="technical-grid">
+            <div className="technical-item">
+              <span className="technical-label">File Name:</span>
+              <span className="technical-value">{candidate.filename}</span>
+            </div>
+            <div className="technical-item">
+              <span className="technical-label">File Size:</span>
+              <span className="technical-value">{candidate.file_size || 'N/A'}</span>
+            </div>
+            <div className="technical-item">
+              <span className="technical-label">AI Provider:</span>
+              <span className="technical-value">{candidate.ai_provider || 'Groq'}</span>
+            </div>
+            <div className="technical-item">
+              <span className="technical-label">AI Model:</span>
+              <span className="technical-value">{candidate.ai_model || modelInfo?.name || 'Groq'}</span>
+            </div>
+            <div className="technical-item">
+              <span className="technical-label">Key Used:</span>
+              <span className="technical-value">{candidate.key_used || 'N/A'}</span>
+            </div>
+            <div className="technical-item">
+              <span className="technical-label">Processing Order:</span>
+              <span className="technical-value">{candidate.processing_order || 'N/A'}</span>
+            </div>
+            {candidate.response_time && (
+              <div className="technical-item">
+                <span className="technical-label">Response Time:</span>
+                <span className="technical-value">{candidate.response_time}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Action Section */}
         <div className="action-section glass">
           <div className="action-content">
             <h3>Candidate Analysis Complete</h3>
-            <p>Go back to rankings or download the full batch report</p>
+            <p>Download the individual report or return to batch view</p>
           </div>
           <div className="action-buttons">
-            <button className="download-button" onClick={navigateBack}>
+            <button className="download-button" onClick={() => handleIndividualDownload(candidate.analysis_id)}>
+              <DownloadCloud size={20} />
+              <span>Download Individual Report</span>
+            </button>
+            <button className="back-button" onClick={() => navigateBack()}>
               <ArrowLeft size={20} />
-              <span>Back to Rankings</span>
+              <span>Back to Batch</span>
             </button>
           </div>
         </div>
@@ -2044,439 +2343,149 @@ function App() {
   };
 
   // Main render function
-  const renderCurrentView = () => {
-    switch (currentView) {
-      case 'single-results':
-        return renderSingleAnalysisView();
-      case 'batch-results':
-        return renderBatchResultsView();
-      case 'candidate-detail':
-        return renderCandidateDetailView();
-      default:
-        return renderMainView();
-    }
-  };
-
   return (
-    <div className="app">
-      {/* Animated Background Elements */}
-      <div className="bg-grid"></div>
-      <div className="bg-blur-1"></div>
-      <div className="bg-blur-2"></div>
-      
+    <div className="app-container">
       {/* Header */}
-      <header className="header">
+      <header className="header glass">
         <div className="header-content">
-          <div className="header-main">
-            {/* Logo and Title */}
-            <div className="logo">
-              <div className="logo-glow">
-                <Brain className="logo-icon" />
-              </div>
+          <div className="logo-section">
+            <div className="logo" onClick={navigateToMain}>
+              <img src={logoImage} alt="LeadSOC Logo" className="logo-image" />
               <div className="logo-text">
-                <h1>AI Resume Analyzer (Groq)</h1>
-                <div className="logo-subtitle">
-                  <span className="powered-by">Powered by</span>
-                  <span className="groq-badge">⚡ Groq</span>
-                  <span className="divider">•</span>
-                  <span className="tagline">5-8 Skills Analysis • Experience Summary • Years of Experience</span>
-                </div>
+                <h1>LeadSOC Resume Analyzer</h1>
+                <p className="tagline">Enhanced Multi-User AI Analysis</p>
               </div>
-            </div>
-            
-            {/* Leadsoc Logo */}
-            <div className="leadsoc-logo-container">
-              <button
-                onClick={handleLeadsocClick}
-                className="leadsoc-logo-link"
-                disabled={isNavigating}
-                title="Visit LEADSOC - Partnering Your Success"
-              >
-                {isNavigating ? (
-                  <div className="leadsoc-loading">
-                    <Loader size={20} className="spinner" />
-                    <span>Opening...</span>
-                  </div>
-                ) : (
-                  <>
-                    <img 
-                      src={logoImage} 
-                      alt="LEADSOC - partnering your success" 
-                      className="leadsoc-logo"
-                    />
-                    <ExternalLink size={14} className="external-link-icon" />
-                  </>
-                )}
-              </button>
             </div>
           </div>
           
-          <div className="header-features">
-            {/* Backend Status */}
-            <div 
-              className="feature backend-status-indicator" 
-              style={{ 
-                backgroundColor: backendStatusInfo.bgColor,
-                borderColor: `${backendStatusInfo.color}30`,
-                color: backendStatusInfo.color
-              }}
-            >
-              {backendStatusInfo.icon}
-              <span>{backendStatusInfo.text}</span>
-              {backendStatus === 'waking' && <Loader size={12} className="pulse-spinner" />}
-            </div>
-            
-            {/* AI Status */}
-            <div 
-              className="feature ai-status-indicator" 
-              style={{ 
-                backgroundColor: aiStatusInfo.bgColor,
-                borderColor: `${aiStatusInfo.color}30`,
-                color: aiStatusInfo.color
-              }}
-            >
-              {aiStatusInfo.icon}
-              <span>{aiStatusInfo.text}</span>
-              {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
-            </div>
-            
-            {/* Key Status */}
-            <div className="feature key-status">
-              <Key size={16} />
-              <span>{getAvailableKeysCount()}/3 Keys</span>
-            </div>
-            
-            {/* Model Info */}
-            {modelInfo && (
-              <div className="feature model-info">
-                <Cpu size={16} />
-                <span>{getModelDisplayName(modelInfo)}</span>
+          <div className="header-actions">
+            <div className="status-indicators">
+              <div className="status-indicator" style={{ background: backendStatusInfo.bgColor, color: backendStatusInfo.color }}>
+                {backendStatusInfo.icon}
+                <span className="status-text">{backendStatusInfo.text}</span>
               </div>
-            )}
-            
-            {/* Rate Limit Protection */}
-            <div className="feature rate-limit">
-              <ShieldCheck size={16} />
-              <span>Rate Protection</span>
+              <div className="status-indicator" style={{ background: aiStatusInfo.bgColor, color: aiStatusInfo.color }}>
+                {aiStatusInfo.icon}
+                <span className="status-text">{aiStatusInfo.text}</span>
+              </div>
+              <div className="status-indicator" style={{ background: 'rgba(0, 123, 255, 0.1)', color: '#007bff' }}>
+                <UsersIcon size={14} />
+                <span className="status-text">
+                  {systemStatus ? `${systemStatus.queue_status?.active_users || 0}/5 Users` : 'Multi-User'}
+                </span>
+              </div>
             </div>
             
-            {/* Navigation Indicator */}
-            {currentView !== 'main' && (
-              <div className="feature nav-indicator">
-                <Grid size={16} />
-                <span>{currentView === 'single-results' ? 'Single Analysis' : 
-                       currentView === 'batch-results' ? 'Batch Results' : 
-                       'Candidate Details'}</span>
-              </div>
-            )}
-            
-            {/* Warm-up Button */}
-            {aiStatus !== 'available' && (
-              <button 
-                className="feature warmup-button"
-                onClick={handleForceWarmup}
-                disabled={isWarmingUp}
-              >
-                {isWarmingUp ? (
-                  <Loader size={16} className="spinner" />
-                ) : (
-                  <Thermometer size={16} />
-                )}
-                <span>Warm Up AI</span>
-              </button>
-            )}
-            
-            {/* Quota Status Toggle */}
             <button 
-              className="feature quota-toggle"
-              onClick={() => setShowQuotaPanel(!showQuotaPanel)}
-              title="Show service status"
+              className={`warmup-btn ${isWarmingUp ? 'warming' : ''}`}
+              onClick={handleForceWarmup}
+              disabled={isWarmingUp}
             >
-              <BarChart size={16} />
-              <span>Service Status</span>
+              {isWarmingUp ? (
+                <Loader size={16} className="spinner" />
+              ) : (
+                <Thermometer size={16} />
+              )}
+              <span>{isWarmingUp ? 'Warming...' : 'Warm Up'}</span>
             </button>
           </div>
         </div>
-        
-        <div className="header-wave">
-          <svg viewBox="0 0 1200 120" preserveAspectRatio="none">
-            <path d="M0,0V46.29c47.79,22.2,103.59,32.17,158,28,70.36-5.37,136.33-33.31,206.8-37.5C438.64,32.43,512.34,53.67,583,72.05c69.27,18,138.3,24.88,209.4,13.08,36.15-6,69.85-17.84,104.45,29.34C989.49,25,1113-14.29,1200,52.47V0Z" opacity=".25" fill="currentColor"></path>
-            <path d="M0,0V15.81C13,36.92,27.64,56.86,47.69,72.05,99.41,111.27,165,111,224.58,91.58c31.15-10.15,60.09-26.07,89.67-39.8,40.92-19,84.73-46,130.83-49.67,36.26-2.85,70.9,9.42,98.6,31.56,31.77,25.39,62.32,62,103.63,73,40.44,10.79,81.35-6.69,119.13-24.28s75.16-39,116.92-43.05c59.73-5.85,113.28,22.88,168.9,38.84,30.2,8.66,59,6.17,87.09-7.5,22.43-10.89,48-26.93,60.65-49.24V0Z" opacity=".5" fill="currentColor"></path>
-            <path d="M0,0V5.63C149.93,59,314.09,71.32,475.83,42.57c43-7.64,84.23-20.12,127.61-26.46,59-8.63,112.48,12.24,165.56,35.4C827.93,77.22,886,95.24,951.2,90c86.53-7,172.46-45.71,248.8-84.81V0Z" fill="currentColor"></path>
-          </svg>
-        </div>
       </header>
 
+      {/* Main Content */}
       <main className="main-content">
-        {/* Status Panel */}
-        {showQuotaPanel && (
-          <div className="quota-status-panel glass">
-            <div className="quota-panel-header">
-              <div className="quota-title">
-                <Activity size={20} />
-                <h3>Groq Service Status (Rate Limit Protection)</h3>
-              </div>
-              <button 
-                className="close-quota"
-                onClick={() => setShowQuotaPanel(false)}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            
-            <div className="quota-summary">
-              <div className="summary-item">
-                <div className="summary-label">Backend Status</div>
-                <div className={`summary-value ${backendStatus === 'ready' ? 'success' : backendStatus === 'waking' ? 'warning' : 'error'}`}>
-                  {backendStatus === 'ready' ? '✅ Active' : 
-                   backendStatus === 'waking' ? '🔥 Waking Up' : 
-                   '💤 Sleeping'}
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Groq API Status</div>
-                <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
-                  {aiStatus === 'available' ? '⚡ Ready' : 
-                   aiStatus === 'warming' ? '🔥 Warming' : 
-                   '⚠️ Enhanced Mode'}
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Available Keys</div>
-                <div className={`summary-value ${getAvailableKeysCount() >= 2 ? 'success' : getAvailableKeysCount() === 1 ? 'warning' : 'error'}`}>
-                  🔑 {getAvailableKeysCount()}/3 keys
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">AI Model</div>
-                <div className="summary-value">
-                  {getModelDisplayName(modelInfo)}
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Rate Limit Protection</div>
-                <div className="summary-value success">
-                  🛡️ ACTIVE (Max 100/min/key)
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Processing Method</div>
-                <div className="summary-value info">
-                  ⏳ Sequential with delays
-                </div>
-              </div>
-              <div className="summary-item">
-                <div className="summary-label">Batch Performance</div>
-                <div className="summary-value warning">
-                  🐢 10 resumes: ~20-30s (SAFER)
-                </div>
-              </div>
-            </div>
-            
-            <div className="rate-limit-explanation">
-              <h4>Why You Won't Hit Rate Limits Now:</h4>
-              <ul>
-                <li>✅ Staggered delays (1-3s between requests)</li>
-                <li>✅ Smart key rotation (load balancing)</li>
-                <li>✅ 60s cooling on rate limit detection</li>
-                <li>✅ Minute-by-minute request tracking</li>
-                <li>✅ Sequential processing (not parallel)</li>
-                <li>✅ Conservative limit: 100 requests/min/key (actual: 1000)</li>
-              </ul>
-            </div>
-            
-            <div className="action-buttons-panel">
-              <button 
-                className="action-button refresh"
-                onClick={checkBackendHealth}
-              >
-                <RefreshCw size={16} />
-                Refresh Status
-              </button>
-              <button 
-                className="action-button warmup"
-                onClick={handleForceWarmup}
-                disabled={isWarmingUp}
-              >
-                {isWarmingUp ? (
-                  <Loader size={16} className="spinner" />
-                ) : (
-                  <Thermometer size={16} />
-                )}
-                Force Warm-up
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Status Banner */}
-        <div className="top-notice-bar glass">
-          <div className="notice-content">
-            <div className="status-indicators">
-              <div className={`status-indicator ${backendStatus === 'ready' ? 'active' : 'inactive'}`}>
-                <div className="indicator-dot"></div>
-                <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}</span>
-              </div>
-              <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
-                <div className="indicator-dot"></div>
-                <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
-              </div>
-              <div className="status-indicator active">
-                <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                <span>Keys: {getAvailableKeysCount()}/3</span>
-              </div>
-              {modelInfo && (
-                <div className="status-indicator active">
-                  <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Model: {getModelDisplayName(modelInfo)}</span>
-                </div>
-              )}
-              <div className="status-indicator active">
-                <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                <span>Excel: Name & Experience columns</span>
-              </div>
-              <div className="status-indicator active">
-                <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
-                <span>Rate Protection: ACTIVE</span>
-              </div>
-              <div className="status-indicator active">
-                <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
-                <span>Mode: {currentView === 'single-results' ? 'Single' : 
-                              currentView === 'batch-results' ? 'Batch' : 
-                              currentView === 'candidate-detail' ? 'Details' : 
-                              batchMode ? 'Batch' : 'Single'}</span>
-              </div>
-              {batchMode && (
-                <>
-                  <div className="status-indicator active">
-                    <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
-                    <span>Capacity: Up to 10 resumes</span>
-                  </div>
-                  <div className="status-indicator active">
-                    <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                    <span>Experience Analysis: Included</span>
-                  </div>
-                  <div className="status-indicator active">
-                    <div className="indicator-dot" style={{ background: '#ff6b6b' }}></div>
-                    <span>Speed: ~20-30s (Safer)</span>
-                  </div>
-                </>
-              )}
-            </div>
-            
-            {backendStatus !== 'ready' && (
-              <div className="wakeup-message">
-                <AlertCircle size={16} />
-                <span>Backend is waking up. Analysis may be slower for the first request.</span>
-              </div>
-            )}
-            
-            {aiStatus === 'warming' && (
-              <div className="wakeup-message">
-                <Thermometer size={16} />
-                <span>Groq API is warming up. This ensures high-quality responses.</span>
-              </div>
-            )}
-            
-            {batchMode && getAvailableKeysCount() > 0 && (
-              <div className="multi-key-message">
-                <ShieldCheck size={16} />
-                <span>Rate protection: Processing {resumeFiles.length} resumes sequentially with delays</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Render Current View */}
-        {renderCurrentView()}
+        {currentView === 'main' && renderMainView()}
+        {currentView === 'single-results' && renderSingleAnalysisView()}
+        {currentView === 'batch-results' && renderBatchResultsView()}
+        {currentView === 'candidate-detail' && renderCandidateDetailView()}
       </main>
 
       {/* Footer */}
       <footer className="footer">
         <div className="footer-content">
-          <div className="footer-brand">
+          <div className="footer-section">
             <div className="footer-logo">
-              <Brain size={20} />
-              <span>AI Resume Analyzer (Groq)</span>
+              <img src={logoImage} alt="LeadSOC Logo" className="footer-logo-image" />
+              <span className="footer-logo-text">LeadSOC</span>
             </div>
-            <p className="footer-tagline">
-              Groq AI • 3-key with rate protection • 5-8 skills analysis • Experience summary • Years of experience
+            <p className="footer-description">
+              Enhanced multi-user resume analyzer powered by Groq AI. 
+              Supports 5 users simultaneously with 8 resumes each.
             </p>
           </div>
           
-          <div className="footer-links">
-            <div className="footer-section">
-              <h4>Features</h4>
-              <a href="#">Groq AI</a>
-              <a href="#">5-8 Skills Analysis</a>
-              <a href="#">Experience Summary</a>
-              <a href="#">Years of Experience</a>
+          <div className="footer-section">
+            <h4>Features</h4>
+            <ul>
+              <li>5-8 skills analysis per candidate</li>
+              <li>Complete sentence summaries</li>
+              <li>Enhanced multi-user queue</li>
+              <li>Excel report downloads</li>
+              <li>Session-based processing</li>
+            </ul>
+          </div>
+          
+          <div className="footer-section">
+            <h4>System Info</h4>
+            <div className="system-info">
+              <div className="info-item">
+                <CpuIcon size={14} />
+                <span>{getModelDisplayName(modelInfo)}</span>
+              </div>
+              <div className="info-item">
+                <UsersIcon size={14} />
+                <span>{systemStatus ? `${systemStatus.queue_status?.active_users || 0}/5 Active Users` : 'Multi-User Ready'}</span>
+              </div>
+              <div className="info-item">
+                <Key size={14} />
+                <span>{getAvailableKeysCount()}/3 API Keys</span>
+              </div>
+              <div className="info-item">
+                <ActivityIcon size={14} />
+                <span>{systemStatus?.queue_status?.queue_size || 0} in Queue</span>
+              </div>
             </div>
-            <div className="footer-section">
-              <h4>Service</h4>
-              <a href="#">Rate Limit Protection</a>
-              <a href="#">3-Key Sequential</a>
-              <a href="#">Excel Reports</a>
-              <a href="#">Candidate Comparison</a>
-            </div>
-            <div className="footer-section">
-              <h4>Navigation</h4>
-              <a href="#" onClick={navigateToMain}>New Analysis</a>
-              {currentView !== 'main' && (
-                <a href="#" onClick={navigateBack}>Go Back</a>
-              )}
-              <a href="#">Support</a>
-              <a href="#">Documentation</a>
+          </div>
+          
+          <div className="footer-section">
+            <h4>Powered By</h4>
+            <div className="powered-by">
+              <div className="tech-badge">
+                <Brain size={14} />
+                <span>Groq AI</span>
+              </div>
+              <div className="tech-badge">
+                <CpuIcon size={14} />
+                <span>Llama 3.3 70B</span>
+              </div>
+              <div className="tech-badge">
+                <UsersIcon size={14} />
+                <span>Multi-User System</span>
+              </div>
+              <div className="tech-badge">
+                <ShieldCheck size={14} />
+                <span>Enhanced Rate Limiting</span>
+              </div>
             </div>
           </div>
         </div>
         
         <div className="footer-bottom">
-          <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
-          <div className="footer-stats">
-            <span className="stat">
-              <CloudLightning size={12} />
-              Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
-            </span>
-            <span className="stat">
-              <Brain size={12} />
-              Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming'}
-            </span>
-            <span className="stat">
-              <Key size={12} />
-              Keys: {getAvailableKeysCount()}/3
-            </span>
-            <span className="stat">
-              <Cpu size={12} />
-              Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
-            </span>
-            <span className="stat">
-              <ShieldCheck size={12} />
-              Rate Protection: Active
-            </span>
-            {batchMode && (
-              <span className="stat">
-                <Activity size={12} />
-                Batch: {resumeFiles.length} resumes
-              </span>
-            )}
-            <span className="stat">
-              <Target size={12} />
-              Skills: 5-8 each
-            </span>
-            <span className="stat">
-              <Briefcase size={12} />
-              Experience: Summary included
-            </span>
-            <span className="stat">
-              <Calendar size={12} />
-              Years: Analysis included
-            </span>
-          </div>
+          <p>
+            © {new Date().getFullYear()} LeadSOC Resume Analyzer (Enhanced Multi-User Edition) • 
+            Supports {MAX_CONCURRENT_USERS} users × {MAX_RESUMES_PER_USER} resumes simultaneously
+          </p>
+          <p className="footer-note">
+            This system uses enhanced multi-user processing with parallel execution and load balancing.
+          </p>
         </div>
       </footer>
     </div>
   );
 }
+
+// Constants for multi-user configuration (matching app.py)
+const MAX_CONCURRENT_USERS = 5;
+const MAX_RESUMES_PER_USER = 8;
 
 export default App;
