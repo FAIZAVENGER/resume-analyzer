@@ -62,6 +62,7 @@ function App() {
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userEmail, setUserEmail] = useState('');
+  const [authChecked, setAuthChecked] = useState(false);
 
   // Check authentication on mount
   useEffect(() => {
@@ -71,6 +72,7 @@ function App() {
       setIsAuthenticated(true);
       setUserEmail(storedEmail || '');
     }
+    setAuthChecked(true);
   }, []);
 
   // Handle login
@@ -95,7 +97,26 @@ function App() {
     setCurrentView('main');
   };
 
-  // If not authenticated, show login page
+  // Show loading while checking auth
+  if (!authChecked) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+        color: 'white'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <Loader className="spinner" size={48} />
+          <p style={{ marginTop: '1rem' }}>Checking authentication...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If not authenticated, show login page - FULL PAGE
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />;
   }
