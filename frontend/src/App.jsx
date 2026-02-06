@@ -56,8 +56,50 @@ import {
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
+import Login from './Login';
 
 function App() {
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userEmail, setUserEmail] = useState('');
+
+  // Check authentication on mount
+  useEffect(() => {
+    const authStatus = localStorage.getItem('isAuthenticated');
+    const storedEmail = localStorage.getItem('userEmail');
+    if (authStatus === 'true') {
+      setIsAuthenticated(true);
+      setUserEmail(storedEmail || '');
+    }
+  }, []);
+
+  // Handle login
+  const handleLogin = () => {
+    setIsAuthenticated(true);
+    const email = localStorage.getItem('userEmail');
+    setUserEmail(email || '');
+  };
+
+  // Handle logout
+  const handleLogout = () => {
+    localStorage.removeItem('isAuthenticated');
+    localStorage.removeItem('userEmail');
+    setIsAuthenticated(false);
+    setUserEmail('');
+    // Reset all state
+    setAnalysis(null);
+    setBatchAnalysis(null);
+    setResumeFile(null);
+    setResumeFiles([]);
+    setJobDescription('');
+    setCurrentView('main');
+  };
+
+  // If not authenticated, show login page
+  if (!isAuthenticated) {
+    return <Login onLogin={handleLogin} />;
+  }
+
   const [resumeFile, setResumeFile] = useState(null);
   const [resumeFiles, setResumeFiles] = useState([]);
   const [jobDescription, setJobDescription] = useState('');
@@ -2082,6 +2124,18 @@ function App() {
                   <span className="tagline">5-8 Skills Analysis • Experience Summary • Years of Experience</span>
                 </div>
               </div>
+            </div>
+            
+            {/* User Info & Logout */}
+            <div className="user-section">
+              <div className="user-info">
+                <User size={16} />
+                <span>{userEmail}</span>
+              </div>
+              <button onClick={handleLogout} className="logout-button">
+                <LogOut size={16} />
+                <span>Logout</span>
+              </button>
             </div>
             
             {/* Leadsoc Logo */}
