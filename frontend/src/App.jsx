@@ -861,7 +861,7 @@ function App() {
               <Brain className="logo-icon" size={32} />
             </div>
             <div className="login-logo-text">
-              <h1>AI Resume Analyzer</h1>
+              <h1>ResuGo</h1>
               <p className="login-subtitle">
                 <span className="groq-badge-login">⚡ Groq AI</span>
                 <span className="divider">•</span>
@@ -1069,27 +1069,6 @@ function App() {
         <div className="section-header">
           <h2>Start Your Analysis</h2>
           <p>Upload resume(s) and job description to get detailed insights</p>
-          <div className="service-status">
-            <span className="status-badge backend">
-              {backendStatusInfo.icon} {backendStatusInfo.text}
-            </span>
-            <span className="status-badge ai">
-              {aiStatusInfo.icon} {aiStatusInfo.text}
-            </span>
-            <span className="status-badge always-active">
-              <ZapIcon size={14} /> Rate Limit Protection
-            </span>
-            <span className="status-badge keys">
-              <Key size={14} /> {getAvailableKeysCount()}/3 Keys
-            </span>
-            {modelInfo && (
-              <span className="status-badge model">
-                <Cpu size={14} /> {getModelDisplayName(modelInfo)}
-              </span>
-            )}
-          </div>
-          
-          {/* REMOVED: Rate Limit Warning */}
           
           {/* Batch Mode Toggle */}
           <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
@@ -1495,7 +1474,7 @@ function App() {
               <span>New Analysis</span>
             </button>
             <div className="navigation-title">
-              <h2>⚡ Resume Analysis Results (Groq)</h2>
+              <h2>ResuGo Analysis Results</h2>
               <p>{analysis.candidate_name}</p>
             </div>
             <div className="navigation-actions">
@@ -1596,9 +1575,9 @@ function App() {
             </div>
           </div>
 
-          {/* Skills Analysis - 5-8 skills each */}
+          {/* Skills Analysis */}
           <div className="section-title">
-            <h2>Skills Analysis (5-8 skills each)</h2>
+            <h2>Skills Analysis</h2>
             <p>Detailed breakdown of matched and missing skills</p>
           </div>
           
@@ -1666,8 +1645,8 @@ function App() {
 
           {/* Summary Section with Complete 4-5 sentences */}
           <div className="section-title">
-            <h2>Profile Summary (4-5 complete sentences each)</h2>
-            <p>Key insights extracted from resume (no truncation)</p>
+            <h2>Profile Summary</h2>
+            <p>Key insights extracted from resume</p>
           </div>
           
           <div className="summary-grid">
@@ -1700,9 +1679,9 @@ function App() {
             </div>
           </div>
 
-          {/* Insights Section - Only 3 items each */}
+          {/* Insights Section */}
           <div className="section-title">
-            <h2>Insights & Recommendations (3 items each)</h2>
+            <h2>Insights & Recommendations</h2>
             <p>Key strengths and areas for improvement</p>
           </div>
           
@@ -1713,7 +1692,7 @@ function App() {
                   <TrendingUp size={24} />
                 </div>
                 <div>
-                  <h3>Key Strengths (3)</h3>
+                  <h3>Key Strengths</h3>
                   <p className="insight-subtitle">Areas where candidate excels</p>
                 </div>
               </div>
@@ -1738,7 +1717,7 @@ function App() {
                   <Target size={24} />
                 </div>
                 <div>
-                  <h3>Areas for Improvement (3)</h3>
+                  <h3>Areas for Improvement</h3>
                   <p className="insight-subtitle">Opportunities to grow</p>
                 </div>
               </div>
@@ -1788,7 +1767,7 @@ function App() {
             <span>Back to Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>⚡ Batch Analysis Results</h2>
+            <h2>ResuGo Batch Analysis Results</h2>
             <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
           </div>
           <div className="navigation-actions">
@@ -1799,9 +1778,7 @@ function App() {
           </div>
         </div>
 
-        {/* REMOVED: Rate Limit Protection Info */}
-
-        {/* Stats - Only keep minimal stats */}
+        {/* Stats */}
         <div className="stats-container glass">
           <div className="stat-card">
             <div className="stat-icon success">
@@ -1836,11 +1813,9 @@ function App() {
           </div>
         </div>
 
-        {/* REMOVED: Key Usage Stats */}
-
         {/* Candidates Ranking */}
         <div className="section-title">
-          <h2>Candidate Rankings (5-8 skills analysis each)</h2>
+          <h2>Candidate Rankings</h2>
           <p>Sorted by ATS Score (Highest to Lowest)</p>
         </div>
         
@@ -2072,9 +2047,9 @@ function App() {
             </div>
           </div>
 
-          {/* Skills Analysis - 5-8 skills each */}
+          {/* Skills Analysis */}
           <div className="section-title">
-            <h2>Skills Analysis (5-8 skills each)</h2>
+            <h2>Skills Analysis</h2>
             <p>Detailed breakdown of matched and missing skills</p>
           </div>
           
@@ -2142,8 +2117,8 @@ function App() {
 
           {/* Summary Section with Complete 4-5 sentences */}
           <div className="section-title">
-            <h2>Profile Summary (4-5 complete sentences each)</h2>
-            <p>Key insights extracted from resume (no truncation)</p>
+            <h2>Profile Summary</h2>
+            <p>Key insights extracted from resume</p>
           </div>
           
           <div className="summary-grid">
@@ -2176,9 +2151,9 @@ function App() {
             </div>
           </div>
 
-          {/* Insights Section - Only 3 items each */}
+          {/* Insights Section */}
           <div className="section-title">
-            <h2>Insights & Recommendations (3 items each)</h2>
+            <h2>Insights & Recommendations</h2>
             <p>Key strengths and areas for improvement</p>
           </div>
           
@@ -2189,7 +2164,7 @@ function App() {
                   <TrendingUp size={24} />
                 </div>
                 <div>
-                  <h3>Key Strengths (3)</h3>
+                  <h3>Key Strengths</h3>
                   <p className="insight-subtitle">Areas where candidate excels</p>
                 </div>
               </div>
@@ -2214,7 +2189,7 @@ function App() {
                   <Target size={24} />
                 </div>
                 <div>
-                  <h3>Areas for Improvement (3)</h3>
+                  <h3>Areas for Improvement</h3>
                   <p className="insight-subtitle">Opportunities to grow</p>
                 </div>
               </div>
@@ -2275,12 +2250,12 @@ function App() {
                   <Brain className="logo-icon" />
                 </div>
                 <div className="logo-text">
-                  <h1>AI Resume Analyzer (Groq)</h1>
+                  <h1>ResuGo</h1>
                   <div className="logo-subtitle">
                     <span className="powered-by">Powered by</span>
                     <span className="groq-badge">⚡ Groq</span>
                     <span className="divider">•</span>
-                    <span className="tagline">5-8 Skills Analysis • Experience Summary • Years of Experience</span>
+                    <span className="tagline">Advanced AI Resume Analysis</span>
                   </div>
                 </div>
               </div>
@@ -2329,85 +2304,7 @@ function App() {
               </div>
             </div>
             
-            <div className="header-features">
-              {/* Backend Status */}
-              <div 
-                className="feature backend-status-indicator" 
-                style={{ 
-                  backgroundColor: backendStatusInfo.bgColor,
-                  borderColor: `${backendStatusInfo.color}30`,
-                  color: backendStatusInfo.color
-                }}
-              >
-                {backendStatusInfo.icon}
-                <span>{backendStatusInfo.text}</span>
-                {backendStatus === 'waking' && <Loader size={12} className="pulse-spinner" />}
-              </div>
-              
-              {/* AI Status */}
-              <div 
-                className="feature ai-status-indicator" 
-                style={{ 
-                  backgroundColor: aiStatusInfo.bgColor,
-                  borderColor: `${aiStatusInfo.color}30`,
-                  color: aiStatusInfo.color
-                }}
-              >
-                {aiStatusInfo.icon}
-                <span>{aiStatusInfo.text}</span>
-                {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
-              </div>
-              
-              {/* Key Status */}
-              <div className="feature key-status">
-                <Key size={16} />
-                <span>{getAvailableKeysCount()}/3 Keys</span>
-              </div>
-              
-              {/* Model Info */}
-              {modelInfo && (
-                <div className="feature model-info">
-                  <Cpu size={16} />
-                  <span>{getModelDisplayName(modelInfo)}</span>
-                </div>
-              )}
-              
-              {/* Navigation Indicator */}
-              {currentView !== 'main' && (
-                <div className="feature nav-indicator">
-                  <Grid size={16} />
-                  <span>{currentView === 'single-results' ? 'Single Analysis' : 
-                         currentView === 'batch-results' ? 'Batch Results' : 
-                         'Candidate Details'}</span>
-                </div>
-              )}
-              
-              {/* Warm-up Button */}
-              {aiStatus !== 'available' && (
-                <button 
-                  className="feature warmup-button"
-                  onClick={handleForceWarmup}
-                  disabled={isWarmingUp}
-                >
-                  {isWarmingUp ? (
-                    <Loader size={16} className="spinner" />
-                  ) : (
-                    <Thermometer size={16} />
-                  )}
-                  <span>Warm Up AI</span>
-                </button>
-              )}
-              
-              {/* Quota Status Toggle */}
-              <button 
-                className="feature quota-toggle"
-                onClick={() => setShowQuotaPanel(!showQuotaPanel)}
-                title="Show service status"
-              >
-                <BarChart size={16} />
-                <span>Service Status</span>
-              </button>
-            </div>
+            {/* REMOVED: Status indicators from header */}
           </div>
           
           <div className="header-wave">
@@ -2420,99 +2317,8 @@ function App() {
         </header>
 
         <main className="main-content">
-          {/* Status Panel */}
-          {showQuotaPanel && (
-            <div className="quota-status-panel glass">
-              <div className="quota-panel-header">
-                <div className="quota-title">
-                  <Activity size={20} />
-                  <h3>Service Status</h3>
-                </div>
-                <button 
-                  className="close-quota"
-                  onClick={() => setShowQuotaPanel(false)}
-                >
-                  <X size={18} />
-                </button>
-              </div>
-              
-              <div className="quota-summary">
-                <div className="summary-item">
-                  <div className="summary-label">Backend Status</div>
-                  <div className={`summary-value ${backendStatus === 'ready' ? 'success' : backendStatus === 'waking' ? 'warning' : 'error'}`}>
-                    {backendStatus === 'ready' ? '✅ Active' : 
-                     backendStatus === 'waking' ? '🔥 Waking Up' : 
-                     '💤 Sleeping'}
-                  </div>
-                </div>
-                <div className="summary-item">
-                  <div className="summary-label">Groq API Status</div>
-                  <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
-                    {aiStatus === 'available' ? '⚡ Ready' : 
-                     aiStatus === 'warming' ? '🔥 Warming' : 
-                     '⚠️ Enhanced Mode'}
-                  </div>
-                </div>
-                <div className="summary-item">
-                  <div className="summary-label">Available Keys</div>
-                  <div className={`summary-value ${getAvailableKeysCount() >= 2 ? 'success' : getAvailableKeysCount() === 1 ? 'warning' : 'error'}`}>
-                    🔑 {getAvailableKeysCount()}/3 keys
-                  </div>
-                </div>
-                <div className="summary-item">
-                  <div className="summary-label">AI Model</div>
-                  <div className="summary-value">
-                    {getModelDisplayName(modelInfo)}
-                  </div>
-                </div>
-              </div>
-              
-              <div className="action-buttons-panel">
-                <button 
-                  className="action-button refresh"
-                  onClick={checkBackendHealth}
-                >
-                  <RefreshCw size={16} />
-                  Refresh Status
-                </button>
-                <button 
-                  className="action-button warmup"
-                  onClick={handleForceWarmup}
-                  disabled={isWarmingUp}
-                >
-                  {isWarmingUp ? (
-                    <Loader size={16} className="spinner" />
-                  ) : (
-                    <Thermometer size={16} />
-                  )}
-                  Force Warm-up
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Status Banner - Simplified */}
-          <div className="top-notice-bar glass">
-            <div className="notice-content">
-              <div className="status-indicators">
-                <div className={`status-indicator ${backendStatus === 'ready' ? 'active' : 'inactive'}`}>
-                  <div className="indicator-dot"></div>
-                  <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}</span>
-                </div>
-                <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
-                  <div className="indicator-dot"></div>
-                  <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
-                </div>
-                <div className="status-indicator active">
-                  <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Mode: {currentView === 'single-results' ? 'Single' : 
-                                currentView === 'batch-results' ? 'Batch' : 
-                                currentView === 'candidate-detail' ? 'Details' : 
-                                batchMode ? 'Batch' : 'Single'}</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          {/* REMOVED: Status Panel */}
+          {/* REMOVED: Status Banner */}
 
           {/* Render Current View */}
           {renderCurrentView()}
@@ -2524,10 +2330,10 @@ function App() {
             <div className="footer-brand">
               <div className="footer-logo">
                 <Brain size={20} />
-                <span>AI Resume Analyzer (Groq)</span>
+                <span>ResuGo</span>
               </div>
               <p className="footer-tagline">
-                Groq AI • 5-8 skills analysis • Experience summary • Years of experience
+                Groq AI • Advanced AI Resume Analysis
               </p>
             </div>
             
@@ -2535,7 +2341,7 @@ function App() {
               <div className="footer-section">
                 <h4>Features</h4>
                 <a href="#">Groq AI</a>
-                <a href="#">5-8 Skills Analysis</a>
+                <a href="#">Skills Analysis</a>
                 <a href="#">Experience Summary</a>
                 <a href="#">Years of Experience</a>
               </div>
@@ -2557,7 +2363,7 @@ function App() {
           </div>
           
           <div className="footer-bottom">
-            <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
+            <p>© 2024 ResuGo. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
             <div className="footer-stats">
               <span className="stat">
                 <Brain size={12} />
@@ -2565,15 +2371,15 @@ function App() {
               </span>
               <span className="stat">
                 <Target size={12} />
-                Skills: 5-8 each
+                Skills Analysis
               </span>
               <span className="stat">
                 <Briefcase size={12} />
-                Experience: Summary included
+                Experience Summary
               </span>
               <span className="stat">
                 <Calendar size={12} />
-                Years: Analysis included
+                Years of Experience
               </span>
             </div>
           </div>
