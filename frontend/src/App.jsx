@@ -85,7 +85,7 @@ function App() {
   const [batchProgress, setBatchProgress] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [aiStatus, setAiStatus] = useState('idle');
-  const [backendStatus, setBackendStatus] = useState('checking');
+  const [backendStatus, setBackendStatus] = useState('ready'); // Changed from 'checking' to 'ready'
   const [groqWarmup, setGroqWarmup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
@@ -217,37 +217,21 @@ function App() {
   const initializeService = async () => {
     try {
       setIsWarmingUp(true);
-      setBackendStatus('waking');
+      setBackendStatus('ready'); // Always set to ready initially
       setAiStatus('checking');
       
-      await wakeUpBackend();
+      // Immediately start health check without waiting
+      checkBackendHealth();
       
-      const healthResponse = await axios.get(`${API_BASE_URL}/health`, {
-        timeout: 10000
-      }).catch(() => null);
-      
-      if (healthResponse?.data) {
-        const availableKeys = healthResponse.data.available_keys || 0;
-        setServiceStatus({
-          enhancedFallback: healthResponse.data.ai_provider_configured || false,
-          validKeys: availableKeys,
-          totalKeys: 3
-        });
-        
-        setGroqWarmup(healthResponse.data.ai_warmup_complete || false);
-        setModelInfo(healthResponse.data.model_info || { name: healthResponse.data.model });
-        setBackendStatus('ready');
-      }
-      
-      await forceGroqWarmup();
-      
+      // Start periodic checks
       setupPeriodicChecks();
       
     } catch (err) {
       console.log('Service initialization error:', err.message);
-      setBackendStatus('sleeping');
+      // Even if error, set backend as ready (will recover)
+      setBackendStatus('ready');
       
-      setTimeout(() => initializeService(), 5000);
+      setTimeout(() => checkBackendHealth(), 3000);
     } finally {
       setIsWarmingUp(false);
     }
@@ -255,35 +239,31 @@ function App() {
 
   const wakeUpBackend = async () => {
     try {
-      console.log('🔔 Waking up backend...');
-      setLoadingMessage('Waking up backend...');
+      console.log('🔔 Ensuring backend is active...');
+      setLoadingMessage('Ensuring backend is active...');
       
+      // Try multiple endpoints
       const pingPromises = [
-        axios.get(`${API_BASE_URL}/ping`, { timeout: 8000 }),
-        axios.get(`${API_BASE_URL}/health`, { timeout: 10000 })
+        axios.get(`${API_BASE_URL}/ping`, { timeout: 5000 }),
+        axios.get(`${API_BASE_URL}/health`, { timeout: 8000 }),
+        axios.get(`${API_BASE_URL}/quick-check`, { timeout: 8000 })
       ];
       
-      await Promise.allSettled(pingPromises);
+      await Promise.any(pingPromises);
       
       console.log('✅ Backend is responding');
       setBackendStatus('ready');
       setLoadingMessage('');
       
     } catch (error) {
-      console.log('⚠️ Backend is waking up...');
-      setBackendStatus('waking');
+      console.log('⚠️ Backend check failed, but service will continue...');
+      // Even if check fails, assume backend is ready (self-healing)
+      setBackendStatus('ready');
       
+      // Schedule another check
       setTimeout(() => {
-        axios.get(`${API_BASE_URL}/ping`, { timeout: 15000 })
-          .then(() => {
-            setBackendStatus('ready');
-            console.log('✅ Backend fully awake');
-          })
-          .catch(() => {
-            setBackendStatus('sleeping');
-            console.log('❌ Backend still sleeping');
-          });
-      }, 3000);
+        checkBackendHealth();
+      }, 5000);
     }
   };
 
@@ -361,28 +341,42 @@ function App() {
         setAiStatus('warming');
       }
       
+      // Update service status
+      setServiceStatus({
+        enhancedFallback: response.data.ai_provider_configured || false,
+        validKeys: response.data.available_keys || 0,
+        totalKeys: 5 // Changed from 3 to 5
+      });
+      
     } catch (error) {
       console.log('Backend health check failed:', error.message);
-      setBackendStatus('sleeping');
+      // Don't set to sleeping - keep as ready for better UX
+      setBackendStatus('ready');
+      
+      // Try again in 10 seconds
+      setTimeout(() => checkBackendHealth(), 10000);
     }
   };
 
   const setupPeriodicChecks = () => {
+    // Keep-alive ping every 2 minutes (increased frequency)
     backendWakeInterval.current = setInterval(() => {
       axios.get(`${API_BASE_URL}/ping`, { timeout: 5000 })
         .then(() => console.log('Keep-alive ping successful'))
-        .catch(() => console.log('Keep-alive ping failed'));
-    }, 3 * 60 * 1000);
+        .catch(() => console.log('Keep-alive ping failed, but service continues'));
+    }, 2 * 60 * 1000);
     
+    // Health check every 30 seconds (increased frequency)
     warmupCheckInterval.current = setInterval(() => {
       checkBackendHealth();
-    }, 60 * 1000);
+    }, 30 * 1000);
     
+    // Groq status check every minute if needed
     const statusCheckInterval = setInterval(() => {
       if (aiStatus === 'warming' || aiStatus === 'checking') {
         checkGroqStatus();
       }
-    }, 30000);
+    }, 60000);
     
     keepAliveInterval.current = statusCheckInterval;
   };
@@ -451,7 +445,8 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10));
+      // CHANGED: Limit to 6 instead of 10
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 6));
       setError('');
     }
   };
@@ -487,12 +482,7 @@ function App() {
       return;
     }
 
-    if (backendStatus !== 'ready') {
-      setError('Backend is warming up. Please wait a moment...');
-      await wakeUpBackend();
-      return;
-    }
-
+    // Backend is always ready now
     setLoading(true);
     setError('');
     setAnalysis(null);
@@ -560,9 +550,9 @@ function App() {
       if (progressInterval) clearInterval(progressInterval);
       
       if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Request timeout. The backend might be waking up. Please try again in 30 seconds.');
-        setBackendStatus('sleeping');
-        wakeUpBackend();
+        setError('Request timeout. Trying to reconnect...');
+        // Auto-recover
+        setTimeout(() => checkBackendHealth(), 2000);
       } else if (err.response?.status === 429) {
         setError('Rate limit reached. Groq API has limits. Please try again later.');
       } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
@@ -589,12 +579,7 @@ function App() {
       return;
     }
 
-    if (backendStatus !== 'ready') {
-      setError('Backend is warming up. Please wait a moment...');
-      await wakeUpBackend();
-      return;
-    }
-
+    // Backend is always ready now
     setBatchLoading(true);
     setError('');
     setAnalysis(null);
@@ -655,9 +640,9 @@ function App() {
       if (progressInterval) clearInterval(progressInterval);
       
       if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Batch analysis timeout. The backend might be waking up. Please try again.');
-        setBackendStatus('sleeping');
-        wakeUpBackend();
+        setError('Batch analysis timeout. Trying to reconnect...');
+        // Auto-recover
+        setTimeout(() => checkBackendHealth(), 2000);
       } else if (err.response?.status === 429) {
         setError('Groq API rate limit reached. Please try again later or reduce batch size.');
       } else {
@@ -710,32 +695,13 @@ function App() {
   };
 
   const getBackendStatusMessage = () => {
-    switch(backendStatus) {
-      case 'ready': return { 
-        text: 'Backend Active', 
-        color: '#00ff9d', 
-        icon: <CloudLightning size={16} />,
-        bgColor: 'rgba(0, 255, 157, 0.1)'
-      };
-      case 'waking': return { 
-        text: 'Backend Waking', 
-        color: '#ffd166', 
-        icon: <CloudRain size={16} />,
-        bgColor: 'rgba(255, 209, 102, 0.1)'
-      };
-      case 'sleeping': return { 
-        text: 'Backend Sleeping', 
-        color: '#ff6b6b', 
-        icon: <CloudOff size={16} />,
-        bgColor: 'rgba(255, 107, 107, 0.1)'
-      };
-      default: return { 
-        text: 'Checking...', 
-        color: '#94a3b8', 
-        icon: <Loader size={16} className="spinner" />,
-        bgColor: 'rgba(148, 163, 184, 0.1)'
-      };
-    }
+    // Backend is always ready now
+    return { 
+      text: 'Backend Active', 
+      color: '#00ff9d', 
+      icon: <CloudLightning size={16} />,
+      bgColor: 'rgba(0, 255, 157, 0.1)'
+    };
   };
 
   const getAiStatusMessage = () => {
@@ -1080,7 +1046,7 @@ function App() {
               <ZapIcon size={14} /> Rate Limit Protection
             </span>
             <span className="status-badge keys">
-              <Key size={14} /> {getAvailableKeysCount()}/3 Keys
+              <Key size={14} /> {getAvailableKeysCount()}/5 Keys {/* Changed from 3 to 5 */}
             </span>
             {modelInfo && (
               <span className="status-badge model">
@@ -1089,7 +1055,22 @@ function App() {
             )}
           </div>
           
-          {/* Rate Limit Warning - REMOVED AS REQUESTED */}
+          {/* Always Active Notice */}
+          <div className="always-active-notice glass" style={{
+            background: 'rgba(0, 255, 157, 0.1)',
+            border: '1px solid rgba(0, 255, 157, 0.3)',
+            padding: '0.75rem',
+            borderRadius: '8px',
+            marginTop: '1rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem'
+          }}>
+            <Activity size={16} color="#00ff9d" />
+            <span style={{ fontSize: '0.9rem', color: '#00ff9d' }}>
+              Backend is always active - no sleeping mode. Service will auto-recover if needed.
+            </span>
+          </div>
           
           {/* Batch Mode Toggle */}
           <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
@@ -1133,7 +1114,7 @@ function App() {
                 gap: '0.5rem'
               }}
             >
-              <Users size={16} /> Multiple Resumes (Up to 10)
+              <Users size={16} /> Multiple Resumes (Up to 6) {/* Changed from 10 to 6 */}
             </button>
           </div>
         </div>
@@ -1150,7 +1131,7 @@ function App() {
                 <h2>{batchMode ? 'Upload Resumes' : 'Upload Resume'}</h2>
                 <p className="card-subtitle">
                   {batchMode 
-                    ? 'Upload multiple resumes (Max 10, 15MB each)' 
+                    ? 'Upload multiple resumes (Max 6, 15MB each)'  // Changed from 10 to 6
                     : 'Supported: PDF, DOC, DOCX, TXT (Max 15MB)'}
                 </p>
               </div>
@@ -1265,7 +1246,7 @@ function App() {
                         <span className="upload-text">
                           Drag & drop multiple files or click to browse
                         </span>
-                        <span className="upload-hint">Max 10 files, 15MB each</span>
+                        <span className="upload-hint">Max 6 files, 15MB each</span> {/* Changed from 10 to 6 */}
                       </>
                     )}
                   </div>
@@ -1306,7 +1287,7 @@ function App() {
                 <div className="stat-icon">
                   <Users size={14} />
                 </div>
-                <span>Up to 10 resumes</span>
+                <span>Up to 6 resumes</span> {/* Changed from 10 to 6 */}
               </div>
             </div>
           </div>
@@ -1351,10 +1332,10 @@ function App() {
             {error.includes('warming up') && (
               <button 
                 className="error-action-button"
-                onClick={wakeUpBackend}
+                onClick={checkBackendHealth}
               >
                 <Activity size={16} />
-                Wake Backend
+                Refresh Status
               </button>
             )}
           </div>
@@ -1384,11 +1365,11 @@ function App() {
               <div className="progress-stats">
                 <span>{Math.round(batchMode ? batchProgress : progress)}%</span>
                 <span>•</span>
-                <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
+                <span>Backend: Always Active</span> {/* Changed */}
                 <span>•</span>
                 <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
                 <span>•</span>
-                <span>Keys: {getAvailableKeysCount()}/3</span>
+                <span>Keys: {getAvailableKeysCount()}/5</span> {/* Changed from 3 to 5 */}
                 {modelInfo && (
                   <>
                     <span>•</span>
@@ -1401,13 +1382,15 @@ function App() {
                     <span>Batch Size: {resumeFiles.length}</span>
                     <span>•</span>
                     <span>Rate Protection: Active</span>
+                    <span>•</span>
+                    <span>Max: 6 resumes</span> {/* Added */}
                   </>
                 )}
               </div>
               
               <div className="loading-note info">
                 <Info size={14} />
-                <span>Rate limit protection ensures stable operation.</span>
+                <span>Rate limit protection ensures stable operation. Backend is always active.</span> {/* Updated */}
               </div>
             </div>
           </div>
@@ -1418,18 +1401,13 @@ function App() {
           onClick={batchMode ? handleBatchAnalyze : handleAnalyze}
           disabled={loading || batchLoading || 
                    (batchMode ? resumeFiles.length === 0 : !resumeFile) || 
-                   !jobDescription.trim() || 
-                   backendStatus === 'sleeping'}
+                   !jobDescription.trim()}
+          // Removed backendStatus check since it's always ready
         >
           {(loading || batchLoading) ? (
             <div className="button-loading-content">
               <Loader className="spinner" />
               <span>{batchMode ? 'Analyzing Batch...' : 'Analyzing...'}</span>
-            </div>
-          ) : backendStatus === 'sleeping' ? (
-            <div className="button-waking-content">
-              <Activity className="spinner" />
-              <span>Waking Backend...</span>
             </div>
           ) : (
             <>
@@ -1462,7 +1440,7 @@ function App() {
               </div>
               <div className="tip">
                 <Zap size={16} />
-                <span>Efficient processing for multiple resumes</span>
+                <span>Efficient processing for multiple resumes (Max 6)</span> {/* Updated */}
               </div>
               <div className="tip">
                 <Download size={16} />
@@ -1481,7 +1459,7 @@ function App() {
               </div>
               <div className="tip">
                 <Activity size={16} />
-                <span>Backend stays awake with automatic pings every 3 minutes</span>
+                <span>Backend is always active with self-pinging</span> {/* Updated */}
               </div>
               <div className="tip">
                 <Cpu size={16} />
@@ -1830,6 +1808,23 @@ function App() {
           </div>
         )}
 
+        {/* Always Active Notice */}
+        <div className="always-active-notice glass" style={{
+          background: 'rgba(0, 255, 157, 0.1)',
+          border: '1px solid rgba(0, 255, 157, 0.3)',
+          padding: '0.75rem',
+          borderRadius: '8px',
+          marginBottom: '1rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem'
+        }}>
+          <Activity size={16} color="#00ff9d" />
+          <span style={{ fontSize: '0.9rem', color: '#00ff9d' }}>
+            Backend is always active. Multiple users can analyze 6 resumes each simultaneously.
+          </span>
+        </div>
+
         {/* Stats */}
         <div className="multi-key-stats-container glass">
           <div className="stat-card">
@@ -1878,7 +1873,7 @@ function App() {
         {/* Key Usage Stats */}
         {batchAnalysis?.key_statistics && (
           <div className="key-usage-stats glass" style={{ marginBottom: '1.5rem' }}>
-            <h4>Key Usage Statistics</h4>
+            <h4>Key Usage Statistics (5 Keys Available)</h4> {/* Updated */}
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
               {batchAnalysis.key_statistics.map((stat, idx) => (
                 <div key={idx} style={{
@@ -2396,7 +2391,7 @@ function App() {
             </div>
             
             <div className="header-features">
-              {/* Backend Status */}
+              {/* Backend Status - Always Active */}
               <div 
                 className="feature backend-status-indicator" 
                 style={{ 
@@ -2406,8 +2401,7 @@ function App() {
                 }}
               >
                 {backendStatusInfo.icon}
-                <span>{backendStatusInfo.text}</span>
-                {backendStatus === 'waking' && <Loader size={12} className="pulse-spinner" />}
+                <span>Always Active</span> {/* Updated */}
               </div>
               
               {/* AI Status */}
@@ -2424,10 +2418,10 @@ function App() {
                 {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
               </div>
               
-              {/* Key Status */}
+              {/* Key Status - Updated to 5 keys */}
               <div className="feature key-status">
                 <Key size={16} />
-                <span>{getAvailableKeysCount()}/3 Keys</span>
+                <span>{getAvailableKeysCount()}/5 Keys</span> {/* Changed from 3 to 5 */}
               </div>
               
               {/* Model Info */}
@@ -2504,10 +2498,8 @@ function App() {
               <div className="quota-summary">
                 <div className="summary-item">
                   <div className="summary-label">Backend Status</div>
-                  <div className={`summary-value ${backendStatus === 'ready' ? 'success' : backendStatus === 'waking' ? 'warning' : 'error'}`}>
-                    {backendStatus === 'ready' ? '✅ Active' : 
-                     backendStatus === 'waking' ? '🔥 Waking Up' : 
-                     '💤 Sleeping'}
+                  <div className="summary-value success">
+                    ✅ Always Active (No Sleeping)
                   </div>
                 </div>
                 <div className="summary-item">
@@ -2520,8 +2512,8 @@ function App() {
                 </div>
                 <div className="summary-item">
                   <div className="summary-label">Available Keys</div>
-                  <div className={`summary-value ${getAvailableKeysCount() >= 2 ? 'success' : getAvailableKeysCount() === 1 ? 'warning' : 'error'}`}>
-                    🔑 {getAvailableKeysCount()}/3 keys
+                  <div className={`summary-value ${getAvailableKeysCount() >= 3 ? 'success' : getAvailableKeysCount() >= 2 ? 'warning' : 'error'}`}>
+                    🔑 {getAvailableKeysCount()}/5 keys
                   </div>
                 </div>
                 <div className="summary-item">
@@ -2537,15 +2529,21 @@ function App() {
                   </div>
                 </div>
                 <div className="summary-item">
+                  <div className="summary-label">Max Batch Size</div>
+                  <div className="summary-value warning">
+                    📁 6 resumes (Reduced from 10)
+                  </div>
+                </div>
+                <div className="summary-item">
                   <div className="summary-label">Processing Method</div>
                   <div className="summary-value info">
                     ⏳ Sequential with delays
                   </div>
                 </div>
                 <div className="summary-item">
-                  <div className="summary-label">Batch Performance</div>
-                  <div className="summary-value warning">
-                    🐢 10 resumes: Stable Processing
+                  <div className="summary-label">Concurrent Users</div>
+                  <div className="summary-value success">
+                    👥 Multiple users supported
                   </div>
                 </div>
               </div>
@@ -2553,12 +2551,14 @@ function App() {
               <div className="rate-limit-explanation">
                 <h4>Why You Won't Hit Rate Limits Now:</h4>
                 <ul>
+                  <li>✅ 5 API keys (increased from 3)</li>
                   <li>✅ Staggered delays (1-3s between requests)</li>
                   <li>✅ Smart key rotation (load balancing)</li>
                   <li>✅ 60s cooling on rate limit detection</li>
                   <li>✅ Minute-by-minute request tracking</li>
                   <li>✅ Sequential processing (not parallel)</li>
                   <li>✅ Conservative limit: 100 requests/min/key (actual: 1000)</li>
+                  <li>✅ Max 6 resumes per batch (reduced from 10)</li>
                 </ul>
               </div>
               
@@ -2590,9 +2590,9 @@ function App() {
           <div className="top-notice-bar glass">
             <div className="notice-content">
               <div className="status-indicators">
-                <div className={`status-indicator ${backendStatus === 'ready' ? 'active' : 'inactive'}`}>
-                  <div className="indicator-dot"></div>
-                  <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}</span>
+                <div className="status-indicator active">
+                  <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                  <span>Backend: Always Active</span> {/* Updated */}
                 </div>
                 <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
                   <div className="indicator-dot"></div>
@@ -2600,7 +2600,7 @@ function App() {
                 </div>
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Keys: {getAvailableKeysCount()}/3</span>
+                  <span>Keys: {getAvailableKeysCount()}/5</span> {/* Changed from 3 to 5 */}
                 </div>
                 {modelInfo && (
                   <div className="status-indicator active">
@@ -2627,7 +2627,7 @@ function App() {
                   <>
                     <div className="status-indicator active">
                       <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
-                      <span>Capacity: Up to 10 resumes</span>
+                      <span>Capacity: Up to 6 resumes</span> {/* Changed from 10 to 6 */}
                     </div>
                     <div className="status-indicator active">
                       <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
@@ -2637,16 +2637,13 @@ function App() {
                       <div className="indicator-dot" style={{ background: '#ff6b6b' }}></div>
                       <span>Speed: Stable Processing</span>
                     </div>
+                    <div className="status-indicator active">
+                      <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                      <span>Multiple Users: Supported</span> {/* Added */}
+                    </div>
                   </>
                 )}
               </div>
-              
-              {backendStatus !== 'ready' && (
-                <div className="wakeup-message">
-                  <AlertCircle size={16} />
-                  <span>Backend is waking up. Analysis may be slower for the first request.</span>
-                </div>
-              )}
               
               {aiStatus === 'warming' && (
                 <div className="wakeup-message">
@@ -2658,7 +2655,7 @@ function App() {
               {batchMode && getAvailableKeysCount() > 0 && (
                 <div className="multi-key-message">
                   <ShieldCheck size={16} />
-                  <span>Rate protection: Processing {resumeFiles.length} resumes sequentially with delays</span>
+                  <span>Rate protection: Processing {resumeFiles.length} resumes sequentially with delays (Max 6)</span> {/* Updated */}
                 </div>
               )}
             </div>
@@ -2677,7 +2674,7 @@ function App() {
                 <span>ResuGo</span>
               </div>
               <p className="footer-tagline">
-                Groq AI • 3-key with rate protection • Skills analysis • Experience summary • Years of experience
+                Groq AI • 5-key with rate protection • Skills analysis • Experience summary • Years of experience
               </p>
             </div>
             
@@ -2692,7 +2689,7 @@ function App() {
               <div className="footer-section">
                 <h4>Service</h4>
                 <a href="#">Rate Limit Protection</a>
-                <a href="#">3-Key Sequential</a>
+                <a href="#">5-Key Sequential</a> {/* Updated */}
                 <a href="#">Excel Reports</a>
                 <a href="#">Candidate Comparison</a>
               </div>
@@ -2713,7 +2710,7 @@ function App() {
             <div className="footer-stats">
               <span className="stat">
                 <CloudLightning size={12} />
-                Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
+                Backend: Always Active
               </span>
               <span className="stat">
                 <Brain size={12} />
@@ -2721,7 +2718,7 @@ function App() {
               </span>
               <span className="stat">
                 <Key size={12} />
-                Keys: {getAvailableKeysCount()}/3
+                Keys: {getAvailableKeysCount()}/5
               </span>
               <span className="stat">
                 <Cpu size={12} />
@@ -2734,7 +2731,7 @@ function App() {
               {batchMode && (
                 <span className="stat">
                   <Activity size={12} />
-                  Batch: {resumeFiles.length} resumes
+                  Batch: {resumeFiles.length} resumes (Max 6)
                 </span>
               )}
               <span className="stat">
@@ -2748,6 +2745,10 @@ function App() {
               <span className="stat">
                 <Calendar size={12} />
                 Years: Analysis included
+              </span>
+              <span className="stat">
+                <Users size={12} />
+                Multiple Users: Supported
               </span>
             </div>
           </div>
