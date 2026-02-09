@@ -34,11 +34,13 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Configure Groq API Keys (3 keys for parallel processing)
+# Configure Groq API Keys (5 keys for parallel processing)
 GROQ_API_KEYS = [
     os.getenv('GROQ_API_KEY_1'),
     os.getenv('GROQ_API_KEY_2'),
-    os.getenv('GROQ_API_KEY_3')
+    os.getenv('GROQ_API_KEY_3'),
+    os.getenv('GROQ_API_KEY_4'),
+    os.getenv('GROQ_API_KEY_5')
 ]
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -64,21 +66,23 @@ print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
 score_cache = {}
 cache_lock = threading.Lock()
 
-# Batch processing configuration
-MAX_CONCURRENT_REQUESTS = 3
-MAX_BATCH_SIZE = 10
+# Batch processing configuration - CHANGED from 10 to 6
+MAX_CONCURRENT_REQUESTS = 5
+MAX_BATCH_SIZE = 6
 MIN_SKILLS_TO_SHOW = 5  # Minimum skills to show
 MAX_SKILLS_TO_SHOW = 8  # Maximum skills to show (5-8 range)
 
-# Rate limiting protection - IMPORTANT: Reduced from 3 to 2
+# Rate limiting protection
 MAX_RETRIES = 2
 RETRY_DELAY_BASE = 2
 
-# Track key usage - ADDED rate limit tracking
+# Track key usage - Updated for 5 keys
 key_usage = {
     0: {'count': 0, 'last_used': None, 'cooling': False, 'errors': 0, 'requests_this_minute': 0, 'minute_window_start': None},
     1: {'count': 0, 'last_used': None, 'cooling': False, 'errors': 0, 'requests_this_minute': 0, 'minute_window_start': None},
-    2: {'count': 0, 'last_used': None, 'cooling': False, 'errors': 0, 'requests_this_minute': 0, 'minute_window_start': None}
+    2: {'count': 0, 'last_used': None, 'cooling': False, 'errors': 0, 'requests_this_minute': 0, 'minute_window_start': None},
+    3: {'count': 0, 'last_used': None, 'cooling': False, 'errors': 0, 'requests_this_minute': 0, 'minute_window_start': None},
+    4: {'count': 0, 'last_used': None, 'cooling': False, 'errors': 0, 'requests_this_minute': 0, 'minute_window_start': None}
 }
 
 # Rate limit thresholds (Groq Developer Plan)
@@ -104,7 +108,7 @@ def get_available_key(resume_index=None):
     current_time = datetime.now()
     
     # Reset minute counters if needed
-    for i in range(3):
+    for i in range(5):
         if key_usage[i]['minute_window_start'] is None:
             key_usage[i]['minute_window_start'] = current_time
             key_usage[i]['requests_this_minute'] = 0
@@ -114,7 +118,7 @@ def get_available_key(resume_index=None):
     
     # If specific index provided, try that key first
     if resume_index is not None:
-        key_index = resume_index % 3
+        key_index = resume_index % 5
         if (GROQ_API_KEYS[key_index] and 
             not key_usage[key_index]['cooling'] and
             key_usage[key_index]['requests_this_minute'] < MAX_REQUESTS_PER_MINUTE_PER_KEY):
@@ -611,6 +615,28 @@ def keep_service_warm():
         except Exception as e:
             print(f"⚠️ Keep-warm thread error: {str(e)}")
             time.sleep(180)
+
+def keep_backend_awake():
+    """Keep backend always active"""
+    while service_running:
+        try:
+            time.sleep(60)  # Ping every 60 seconds
+            
+            try:
+                # Self-ping to keep the service awake
+                requests.get(f"http://localhost:{PORT}/ping", timeout=10)
+                print(f"✅ Self-ping successful to keep backend awake")
+            except:
+                # If self-ping fails, try health check
+                try:
+                    response = requests.get(f"http://localhost:{PORT}/health", timeout=10)
+                    print(f"✅ Health check successful")
+                except Exception as e:
+                    print(f"⚠️ Keep-alive check failed: {e}")
+                    
+        except Exception as e:
+            print(f"⚠️ Keep-backend-awake thread error: {str(e)}")
+            time.sleep(60)
 
 # Text extraction functions
 def extract_text_from_pdf(file_path):
@@ -1110,7 +1136,7 @@ def home():
     # Calculate current minute usage
     current_time = datetime.now()
     key_usage_info = []
-    for i in range(3):
+    for i in range(5):
         if GROQ_API_KEYS[i]:
             if key_usage[i]['minute_window_start']:
                 seconds_in_window = (current_time - key_usage[i]['minute_window_start']).total_seconds()
@@ -1145,7 +1171,7 @@ def home():
     <body>
         <div class="container">
             <h1>🚀 Resume Analyzer API (Groq Parallel)</h1>
-            <p>AI-powered resume analysis using Groq API with 3-key parallel processing</p>
+            <p>AI-powered resume analysis using Groq API with 5-key parallel processing</p>
             
             <div class="status ''' + ('ready' if warmup_complete else 'warming') + '''">
                 <strong>Status:</strong> ''' + warmup_status + '''
@@ -1171,7 +1197,7 @@ def home():
             <p><strong>API Provider:</strong> Groq (Parallel Processing)</p>
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
             <p><strong>Processing:</strong> Rate-limited round-robin with staggered delays</p>
-            <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/3</p>
+            <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/5</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
             
             <h2>📡 Endpoints</h2>
@@ -1349,7 +1375,7 @@ def analyze_resume_batch():
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         
         # Reset tracking
-        for i in range(3):
+        for i in range(5):
             key_usage[i]['count'] = 0
             key_usage[i]['last_used'] = None
             key_usage[i]['errors'] = 0
@@ -1387,7 +1413,7 @@ def analyze_resume_batch():
                 })
             
             # Check if any key needs cooling
-            for i in range(3):
+            for i in range(5):
                 if key_usage[i]['requests_this_minute'] >= MAX_REQUESTS_PER_MINUTE_PER_KEY - 2:
                     print(f"⚠️ Key {i+1} near limit, marking for cooling")
                     mark_key_cooling(i, 30)
@@ -1411,7 +1437,7 @@ def analyze_resume_batch():
                 batch_excel_path = create_minimal_batch_report(all_analyses, job_description, excel_filename)
         
         key_stats = []
-        for i in range(3):
+        for i in range(5):
             if GROQ_API_KEYS[i]:
                 key_stats.append({
                     'key': f'Key {i+1}',
@@ -2505,7 +2531,7 @@ def health_check():
         'resume_previews_folder_exists': os.path.exists(RESUME_PREVIEW_FOLDER),
         'resume_previews_stored': len(resume_storage),
         'inactive_minutes': inactive_minutes,
-        'version': '2.7.0',
+        'version': '3.0.0',
         'key_status': key_status,
         'available_keys': available_keys,
         'configuration': {
@@ -2517,13 +2543,14 @@ def health_check():
             'years_experience_analysis': True
         },
         'processing_method': 'rate_limited_sequential',
-        'performance_target': '10 resumes in 20-30 seconds (safer)',
+        'performance_target': '6 resumes in 20-30 seconds (safer)',
         'skills_analysis': '5-8 skills per category',
         'summaries': 'Complete 4-5 sentences each',
         'years_experience': 'Included in analysis',
         'excel_report': 'Candidate name & experience summary included',
         'insights': '3 strengths & 3 improvements',
-        'rate_limit_protection': 'ACTIVE - Staggered delays, minute tracking, automatic cooling'
+        'rate_limit_protection': 'ACTIVE - Staggered delays, minute tracking, automatic cooling',
+        'always_awake': True
     })
 
 def cleanup_on_exit():
@@ -2559,13 +2586,13 @@ if __name__ == '__main__':
     print("\n" + "="*50)
     print("🚀 Resume Analyzer Backend Starting (Groq Parallel)...")
     print("="*50)
-    port = int(os.environ.get('PORT', 5002))
-    print(f"📍 Server: http://localhost:{port}")
+    PORT = int(os.environ.get('PORT', 5002))
+    print(f"📍 Server: http://localhost:{PORT}")
     print(f"⚡ AI Provider: Groq (Parallel Processing)")
     print(f"🤖 Model: {GROQ_MODEL}")
     
     available_keys = sum(1 for key in GROQ_API_KEYS if key)
-    print(f"🔑 API Keys: {available_keys}/3 configured")
+    print(f"🔑 API Keys: {available_keys}/5 configured")
     
     for i, key in enumerate(GROQ_API_KEYS):
         status = "✅ Configured" if key else "❌ Not configured"
@@ -2577,17 +2604,18 @@ if __name__ == '__main__':
     print(f"⚠️ RATE LIMIT PROTECTION: ACTIVE")
     print(f"📊 Max requests/minute/key: {MAX_REQUESTS_PER_MINUTE_PER_KEY}")
     print(f"⏳ Staggered delays: 1-3 seconds between requests")
-    print(f"🔀 Key rotation: Smart load balancing")
+    print(f"🔀 Key rotation: Smart load balancing (5 keys)")
     print(f"🛡️ Cooling: 60s on rate limits")
-    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
+    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes (CHANGED from 10 to 6)")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
     print(f"✅ Years of Experience: Included in analysis")
     print(f"✅ Excel Report: Experience summary column added (Candidate name removed from comparison sheet)")
     print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
-    print(f"⚠️ Performance: ~10 resumes in 20-30 seconds (SAFER for rate limits)")
+    print(f"⚠️ Performance: ~6 resumes in 20-30 seconds (SAFER for rate limits)")
     print(f"✅ Excel Reports: Single & Batch with Individual Sheets")
+    print(f"✅ Always Awake: Backend will stay active with self-pinging")
     print("="*50 + "\n")
     
     # Check for required dependencies
@@ -2601,7 +2629,7 @@ if __name__ == '__main__':
     
     if available_keys == 0:
         print("⚠️  WARNING: No Groq API keys found!")
-        print("Please set GROQ_API_KEY_1, GROQ_API_KEY_2, GROQ_API_KEY_3 in environment variables")
+        print("Please set GROQ_API_KEY_1 through GROQ_API_KEY_5 in environment variables")
         print("Get free API keys from: https://console.groq.com")
     
     gc.enable()
@@ -2613,10 +2641,14 @@ if __name__ == '__main__':
         keep_warm_thread = threading.Thread(target=keep_service_warm, daemon=True)
         keep_warm_thread.start()
         
+        # Start keep-backend-awake thread
+        keep_awake_thread = threading.Thread(target=keep_backend_awake, daemon=True)
+        keep_awake_thread.start()
+        
         cleanup_thread = threading.Thread(target=periodic_cleanup, daemon=True)
         cleanup_thread.start()
         
         print("✅ Background threads started")
     
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
-    app.run(host='0.0.0.0', port=port, debug=debug_mode, threaded=True)
+    app.run(host='0.0.0.0', port=PORT, debug=debug_mode, threaded=True)
