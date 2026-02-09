@@ -97,7 +97,7 @@ function App() {
   const [serviceStatus, setServiceStatus] = useState({
     enhancedFallback: true,
     validKeys: 0,
-    totalKeys: 3
+    totalKeys: 0
   });
   
   // View management for navigation
@@ -861,7 +861,7 @@ function App() {
               <Brain className="logo-icon" size={32} />
             </div>
             <div className="login-logo-text">
-              <h1>ResuGo</h1>
+              <h1>AI Resume Analyzer</h1>
               <p className="login-subtitle">
                 <span className="groq-badge-login">⚡ Groq AI</span>
                 <span className="divider">•</span>
@@ -1067,94 +1067,90 @@ function App() {
     const renderMainView = () => (
       <div className="upload-section">
         <div className="section-header">
-          <div className="section-title-container">
-            <div className="section-title-icon">
-              <Rocket size={28} />
-            </div>
-            <div>
-              <h2>Start Your Analysis</h2>
-              <p>Upload resume(s) and job description to get detailed insights</p>
-              
-              {/* Status Indicators */}
-              <div className="status-indicators-container">
-                <div className="status-indicator" style={{ 
-                  backgroundColor: backendStatusInfo.bgColor,
-                  color: backendStatusInfo.color,
-                  borderColor: backendStatusInfo.color + '40'
-                }}>
-                  <div className="status-icon-wrapper">
-                    {backendStatusInfo.icon}
-                  </div>
-                  <span className="status-text">{backendStatusInfo.text}</span>
-                </div>
-                
-                <div className="status-indicator" style={{ 
-                  backgroundColor: aiStatusInfo.bgColor,
-                  color: aiStatusInfo.color,
-                  borderColor: aiStatusInfo.color + '40'
-                }}>
-                  <div className="status-icon-wrapper">
-                    {aiStatusInfo.icon}
-                  </div>
-                  <span className="status-text">{aiStatusInfo.text}</span>
-                </div>
-                
-                <div className="status-indicator" style={{ 
-                  backgroundColor: aiStatus === 'available' ? 'rgba(0, 255, 157, 0.1)' : 'rgba(255, 209, 102, 0.1)',
-                  color: aiStatus === 'available' ? '#00ff9d' : '#ffd166',
-                  borderColor: aiStatus === 'available' ? '#00ff9d40' : '#ffd16640'
-                }}>
-                  <div className="status-icon-wrapper">
-                    <Key size={16} />
-                  </div>
-                  <span className="status-text">Keys: {getAvailableKeysCount()}/3</span>
-                </div>
-              </div>
-            </div>
+          <h2>Start Your Analysis</h2>
+          <p>Upload resume(s) and job description to get detailed insights</p>
+          <div className="service-status">
+            <span className="status-badge backend">
+              {backendStatusInfo.icon} {backendStatusInfo.text}
+            </span>
+            <span className="status-badge ai">
+              {aiStatusInfo.icon} {aiStatusInfo.text}
+            </span>
+            <span className="status-badge always-active">
+              <ZapIcon size={14} /> Rate Limit Protection
+            </span>
+            <span className="status-badge keys">
+              <Key size={14} /> {getAvailableKeysCount()}/3 Keys
+            </span>
+            {modelInfo && (
+              <span className="status-badge model">
+                <Cpu size={14} /> {getModelDisplayName(modelInfo)}
+              </span>
+            )}
           </div>
           
+          {/* Rate Limit Warning */}
+          {(backendStatus === 'ready' && aiStatus === 'available') && (
+            <div className="rate-limit-warning glass" style={{
+              background: 'rgba(255, 209, 102, 0.1)',
+              border: '1px solid rgba(255, 209, 102, 0.3)',
+              padding: '0.75rem 1rem',
+              borderRadius: '8px',
+              marginTop: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              <AlertTriangle size={16} color="#ffd166" />
+              <span style={{ fontSize: '0.9rem' }}>
+                <strong>Rate Limit Protection:</strong> Staggered delays ensure you won't hit limits. 10 resumes take ~20-30s (safer).
+              </span>
+            </div>
+          )}
+          
           {/* Batch Mode Toggle */}
-          <div className="mode-toggle-container">
+          <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
             <button
               className={`mode-toggle ${!batchMode ? 'active' : ''}`}
               onClick={() => {
                 setBatchMode(false);
                 setResumeFiles([]);
               }}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: !batchMode ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}
             >
-              <div className="mode-toggle-content">
-                <User size={18} />
-                <div className="mode-toggle-text">
-                  <span className="mode-title">Single Resume</span>
-                  <span className="mode-subtitle">Individual analysis</span>
-                </div>
-              </div>
-              {!batchMode && (
-                <div className="mode-active-indicator">
-                  <Check size={16} />
-                </div>
-              )}
+              <User size={16} /> Single Resume
             </button>
-            
             <button
               className={`mode-toggle ${batchMode ? 'active' : ''}`}
               onClick={() => {
                 setBatchMode(true);
                 setResumeFile(null);
               }}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: batchMode ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}
             >
-              <div className="mode-toggle-content">
-                <Users size={18} />
-                <div className="mode-toggle-text">
-                  <span className="mode-title">Multiple Resumes</span>
-                  <span className="mode-subtitle">Up to 10 files</span>
-                </div>
-              </div>
-              {batchMode && (
-                <div className="mode-active-indicator">
-                  <Check size={16} />
-                </div>
-              )}
+              <Users size={16} /> Multiple Resumes (Up to 10)
             </button>
           </div>
         </div>
@@ -1162,16 +1158,10 @@ function App() {
         <div className="upload-grid">
           {/* Left Column - File Upload */}
           <div className="upload-card glass">
-            <div className="upload-card-decoration"></div>
+            <div className="card-decoration"></div>
             <div className="card-header">
               <div className="header-icon-wrapper">
-                <div className="icon-background" style={{ 
-                  background: batchMode 
-                    ? 'linear-gradient(135deg, #8b5cf6, #7c3aed)' 
-                    : 'linear-gradient(135deg, #3b82f6, #1d4ed8)' 
-                }}>
-                  {batchMode ? <Users className="header-icon" /> : <FileText className="header-icon" />}
-                </div>
+                {batchMode ? <Users className="header-icon" /> : <FileText className="header-icon" />}
               </div>
               <div>
                 <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
@@ -1191,13 +1181,6 @@ function App() {
                 onDragLeave={handleDrag}
                 onDragOver={handleDrag}
                 onDrop={handleDrop}
-                style={{
-                  background: dragActive 
-                    ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(29, 78, 216, 0.1))' 
-                    : resumeFile 
-                      ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.05))' 
-                      : 'linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(29, 78, 216, 0.02))'
-                }}
               >
                 <input
                   type="file"
@@ -1210,34 +1193,21 @@ function App() {
                   <div className="upload-icon-wrapper">
                     {resumeFile ? (
                       <div className="file-preview">
-                        <div className="file-preview-icon">
-                          <FileText size={40} />
-                        </div>
+                        <FileText size={40} />
                         <div className="file-preview-info">
                           <span className="file-name">{resumeFile.name}</span>
                           <span className="file-size">
                             {(resumeFile.size / 1024 / 1024).toFixed(2)} MB
                           </span>
-                          <span className="file-type">
-                            {resumeFile.type || 'Resume file'}
-                          </span>
                         </div>
                       </div>
                     ) : (
                       <>
-                        <div className="upload-icon-circle">
-                          <Upload className="upload-icon" />
-                        </div>
+                        <Upload className="upload-icon" />
                         <span className="upload-text">
                           Drag & drop or click to browse
                         </span>
                         <span className="upload-hint">Max file size: 15MB</span>
-                        <div className="file-types-hint">
-                          <span className="file-type-tag">PDF</span>
-                          <span className="file-type-tag">DOC</span>
-                          <span className="file-type-tag">DOCX</span>
-                          <span className="file-type-tag">TXT</span>
-                        </div>
                       </>
                     )}
                   </div>
@@ -1248,7 +1218,6 @@ function App() {
                     className="change-file-btn"
                     onClick={() => setResumeFile(null)}
                   >
-                    <RefreshCw size={14} />
                     Change File
                   </button>
                 )}
@@ -1261,13 +1230,6 @@ function App() {
                 onDragLeave={handleDrag}
                 onDragOver={handleDrag}
                 onDrop={handleBatchDrop}
-                style={{
-                  background: dragActive 
-                    ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(124, 58, 237, 0.1))' 
-                    : resumeFiles.length > 0 
-                      ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.05))' 
-                      : 'linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(124, 58, 237, 0.02))'
-                }}
               >
                 <input
                   type="file"
@@ -1280,14 +1242,12 @@ function App() {
                 <label htmlFor="batch-resume-upload" className="file-label">
                   <div className="upload-icon-wrapper">
                     {resumeFiles.length > 0 ? (
-                      <div className="batch-upload-preview">
-                        <div className="batch-header">
-                          <div className="batch-icon-circle">
-                            <Users size={32} />
-                          </div>
-                          <div className="batch-info">
-                            <span className="batch-count">{resumeFiles.length} resume(s) selected</span>
-                            <span className="batch-size">
+                      <div style={{ width: '100%' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                          <Users size={40} />
+                          <div style={{ textAlign: 'left' }}>
+                            <span className="file-name">{resumeFiles.length} resume(s) selected</span>
+                            <span className="file-size">
                               Total: {(resumeFiles.reduce((acc, file) => acc + file.size, 0) / 1024 / 1024).toFixed(2)} MB
                             </span>
                           </div>
@@ -1315,29 +1275,14 @@ function App() {
                             </div>
                           ))}
                         </div>
-                        
-                        {resumeFiles.length < 10 && (
-                          <div className="add-more-files">
-                            <Plus size={16} />
-                            <span>Click to add more files (max 10)</span>
-                          </div>
-                        )}
                       </div>
                     ) : (
                       <>
-                        <div className="upload-icon-circle">
-                          <Upload className="upload-icon" />
-                        </div>
+                        <Upload className="upload-icon" />
                         <span className="upload-text">
                           Drag & drop multiple files or click to browse
                         </span>
                         <span className="upload-hint">Max 10 files, 15MB each</span>
-                        <div className="file-types-hint">
-                          <span className="file-type-tag">PDF</span>
-                          <span className="file-type-tag">DOC</span>
-                          <span className="file-type-tag">DOCX</span>
-                          <span className="file-type-tag">TXT</span>
-                        </div>
                       </>
                     )}
                   </div>
@@ -1347,9 +1292,8 @@ function App() {
                   <button 
                     className="change-file-btn"
                     onClick={clearBatchFiles}
-                    style={{ background: 'linear-gradient(135deg, #ef4444, #dc2626)' }}
+                    style={{ background: '#ff6b6b' }}
                   >
-                    <Trash2 size={14} />
                     Clear All Files
                   </button>
                 )}
@@ -1357,64 +1301,39 @@ function App() {
             )}
             
             <div className="upload-stats">
-              <div className="stat" style={{ 
-                background: aiStatus === 'available' 
-                  ? 'linear-gradient(135deg, rgba(0, 255, 157, 0.1), rgba(0, 255, 157, 0.05))' 
-                  : 'linear-gradient(135deg, rgba(255, 209, 102, 0.1), rgba(255, 209, 102, 0.05))'
-              }}>
-                <div className="stat-icon" style={{ 
-                  color: aiStatus === 'available' ? '#00ff9d' : '#ffd166'
-                }}>
-                  <Brain size={16} />
+              <div className="stat">
+                <div className="stat-icon">
+                  <Brain size={14} />
                 </div>
-                <div className="stat-content">
-                  <span className="stat-title">Groq AI analysis</span>
-                  <span className="stat-subtitle">{getModelDisplayName(modelInfo)}</span>
-                </div>
+                <span>Groq AI analysis</span>
               </div>
-              <div className="stat" style={{ 
-                background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(29, 78, 216, 0.05))' 
-              }}>
-                <div className="stat-icon" style={{ color: '#3b82f6' }}>
-                  <Activity size={16} />
+              <div className="stat">
+                <div className="stat-icon">
+                  <Cpu size={14} />
                 </div>
-                <div className="stat-content">
-                  <span className="stat-title">Rate Limit Protection</span>
-                  <span className="stat-subtitle">Auto-retry system</span>
-                </div>
+                <span>{getModelDisplayName(modelInfo)}</span>
               </div>
-              <div className="stat" style={{ 
-                background: batchMode 
-                  ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(124, 58, 237, 0.05))' 
-                  : 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(29, 78, 216, 0.05))'
-              }}>
-                <div className="stat-icon" style={{ 
-                  color: batchMode ? '#8b5cf6' : '#3b82f6'
-                }}>
-                  <Users size={16} />
+              <div className="stat">
+                <div className="stat-icon">
+                  <Activity size={14} />
                 </div>
-                <div className="stat-content">
-                  <span className="stat-title">
-                    {batchMode ? 'Up to 10 resumes' : 'Single resume'}
-                  </span>
-                  <span className="stat-subtitle">
-                    {batchMode ? 'Batch processing' : 'Individual analysis'}
-                  </span>
+                <span>Rate Limit Protection</span>
+              </div>
+              <div className="stat">
+                <div className="stat-icon">
+                  <Users size={14} />
                 </div>
+                <span>Up to 10 resumes</span>
               </div>
             </div>
           </div>
 
           {/* Right Column - Job Description */}
           <div className="job-description-card glass">
-            <div className="job-card-decoration"></div>
+            <div className="card-decoration"></div>
             <div className="card-header">
               <div className="header-icon-wrapper">
-                <div className="icon-background" style={{ 
-                  background: 'linear-gradient(135deg, #f59e0b, #d97706)' 
-                }}>
-                  <Briefcase className="header-icon" />
-                </div>
+                <Briefcase className="header-icon" />
               </div>
               <div>
                 <h2>Job Description</h2>
@@ -1423,23 +1342,6 @@ function App() {
             </div>
             
             <div className="textarea-wrapper">
-              <div className="textarea-header">
-                <div className="textarea-header-stats">
-                  <span className="stat-item">
-                    <Target size={14} />
-                    Required skills
-                  </span>
-                  <span className="stat-item">
-                    <Award size={14} />
-                    Qualifications
-                  </span>
-                  <span className="stat-item">
-                    <ListOrdered size={14} />
-                    Responsibilities
-                  </span>
-                </div>
-              </div>
-              
               <textarea
                 className="job-description-input"
                 placeholder={`• Paste job description here\n• Include required skills\n• Mention qualifications\n• List responsibilities\n• Add any specific requirements`}
@@ -1447,32 +1349,13 @@ function App() {
                 onChange={(e) => setJobDescription(e.target.value)}
                 rows={12}
               />
-              
               <div className="textarea-footer">
-                <div className="textarea-stats">
-                  <span className="char-stat">
-                    <Type size={14} />
-                    {jobDescription.length} characters
-                  </span>
-                  <span className="word-stat">
-                    <Hash size={14} />
-                    {jobDescription.trim() ? jobDescription.trim().split(/\s+/).length : 0} words
-                  </span>
-                </div>
-                
-                {jobDescription.length > 500 && (
-                  <div className="textarea-quality" style={{ 
-                    background: jobDescription.length > 1000 
-                      ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.05))' 
-                      : 'linear-gradient(135deg, rgba(251, 191, 36, 0.1), rgba(245, 158, 11, 0.05))',
-                    color: jobDescription.length > 1000 ? '#22c55e' : '#fbbf24'
-                  }}>
-                    <CheckCircle size={14} />
-                    <span>
-                      {jobDescription.length > 1000 ? 'Excellent detail' : 'Good detail'}
-                    </span>
-                  </div>
-                )}
+                <span className="char-count">
+                  {jobDescription.length} characters
+                </span>
+                <span className="word-count">
+                  {jobDescription.trim() ? jobDescription.trim().split(/\s+/).length : 0} words
+                </span>
               </div>
             </div>
           </div>
@@ -1480,13 +1363,8 @@ function App() {
 
         {error && (
           <div className="error-message glass">
-            <div className="error-icon">
-              <AlertCircle size={24} />
-            </div>
-            <div className="error-content">
-              <span className="error-title">Analysis Error</span>
-              <span className="error-text">{error}</span>
-            </div>
+            <AlertCircle size={20} />
+            <span>{error}</span>
             {error.includes('warming up') && (
               <button 
                 className="error-action-button"
@@ -1503,17 +1381,8 @@ function App() {
           <div className="loading-section glass">
             <div className="loading-container">
               <div className="loading-header">
-                <div className="loading-icon">
-                  <Loader className="spinner" size={28} />
-                </div>
-                <div className="loading-title">
-                  <h3>{batchMode ? 'Batch Analysis' : 'Analysis in Progress'}</h3>
-                  <p className="loading-subtitle">
-                    {batchMode 
-                      ? `Processing ${resumeFiles.length} resume(s) with Groq AI` 
-                      : `Analyzing resume with ${getModelDisplayName(modelInfo)}`}
-                  </p>
-                </div>
+                <Loader className="spinner" />
+                <h3>{batchMode ? 'Batch Analysis' : 'Analysis in Progress'}</h3>
               </div>
               
               <div className="progress-container">
@@ -1522,53 +1391,40 @@ function App() {
               
               <div className="loading-text">
                 <span className="loading-message">{loadingMessage}</span>
-                <span className="loading-percentage">
-                  {Math.round(batchMode ? batchProgress : progress)}%
+                <span className="loading-subtext">
+                  {batchMode 
+                    ? `Processing ${resumeFiles.length} resume(s) with rate limit protection...` 
+                    : `Using ${getModelDisplayName(modelInfo)}...`}
                 </span>
               </div>
               
               <div className="progress-stats">
-                <div className="progress-stat">
-                  <span className="stat-label">Backend</span>
-                  <span className="stat-value" style={{ 
-                    color: backendStatus === 'ready' ? '#00ff9d' : '#ffd166'
-                  }}>
-                    {backendStatus === 'ready' ? 'Active' : 'Waking...'}
-                  </span>
-                </div>
-                <div className="progress-stat">
-                  <span className="stat-label">Groq AI</span>
-                  <span className="stat-value" style={{ 
-                    color: aiStatus === 'available' ? '#00ff9d' : '#ffd166'
-                  }}>
-                    {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}
-                  </span>
-                </div>
-                <div className="progress-stat">
-                  <span className="stat-label">Keys</span>
-                  <span className="stat-value" style={{ 
-                    color: getAvailableKeysCount() === 3 ? '#00ff9d' : '#ffd166'
-                  }}>
-                    {getAvailableKeysCount()}/3
-                  </span>
-                </div>
+                <span>{Math.round(batchMode ? batchProgress : progress)}%</span>
+                <span>•</span>
+                <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
+                <span>•</span>
+                <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
+                <span>•</span>
+                <span>Keys: {getAvailableKeysCount()}/3</span>
                 {modelInfo && (
-                  <div className="progress-stat">
-                    <span className="stat-label">Model</span>
-                    <span className="stat-value">{getModelDisplayName(modelInfo)}</span>
-                  </div>
+                  <>
+                    <span>•</span>
+                    <span>Model: {getModelDisplayName(modelInfo)}</span>
+                  </>
                 )}
                 {batchMode && (
-                  <div className="progress-stat">
-                    <span className="stat-label">Batch Size</span>
-                    <span className="stat-value">{resumeFiles.length}</span>
-                  </div>
+                  <>
+                    <span>•</span>
+                    <span>Batch Size: {resumeFiles.length}</span>
+                    <span>•</span>
+                    <span>Rate Protection: Active</span>
+                  </>
                 )}
               </div>
               
               <div className="loading-note info">
-                <Info size={16} />
-                <span>Processing resumes with AI analysis. This may take a moment...</span>
+                <Info size={14} />
+                <span>Rate limit protection ensures stable operation. 10 resumes take ~20-30s.</span>
               </div>
             </div>
           </div>
@@ -1595,23 +1451,17 @@ function App() {
           ) : (
             <>
               <div className="button-content">
-                <div className="button-icon-wrapper">
-                  <Brain size={24} />
-                </div>
+                <Brain size={20} />
                 <div className="button-text">
-                  <span className="button-main-text">
-                    {batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}
-                  </span>
+                  <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                   <span className="button-subtext">
                     {batchMode 
-                      ? `${resumeFiles.length} resume(s) • Groq AI` 
+                      ? `${resumeFiles.length} resume(s) • Rate Protection • ~${Math.ceil(resumeFiles.length * 2)}-${Math.ceil(resumeFiles.length * 3)}s` 
                       : `${getModelDisplayName(modelInfo)} • Single`}
                   </span>
                 </div>
               </div>
-              <div className="button-arrow">
-                <ChevronRight size={24} />
-              </div>
+              <ChevronRight size={20} />
             </>
           )}
         </button>
@@ -1619,62 +1469,40 @@ function App() {
         <div className="tips-section">
           {batchMode ? (
             <>
-              <div className="tip" style={{ 
-                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(124, 58, 237, 0.05))'
-              }}>
-                <Brain size={18} />
-                <div className="tip-content">
-                  <span className="tip-title">Batch AI Analysis</span>
-                  <span className="tip-text">Groq AI with 128K context length for comprehensive batch analysis</span>
-                </div>
+              <div className="tip">
+                <Brain size={16} />
+                <span>Groq AI with 128K context length for comprehensive analysis</span>
               </div>
-              <div className="tip" style={{ 
-                background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(29, 78, 216, 0.05))'
-              }}>
-                <Users size={18} />
-                <div className="tip-content">
-                  <span className="tip-title">Parallel Processing</span>
-                  <span className="tip-text">Analyze multiple resumes simultaneously for efficient screening</span>
-                </div>
+              <div className="tip">
+                <Activity size={16} />
+                <span>Rate limit protection with staggered delays prevents API limits</span>
               </div>
-              <div className="tip" style={{ 
-                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.05))'
-              }}>
-                <Download size={18} />
-                <div className="tip-content">
-                  <span className="tip-title">Comprehensive Report</span>
-                  <span className="tip-text">Download Excel report with candidate name & experience summary</span>
-                </div>
+              <div className="tip">
+                <Zap size={16} />
+                <span>~20-30 seconds for 10 resumes (Slower but SAFE from rate limits)</span>
+              </div>
+              <div className="tip">
+                <Download size={16} />
+                <span>Download comprehensive Excel report with candidate name & experience summary</span>
               </div>
             </>
           ) : (
             <>
-              <div className="tip" style={{ 
-                background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(29, 78, 216, 0.05))'
-              }}>
-                <Brain size={18} />
-                <div className="tip-content">
-                  <span className="tip-title">Groq AI Analysis</span>
-                  <span className="tip-text">Ultra-fast resume analysis with detailed skill matching</span>
-                </div>
+              <div className="tip">
+                <Brain size={16} />
+                <span>Groq AI offers ultra-fast resume analysis</span>
               </div>
-              <div className="tip" style={{ 
-                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.05))'
-              }}>
-                <Activity size={18} />
-                <div className="tip-content">
-                  <span className="tip-title">Auto Keep-alive</span>
-                  <span className="tip-text">Backend stays awake with automatic pings every 3 minutes</span>
-                </div>
+              <div className="tip">
+                <Thermometer size={16} />
+                <span>Groq API automatically warms up when idle</span>
               </div>
-              <div className="tip" style={{ 
-                background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(217, 119, 6, 0.05))'
-              }}>
-                <Cpu size={18} />
-                <div className="tip-content">
-                  <span className="tip-title">Model Info</span>
-                  <span className="tip-text">Using: {getModelDisplayName(modelInfo)}</span>
-                </div>
+              <div className="tip">
+                <Activity size={16} />
+                <span>Backend stays awake with automatic pings every 3 minutes</span>
+              </div>
+              <div className="tip">
+                <Cpu size={16} />
+                <span>Using: {getModelDisplayName(modelInfo)}</span>
               </div>
             </>
           )}
@@ -1694,7 +1522,7 @@ function App() {
               <span>New Analysis</span>
             </button>
             <div className="navigation-title">
-              <h2>ResuGo Analysis Results</h2>
+              <h2>⚡ Resume Analysis Results (Groq)</h2>
               <p>{analysis.candidate_name}</p>
             </div>
             <div className="navigation-actions">
@@ -1795,9 +1623,9 @@ function App() {
             </div>
           </div>
 
-          {/* Skills Analysis */}
+          {/* Skills Analysis - 5-8 skills each */}
           <div className="section-title">
-            <h2>Skills Analysis</h2>
+            <h2>Skills Analysis (5-8 skills each)</h2>
             <p>Detailed breakdown of matched and missing skills</p>
           </div>
           
@@ -1865,8 +1693,8 @@ function App() {
 
           {/* Summary Section with Complete 4-5 sentences */}
           <div className="section-title">
-            <h2>Profile Summary</h2>
-            <p>Key insights extracted from resume</p>
+            <h2>Profile Summary (4-5 complete sentences each)</h2>
+            <p>Key insights extracted from resume (no truncation)</p>
           </div>
           
           <div className="summary-grid">
@@ -1899,9 +1727,9 @@ function App() {
             </div>
           </div>
 
-          {/* Insights Section */}
+          {/* Insights Section - Only 3 items each */}
           <div className="section-title">
-            <h2>Insights & Recommendations</h2>
+            <h2>Insights & Recommendations (3 items each)</h2>
             <p>Key strengths and areas for improvement</p>
           </div>
           
@@ -1912,7 +1740,7 @@ function App() {
                   <TrendingUp size={24} />
                 </div>
                 <div>
-                  <h3>Key Strengths</h3>
+                  <h3>Key Strengths (3)</h3>
                   <p className="insight-subtitle">Areas where candidate excels</p>
                 </div>
               </div>
@@ -1937,7 +1765,7 @@ function App() {
                   <Target size={24} />
                 </div>
                 <div>
-                  <h3>Areas for Improvement</h3>
+                  <h3>Areas for Improvement (3)</h3>
                   <p className="insight-subtitle">Opportunities to grow</p>
                 </div>
               </div>
@@ -1987,7 +1815,7 @@ function App() {
             <span>Back to Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>ResuGo Batch Analysis Results</h2>
+            <h2>⚡ Batch Analysis Results (Groq with Rate Protection)</h2>
             <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
           </div>
           <div className="navigation-actions">
@@ -1998,15 +1826,36 @@ function App() {
           </div>
         </div>
 
+        {/* Rate Limit Protection Info */}
+        {batchAnalysis?.rate_limit_protection && (
+          <div className="rate-protection-info glass" style={{
+            background: 'rgba(0, 255, 157, 0.1)',
+            border: '1px solid rgba(0, 255, 157, 0.3)',
+            padding: '1rem',
+            borderRadius: '12px',
+            marginBottom: '1.5rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <ShieldCheck size={24} color="#00ff9d" />
+              <div>
+                <h4 style={{ margin: 0, color: '#00ff9d' }}>Rate Limit Protection Active</h4>
+                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.9rem', opacity: 0.9 }}>
+                  {batchAnalysis.rate_limit_protection} • Used sequential processing with staggered delays
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Stats */}
-        <div className="stats-container glass">
+        <div className="multi-key-stats-container glass">
           <div className="stat-card">
             <div className="stat-icon success">
               <Check size={24} />
             </div>
             <div className="stat-content">
               <div className="stat-value">{batchAnalysis?.successfully_analyzed || 0}</div>
-              <div className="stat-label">Analyzed</div>
+              <div className="stat-label">Successful</div>
             </div>
           </div>
           
@@ -2028,14 +1877,53 @@ function App() {
             </div>
             <div className="stat-content">
               <div className="stat-value">{batchAnalysis?.total_files || 0}</div>
-              <div className="stat-label">Total</div>
+              <div className="stat-label">Total Files</div>
+            </div>
+          </div>
+          
+          <div className="stat-card">
+            <div className="stat-icon success">
+              <Zap size={24} />
+            </div>
+            <div className="stat-content">
+              <div className="stat-value">{batchAnalysis?.available_keys || 0}</div>
+              <div className="stat-label">Keys Used</div>
             </div>
           </div>
         </div>
 
+        {/* Key Usage Stats */}
+        {batchAnalysis?.key_statistics && (
+          <div className="key-usage-stats glass" style={{ marginBottom: '1.5rem' }}>
+            <h4>Key Usage Statistics</h4>
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              {batchAnalysis.key_statistics.map((stat, idx) => (
+                <div key={idx} style={{
+                  padding: '0.75rem',
+                  background: stat.status === 'cooling' ? 'rgba(255, 107, 107, 0.1)' : 'rgba(0, 255, 157, 0.1)',
+                  borderRadius: '8px',
+                  flex: 1,
+                  minWidth: '150px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <Key size={16} color={stat.status === 'cooling' ? '#ff6b6b' : '#00ff9d'} />
+                    <strong>{stat.key}</strong>
+                  </div>
+                  <div style={{ fontSize: '0.85rem' }}>
+                    <div>Total: {stat.used}</div>
+                    <div>This minute: {stat.requests_this_minute}</div>
+                    <div>Errors: {stat.errors}</div>
+                    <div>Status: {stat.status}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Candidates Ranking */}
         <div className="section-title">
-          <h2>Candidate Rankings</h2>
+          <h2>Candidate Rankings (5-8 skills analysis each)</h2>
           <p>Sorted by ATS Score (Highest to Lowest)</p>
         </div>
         
@@ -2256,7 +2144,7 @@ function App() {
                 <p className="recommendation-subtitle">
                   Powered by Groq AI
                 </p>
-              </div>
+            </div>
             </div>
             <div className="recommendation-content">
               <p className="recommendation-text">{candidate.recommendation}</p>
@@ -2267,9 +2155,9 @@ function App() {
             </div>
           </div>
 
-          {/* Skills Analysis */}
+          {/* Skills Analysis - 5-8 skills each */}
           <div className="section-title">
-            <h2>Skills Analysis</h2>
+            <h2>Skills Analysis (5-8 skills each)</h2>
             <p>Detailed breakdown of matched and missing skills</p>
           </div>
           
@@ -2337,8 +2225,8 @@ function App() {
 
           {/* Summary Section with Complete 4-5 sentences */}
           <div className="section-title">
-            <h2>Profile Summary</h2>
-            <p>Key insights extracted from resume</p>
+            <h2>Profile Summary (4-5 complete sentences each)</h2>
+            <p>Key insights extracted from resume (no truncation)</p>
           </div>
           
           <div className="summary-grid">
@@ -2371,9 +2259,9 @@ function App() {
             </div>
           </div>
 
-          {/* Insights Section */}
+          {/* Insights Section - Only 3 items each */}
           <div className="section-title">
-            <h2>Insights & Recommendations</h2>
+            <h2>Insights & Recommendations (3 items each)</h2>
             <p>Key strengths and areas for improvement</p>
           </div>
           
@@ -2384,7 +2272,7 @@ function App() {
                   <TrendingUp size={24} />
                 </div>
                 <div>
-                  <h3>Key Strengths</h3>
+                  <h3>Key Strengths (3)</h3>
                   <p className="insight-subtitle">Areas where candidate excels</p>
                 </div>
               </div>
@@ -2409,7 +2297,7 @@ function App() {
                   <Target size={24} />
                 </div>
                 <div>
-                  <h3>Areas for Improvement</h3>
+                  <h3>Areas for Improvement (3)</h3>
                   <p className="insight-subtitle">Opportunities to grow</p>
                 </div>
               </div>
@@ -2470,12 +2358,12 @@ function App() {
                   <Brain className="logo-icon" />
                 </div>
                 <div className="logo-text">
-                  <h1>ResuGo</h1>
+                  <h1>AI Resume Analyzer (Groq)</h1>
                   <div className="logo-subtitle">
                     <span className="powered-by">Powered by</span>
                     <span className="groq-badge">⚡ Groq</span>
                     <span className="divider">•</span>
-                    <span className="tagline">Advanced AI Resume Analysis</span>
+                    <span className="tagline">5-8 Skills Analysis • Experience Summary • Years of Experience</span>
                   </div>
                 </div>
               </div>
@@ -2524,14 +2412,281 @@ function App() {
               </div>
             </div>
             
-            {/* REMOVED: Status indicators from header */}
+            <div className="header-features">
+              {/* Backend Status */}
+              <div 
+                className="feature backend-status-indicator" 
+                style={{ 
+                  backgroundColor: backendStatusInfo.bgColor,
+                  borderColor: `${backendStatusInfo.color}30`,
+                  color: backendStatusInfo.color
+                }}
+              >
+                {backendStatusInfo.icon}
+                <span>{backendStatusInfo.text}</span>
+                {backendStatus === 'waking' && <Loader size={12} className="pulse-spinner" />}
+              </div>
+              
+              {/* AI Status */}
+              <div 
+                className="feature ai-status-indicator" 
+                style={{ 
+                  backgroundColor: aiStatusInfo.bgColor,
+                  borderColor: `${aiStatusInfo.color}30`,
+                  color: aiStatusInfo.color
+                }}
+              >
+                {aiStatusInfo.icon}
+                <span>{aiStatusInfo.text}</span>
+                {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
+              </div>
+              
+              {/* Key Status */}
+              <div className="feature key-status">
+                <Key size={16} />
+                <span>{getAvailableKeysCount()}/3 Keys</span>
+              </div>
+              
+              {/* Model Info */}
+              {modelInfo && (
+                <div className="feature model-info">
+                  <Cpu size={16} />
+                  <span>{getModelDisplayName(modelInfo)}</span>
+                </div>
+              )}
+              
+              {/* Rate Limit Protection */}
+              <div className="feature rate-limit">
+                <ShieldCheck size={16} />
+                <span>Rate Protection</span>
+              </div>
+              
+              {/* Navigation Indicator */}
+              {currentView !== 'main' && (
+                <div className="feature nav-indicator">
+                  <Grid size={16} />
+                  <span>{currentView === 'single-results' ? 'Single Analysis' : 
+                         currentView === 'batch-results' ? 'Batch Results' : 
+                         'Candidate Details'}</span>
+                </div>
+              )}
+              
+              {/* Warm-up Button */}
+              {aiStatus !== 'available' && (
+                <button 
+                  className="feature warmup-button"
+                  onClick={handleForceWarmup}
+                  disabled={isWarmingUp}
+                >
+                  {isWarmingUp ? (
+                    <Loader size={16} className="spinner" />
+                  ) : (
+                    <Thermometer size={16} />
+                  )}
+                  <span>Warm Up AI</span>
+                </button>
+              )}
+              
+              {/* Quota Status Toggle */}
+              <button 
+                className="feature quota-toggle"
+                onClick={() => setShowQuotaPanel(!showQuotaPanel)}
+                title="Show service status"
+              >
+                <BarChart size={16} />
+                <span>Service Status</span>
+              </button>
+            </div>
           </div>
           
+          <div className="header-wave">
+            <svg viewBox="0 0 1200 120" preserveAspectRatio="none">
+              <path d="M0,0V46.29c47.79,22.2,103.59,32.17,158,28,70.36-5.37,136.33-33.31,206.8-37.5C438.64,32.43,512.34,53.67,583,72.05c69.27,18,138.3,24.88,209.4,13.08,36.15-6,69.85-17.84,104.45,29.34C989.49,25,1113-14.29,1200,52.47V0Z" opacity=".25" fill="currentColor"></path>
+              <path d="M0,0V15.81C13,36.92,27.64,56.86,47.69,72.05,99.41,111.27,165,111,224.58,91.58c31.15-10.15,60.09-26.07,89.67-39.8,40.92-19,84.73-46,130.83-49.67,36.26-2.85,70.9,9.42,98.6,31.56,31.77,25.39,62.32,62,103.63,73,40.44,10.79,81.35-6.69,119.13-24.28s75.16-39,116.92-43.05c59.73-5.85,113.28,22.88,168.9,38.84,30.2,8.66,59,6.17,87.09-7.5,22.43-10.89,48-26.93,60.65-49.24V0Z" opacity=".5" fill="currentColor"></path>
+              <path d="M0,0V5.63C149.93,59,314.09,71.32,475.83,42.57c43-7.64,84.23-20.12,127.61-26.46,59-8.63,112.48,12.24,165.56,35.4C827.93,77.22,886,95.24,951.2,90c86.53-7,172.46-45.71,248.8-84.81V0Z" fill="currentColor"></path>
+            </svg>
+          </div>
         </header>
 
         <main className="main-content">
-          {/* REMOVED: Status Panel */}
-          {/* REMOVED: Status Banner */}
+          {/* Status Panel */}
+          {showQuotaPanel && (
+            <div className="quota-status-panel glass">
+              <div className="quota-panel-header">
+                <div className="quota-title">
+                  <Activity size={20} />
+                  <h3>Groq Service Status (Rate Limit Protection)</h3>
+                </div>
+                <button 
+                  className="close-quota"
+                  onClick={() => setShowQuotaPanel(false)}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              
+              <div className="quota-summary">
+                <div className="summary-item">
+                  <div className="summary-label">Backend Status</div>
+                  <div className={`summary-value ${backendStatus === 'ready' ? 'success' : backendStatus === 'waking' ? 'warning' : 'error'}`}>
+                    {backendStatus === 'ready' ? '✅ Active' : 
+                     backendStatus === 'waking' ? '🔥 Waking Up' : 
+                     '💤 Sleeping'}
+                  </div>
+                </div>
+                <div className="summary-item">
+                  <div className="summary-label">Groq API Status</div>
+                  <div className={`summary-value ${aiStatus === 'available' ? 'success' : aiStatus === 'warming' ? 'warning' : 'error'}`}>
+                    {aiStatus === 'available' ? '⚡ Ready' : 
+                     aiStatus === 'warming' ? '🔥 Warming' : 
+                     '⚠️ Enhanced Mode'}
+                  </div>
+                </div>
+                <div className="summary-item">
+                  <div className="summary-label">Available Keys</div>
+                  <div className={`summary-value ${getAvailableKeysCount() >= 2 ? 'success' : getAvailableKeysCount() === 1 ? 'warning' : 'error'}`}>
+                    🔑 {getAvailableKeysCount()}/3 keys
+                  </div>
+                </div>
+                <div className="summary-item">
+                  <div className="summary-label">AI Model</div>
+                  <div className="summary-value">
+                    {getModelDisplayName(modelInfo)}
+                  </div>
+                </div>
+                <div className="summary-item">
+                  <div className="summary-label">Rate Limit Protection</div>
+                  <div className="summary-value success">
+                    🛡️ ACTIVE (Max 100/min/key)
+                  </div>
+                </div>
+                <div className="summary-item">
+                  <div className="summary-label">Processing Method</div>
+                  <div className="summary-value info">
+                    ⏳ Sequential with delays
+                  </div>
+                </div>
+                <div className="summary-item">
+                  <div className="summary-label">Batch Performance</div>
+                  <div className="summary-value warning">
+                    🐢 10 resumes: ~20-30s (SAFER)
+                  </div>
+                </div>
+              </div>
+              
+              <div className="rate-limit-explanation">
+                <h4>Why You Won't Hit Rate Limits Now:</h4>
+                <ul>
+                  <li>✅ Staggered delays (1-3s between requests)</li>
+                  <li>✅ Smart key rotation (load balancing)</li>
+                  <li>✅ 60s cooling on rate limit detection</li>
+                  <li>✅ Minute-by-minute request tracking</li>
+                  <li>✅ Sequential processing (not parallel)</li>
+                  <li>✅ Conservative limit: 100 requests/min/key (actual: 1000)</li>
+                </ul>
+              </div>
+              
+              <div className="action-buttons-panel">
+                <button 
+                  className="action-button refresh"
+                  onClick={checkBackendHealth}
+                >
+                  <RefreshCw size={16} />
+                  Refresh Status
+                </button>
+                <button 
+                  className="action-button warmup"
+                  onClick={handleForceWarmup}
+                  disabled={isWarmingUp}
+                >
+                  {isWarmingUp ? (
+                    <Loader size={16} className="spinner" />
+                  ) : (
+                    <Thermometer size={16} />
+                  )}
+                  Force Warm-up
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Status Banner */}
+          <div className="top-notice-bar glass">
+            <div className="notice-content">
+              <div className="status-indicators">
+                <div className={`status-indicator ${backendStatus === 'ready' ? 'active' : 'inactive'}`}>
+                  <div className="indicator-dot"></div>
+                  <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}</span>
+                </div>
+                <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
+                  <div className="indicator-dot"></div>
+                  <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
+                </div>
+                <div className="status-indicator active">
+                  <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                  <span>Keys: {getAvailableKeysCount()}/3</span>
+                </div>
+                {modelInfo && (
+                  <div className="status-indicator active">
+                    <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                    <span>Model: {getModelDisplayName(modelInfo)}</span>
+                  </div>
+                )}
+                <div className="status-indicator active">
+                  <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                  <span>Excel: Name & Experience columns</span>
+                </div>
+                <div className="status-indicator active">
+                  <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
+                  <span>Rate Protection: ACTIVE</span>
+                </div>
+                <div className="status-indicator active">
+                  <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
+                  <span>Mode: {currentView === 'single-results' ? 'Single' : 
+                                currentView === 'batch-results' ? 'Batch' : 
+                                currentView === 'candidate-detail' ? 'Details' : 
+                                batchMode ? 'Batch' : 'Single'}</span>
+                </div>
+                {batchMode && (
+                  <>
+                    <div className="status-indicator active">
+                      <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
+                      <span>Capacity: Up to 10 resumes</span>
+                    </div>
+                    <div className="status-indicator active">
+                      <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                      <span>Experience Analysis: Included</span>
+                    </div>
+                    <div className="status-indicator active">
+                      <div className="indicator-dot" style={{ background: '#ff6b6b' }}></div>
+                      <span>Speed: ~20-30s (Safer)</span>
+                    </div>
+                  </>
+                )}
+              </div>
+              
+              {backendStatus !== 'ready' && (
+                <div className="wakeup-message">
+                  <AlertCircle size={16} />
+                  <span>Backend is waking up. Analysis may be slower for the first request.</span>
+                </div>
+              )}
+              
+              {aiStatus === 'warming' && (
+                <div className="wakeup-message">
+                  <Thermometer size={16} />
+                  <span>Groq API is warming up. This ensures high-quality responses.</span>
+                </div>
+              )}
+              
+              {batchMode && getAvailableKeysCount() > 0 && (
+                <div className="multi-key-message">
+                  <ShieldCheck size={16} />
+                  <span>Rate protection: Processing {resumeFiles.length} resumes sequentially with delays</span>
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* Render Current View */}
           {renderCurrentView()}
@@ -2543,10 +2698,10 @@ function App() {
             <div className="footer-brand">
               <div className="footer-logo">
                 <Brain size={20} />
-                <span>ResuGo</span>
+                <span>AI Resume Analyzer (Groq)</span>
               </div>
               <p className="footer-tagline">
-                Groq AI • Advanced AI Resume Analysis
+                Groq AI • 3-key with rate protection • 5-8 skills analysis • Experience summary • Years of experience
               </p>
             </div>
             
@@ -2554,12 +2709,14 @@ function App() {
               <div className="footer-section">
                 <h4>Features</h4>
                 <a href="#">Groq AI</a>
-                <a href="#">Skills Analysis</a>
+                <a href="#">5-8 Skills Analysis</a>
                 <a href="#">Experience Summary</a>
                 <a href="#">Years of Experience</a>
               </div>
               <div className="footer-section">
                 <h4>Service</h4>
+                <a href="#">Rate Limit Protection</a>
+                <a href="#">3-Key Sequential</a>
                 <a href="#">Excel Reports</a>
                 <a href="#">Candidate Comparison</a>
               </div>
@@ -2576,23 +2733,45 @@ function App() {
           </div>
           
           <div className="footer-bottom">
-            <p>© 2026 ResuGo. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
+            <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
             <div className="footer-stats">
               <span className="stat">
-                <Brain size={12} />
-                Groq AI Analysis
+                <CloudLightning size={12} />
+                Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
               </span>
               <span className="stat">
+                <Brain size={12} />
+                Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming'}
+              </span>
+              <span className="stat">
+                <Key size={12} />
+                Keys: {getAvailableKeysCount()}/3
+              </span>
+              <span className="stat">
+                <Cpu size={12} />
+                Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
+              </span>
+              <span className="stat">
+                <ShieldCheck size={12} />
+                Rate Protection: Active
+              </span>
+              {batchMode && (
+                <span className="stat">
+                  <Activity size={12} />
+                  Batch: {resumeFiles.length} resumes
+                </span>
+              )}
+              <span className="stat">
                 <Target size={12} />
-                Skills Analysis
+                Skills: 5-8 each
               </span>
               <span className="stat">
                 <Briefcase size={12} />
-                Experience Summary
+                Experience: Summary included
               </span>
               <span className="stat">
                 <Calendar size={12} />
-                Years of Experience
+                Years: Analysis included
               </span>
             </div>
           </div>
