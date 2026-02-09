@@ -97,7 +97,7 @@ function App() {
   const [serviceStatus, setServiceStatus] = useState({
     enhancedFallback: true,
     validKeys: 0,
-    totalKeys: 0
+    totalKeys: 5
   });
   
   // View management for navigation
@@ -1055,23 +1055,6 @@ function App() {
             )}
           </div>
           
-          {/* Always Active Notice */}
-          <div className="always-active-notice glass" style={{
-            background: 'rgba(0, 255, 157, 0.1)',
-            border: '1px solid rgba(0, 255, 157, 0.3)',
-            padding: '0.75rem',
-            borderRadius: '8px',
-            marginTop: '1rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem'
-          }}>
-            <Activity size={16} color="#00ff9d" />
-            <span style={{ fontSize: '0.9rem', color: '#00ff9d' }}>
-              Backend is always active - no sleeping mode. Service will auto-recover if needed.
-            </span>
-          </div>
-          
           {/* Batch Mode Toggle */}
           <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
             <button
@@ -1787,44 +1770,6 @@ function App() {
           </div>
         </div>
 
-        {/* Rate Limit Protection Info */}
-        {batchAnalysis?.rate_limit_protection && (
-          <div className="rate-protection-info glass" style={{
-            background: 'rgba(0, 255, 157, 0.1)',
-            border: '1px solid rgba(0, 255, 157, 0.3)',
-            padding: '1rem',
-            borderRadius: '12px',
-            marginBottom: '1.5rem'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <ShieldCheck size={24} color="#00ff9d" />
-              <div>
-                <h4 style={{ margin: 0, color: '#00ff9d' }}>Rate Limit Protection Active</h4>
-                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.9rem', opacity: 0.9 }}>
-                  {batchAnalysis.rate_limit_protection} • Used sequential processing with staggered delays
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Always Active Notice */}
-        <div className="always-active-notice glass" style={{
-          background: 'rgba(0, 255, 157, 0.1)',
-          border: '1px solid rgba(0, 255, 157, 0.3)',
-          padding: '0.75rem',
-          borderRadius: '8px',
-          marginBottom: '1rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem'
-        }}>
-          <Activity size={16} color="#00ff9d" />
-          <span style={{ fontSize: '0.9rem', color: '#00ff9d' }}>
-            Backend is always active. Multiple users can analyze 6 resumes each simultaneously.
-          </span>
-        </div>
-
         {/* Stats */}
         <div className="multi-key-stats-container glass">
           <div className="stat-card">
@@ -1858,46 +1803,7 @@ function App() {
               <div className="stat-label">Total Files</div>
             </div>
           </div>
-          
-          <div className="stat-card">
-            <div className="stat-icon success">
-              <Zap size={24} />
-            </div>
-            <div className="stat-content">
-              <div className="stat-value">{batchAnalysis?.available_keys || 0}</div>
-              <div className="stat-label">Keys Used</div>
-            </div>
-          </div>
         </div>
-
-        {/* Key Usage Stats */}
-        {batchAnalysis?.key_statistics && (
-          <div className="key-usage-stats glass" style={{ marginBottom: '1.5rem' }}>
-            <h4>Key Usage Statistics (5 Keys Available)</h4> {/* Updated */}
-            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              {batchAnalysis.key_statistics.map((stat, idx) => (
-                <div key={idx} style={{
-                  padding: '0.75rem',
-                  background: stat.status === 'cooling' ? 'rgba(255, 107, 107, 0.1)' : 'rgba(0, 255, 157, 0.1)',
-                  borderRadius: '8px',
-                  flex: 1,
-                  minWidth: '150px'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                    <Key size={16} color={stat.status === 'cooling' ? '#ff6b6b' : '#00ff9d'} />
-                    <strong>{stat.key}</strong>
-                  </div>
-                  <div style={{ fontSize: '0.85rem' }}>
-                    <div>Total: {stat.used}</div>
-                    <div>This minute: {stat.requests_this_minute}</div>
-                    <div>Errors: {stat.errors}</div>
-                    <div>Status: {stat.status}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Candidates Ranking */}
         <div className="section-title">
@@ -2623,41 +2529,7 @@ function App() {
                                 currentView === 'candidate-detail' ? 'Details' : 
                                 batchMode ? 'Batch' : 'Single'}</span>
                 </div>
-                {batchMode && (
-                  <>
-                    <div className="status-indicator active">
-                      <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
-                      <span>Capacity: Up to 6 resumes</span> {/* Changed from 10 to 6 */}
-                    </div>
-                    <div className="status-indicator active">
-                      <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                      <span>Experience Analysis: Included</span>
-                    </div>
-                    <div className="status-indicator active">
-                      <div className="indicator-dot" style={{ background: '#ff6b6b' }}></div>
-                      <span>Speed: Stable Processing</span>
-                    </div>
-                    <div className="status-indicator active">
-                      <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                      <span>Multiple Users: Supported</span> {/* Added */}
-                    </div>
-                  </>
-                )}
               </div>
-              
-              {aiStatus === 'warming' && (
-                <div className="wakeup-message">
-                  <Thermometer size={16} />
-                  <span>Groq API is warming up. This ensures high-quality responses.</span>
-                </div>
-              )}
-              
-              {batchMode && getAvailableKeysCount() > 0 && (
-                <div className="multi-key-message">
-                  <ShieldCheck size={16} />
-                  <span>Rate protection: Processing {resumeFiles.length} resumes sequentially with delays (Max 6)</span> {/* Updated */}
-                </div>
-              )}
             </div>
           </div>
 
