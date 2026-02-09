@@ -2356,7 +2356,7 @@ function App() {
           </div>
           
           <div className="footer-bottom">
-            <p>© 2024 ResuGo. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
+            <p>© 2026 ResuGo. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
             <div className="footer-stats">
               <span className="stat">
                 <Brain size={12} />
