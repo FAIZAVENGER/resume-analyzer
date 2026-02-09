@@ -97,7 +97,7 @@ function App() {
   const [serviceStatus, setServiceStatus] = useState({
     enhancedFallback: true,
     validKeys: 0,
-    totalKeys: 0
+    totalKeys: 3
   });
   
   // View management for navigation
@@ -1067,52 +1067,94 @@ function App() {
     const renderMainView = () => (
       <div className="upload-section">
         <div className="section-header">
-          <h2>Start Your Analysis</h2>
-          <p>Upload resume(s) and job description to get detailed insights</p>
+          <div className="section-title-container">
+            <div className="section-title-icon">
+              <Rocket size={28} />
+            </div>
+            <div>
+              <h2>Start Your Analysis</h2>
+              <p>Upload resume(s) and job description to get detailed insights</p>
+              
+              {/* Status Indicators */}
+              <div className="status-indicators-container">
+                <div className="status-indicator" style={{ 
+                  backgroundColor: backendStatusInfo.bgColor,
+                  color: backendStatusInfo.color,
+                  borderColor: backendStatusInfo.color + '40'
+                }}>
+                  <div className="status-icon-wrapper">
+                    {backendStatusInfo.icon}
+                  </div>
+                  <span className="status-text">{backendStatusInfo.text}</span>
+                </div>
+                
+                <div className="status-indicator" style={{ 
+                  backgroundColor: aiStatusInfo.bgColor,
+                  color: aiStatusInfo.color,
+                  borderColor: aiStatusInfo.color + '40'
+                }}>
+                  <div className="status-icon-wrapper">
+                    {aiStatusInfo.icon}
+                  </div>
+                  <span className="status-text">{aiStatusInfo.text}</span>
+                </div>
+                
+                <div className="status-indicator" style={{ 
+                  backgroundColor: aiStatus === 'available' ? 'rgba(0, 255, 157, 0.1)' : 'rgba(255, 209, 102, 0.1)',
+                  color: aiStatus === 'available' ? '#00ff9d' : '#ffd166',
+                  borderColor: aiStatus === 'available' ? '#00ff9d40' : '#ffd16640'
+                }}>
+                  <div className="status-icon-wrapper">
+                    <Key size={16} />
+                  </div>
+                  <span className="status-text">Keys: {getAvailableKeysCount()}/3</span>
+                </div>
+              </div>
+            </div>
+          </div>
           
           {/* Batch Mode Toggle */}
-          <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+          <div className="mode-toggle-container">
             <button
               className={`mode-toggle ${!batchMode ? 'active' : ''}`}
               onClick={() => {
                 setBatchMode(false);
                 setResumeFiles([]);
               }}
-              style={{
-                padding: '0.75rem 1.5rem',
-                background: !batchMode ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}
             >
-              <User size={16} /> Single Resume
+              <div className="mode-toggle-content">
+                <User size={18} />
+                <div className="mode-toggle-text">
+                  <span className="mode-title">Single Resume</span>
+                  <span className="mode-subtitle">Individual analysis</span>
+                </div>
+              </div>
+              {!batchMode && (
+                <div className="mode-active-indicator">
+                  <Check size={16} />
+                </div>
+              )}
             </button>
+            
             <button
               className={`mode-toggle ${batchMode ? 'active' : ''}`}
               onClick={() => {
                 setBatchMode(true);
                 setResumeFile(null);
               }}
-              style={{
-                padding: '0.75rem 1.5rem',
-                background: batchMode ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}
             >
-              <Users size={16} /> Multiple Resumes (Up to 10)
+              <div className="mode-toggle-content">
+                <Users size={18} />
+                <div className="mode-toggle-text">
+                  <span className="mode-title">Multiple Resumes</span>
+                  <span className="mode-subtitle">Up to 10 files</span>
+                </div>
+              </div>
+              {batchMode && (
+                <div className="mode-active-indicator">
+                  <Check size={16} />
+                </div>
+              )}
             </button>
           </div>
         </div>
@@ -1120,10 +1162,16 @@ function App() {
         <div className="upload-grid">
           {/* Left Column - File Upload */}
           <div className="upload-card glass">
-            <div className="card-decoration"></div>
+            <div className="upload-card-decoration"></div>
             <div className="card-header">
               <div className="header-icon-wrapper">
-                {batchMode ? <Users className="header-icon" /> : <FileText className="header-icon" />}
+                <div className="icon-background" style={{ 
+                  background: batchMode 
+                    ? 'linear-gradient(135deg, #8b5cf6, #7c3aed)' 
+                    : 'linear-gradient(135deg, #3b82f6, #1d4ed8)' 
+                }}>
+                  {batchMode ? <Users className="header-icon" /> : <FileText className="header-icon" />}
+                </div>
               </div>
               <div>
                 <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
@@ -1143,6 +1191,13 @@ function App() {
                 onDragLeave={handleDrag}
                 onDragOver={handleDrag}
                 onDrop={handleDrop}
+                style={{
+                  background: dragActive 
+                    ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(29, 78, 216, 0.1))' 
+                    : resumeFile 
+                      ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.05))' 
+                      : 'linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(29, 78, 216, 0.02))'
+                }}
               >
                 <input
                   type="file"
@@ -1155,21 +1210,34 @@ function App() {
                   <div className="upload-icon-wrapper">
                     {resumeFile ? (
                       <div className="file-preview">
-                        <FileText size={40} />
+                        <div className="file-preview-icon">
+                          <FileText size={40} />
+                        </div>
                         <div className="file-preview-info">
                           <span className="file-name">{resumeFile.name}</span>
                           <span className="file-size">
                             {(resumeFile.size / 1024 / 1024).toFixed(2)} MB
                           </span>
+                          <span className="file-type">
+                            {resumeFile.type || 'Resume file'}
+                          </span>
                         </div>
                       </div>
                     ) : (
                       <>
-                        <Upload className="upload-icon" />
+                        <div className="upload-icon-circle">
+                          <Upload className="upload-icon" />
+                        </div>
                         <span className="upload-text">
                           Drag & drop or click to browse
                         </span>
                         <span className="upload-hint">Max file size: 15MB</span>
+                        <div className="file-types-hint">
+                          <span className="file-type-tag">PDF</span>
+                          <span className="file-type-tag">DOC</span>
+                          <span className="file-type-tag">DOCX</span>
+                          <span className="file-type-tag">TXT</span>
+                        </div>
                       </>
                     )}
                   </div>
@@ -1180,6 +1248,7 @@ function App() {
                     className="change-file-btn"
                     onClick={() => setResumeFile(null)}
                   >
+                    <RefreshCw size={14} />
                     Change File
                   </button>
                 )}
@@ -1192,6 +1261,13 @@ function App() {
                 onDragLeave={handleDrag}
                 onDragOver={handleDrag}
                 onDrop={handleBatchDrop}
+                style={{
+                  background: dragActive 
+                    ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(124, 58, 237, 0.1))' 
+                    : resumeFiles.length > 0 
+                      ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.05))' 
+                      : 'linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(124, 58, 237, 0.02))'
+                }}
               >
                 <input
                   type="file"
@@ -1204,12 +1280,14 @@ function App() {
                 <label htmlFor="batch-resume-upload" className="file-label">
                   <div className="upload-icon-wrapper">
                     {resumeFiles.length > 0 ? (
-                      <div style={{ width: '100%' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
-                          <Users size={40} />
-                          <div style={{ textAlign: 'left' }}>
-                            <span className="file-name">{resumeFiles.length} resume(s) selected</span>
-                            <span className="file-size">
+                      <div className="batch-upload-preview">
+                        <div className="batch-header">
+                          <div className="batch-icon-circle">
+                            <Users size={32} />
+                          </div>
+                          <div className="batch-info">
+                            <span className="batch-count">{resumeFiles.length} resume(s) selected</span>
+                            <span className="batch-size">
                               Total: {(resumeFiles.reduce((acc, file) => acc + file.size, 0) / 1024 / 1024).toFixed(2)} MB
                             </span>
                           </div>
@@ -1237,14 +1315,29 @@ function App() {
                             </div>
                           ))}
                         </div>
+                        
+                        {resumeFiles.length < 10 && (
+                          <div className="add-more-files">
+                            <Plus size={16} />
+                            <span>Click to add more files (max 10)</span>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <>
-                        <Upload className="upload-icon" />
+                        <div className="upload-icon-circle">
+                          <Upload className="upload-icon" />
+                        </div>
                         <span className="upload-text">
                           Drag & drop multiple files or click to browse
                         </span>
                         <span className="upload-hint">Max 10 files, 15MB each</span>
+                        <div className="file-types-hint">
+                          <span className="file-type-tag">PDF</span>
+                          <span className="file-type-tag">DOC</span>
+                          <span className="file-type-tag">DOCX</span>
+                          <span className="file-type-tag">TXT</span>
+                        </div>
                       </>
                     )}
                   </div>
@@ -1254,8 +1347,9 @@ function App() {
                   <button 
                     className="change-file-btn"
                     onClick={clearBatchFiles}
-                    style={{ background: '#ff6b6b' }}
+                    style={{ background: 'linear-gradient(135deg, #ef4444, #dc2626)' }}
                   >
+                    <Trash2 size={14} />
                     Clear All Files
                   </button>
                 )}
@@ -1263,39 +1357,64 @@ function App() {
             )}
             
             <div className="upload-stats">
-              <div className="stat">
-                <div className="stat-icon">
-                  <Brain size={14} />
+              <div className="stat" style={{ 
+                background: aiStatus === 'available' 
+                  ? 'linear-gradient(135deg, rgba(0, 255, 157, 0.1), rgba(0, 255, 157, 0.05))' 
+                  : 'linear-gradient(135deg, rgba(255, 209, 102, 0.1), rgba(255, 209, 102, 0.05))'
+              }}>
+                <div className="stat-icon" style={{ 
+                  color: aiStatus === 'available' ? '#00ff9d' : '#ffd166'
+                }}>
+                  <Brain size={16} />
                 </div>
-                <span>Groq AI analysis</span>
+                <div className="stat-content">
+                  <span className="stat-title">Groq AI analysis</span>
+                  <span className="stat-subtitle">{getModelDisplayName(modelInfo)}</span>
+                </div>
               </div>
-              <div className="stat">
-                <div className="stat-icon">
-                  <Cpu size={14} />
+              <div className="stat" style={{ 
+                background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(29, 78, 216, 0.05))' 
+              }}>
+                <div className="stat-icon" style={{ color: '#3b82f6' }}>
+                  <Activity size={16} />
                 </div>
-                <span>{getModelDisplayName(modelInfo)}</span>
+                <div className="stat-content">
+                  <span className="stat-title">Rate Limit Protection</span>
+                  <span className="stat-subtitle">Auto-retry system</span>
+                </div>
               </div>
-              <div className="stat">
-                <div className="stat-icon">
-                  <Activity size={14} />
+              <div className="stat" style={{ 
+                background: batchMode 
+                  ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(124, 58, 237, 0.05))' 
+                  : 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(29, 78, 216, 0.05))'
+              }}>
+                <div className="stat-icon" style={{ 
+                  color: batchMode ? '#8b5cf6' : '#3b82f6'
+                }}>
+                  <Users size={16} />
                 </div>
-                <span>Rate Limit Protection</span>
-              </div>
-              <div className="stat">
-                <div className="stat-icon">
-                  <Users size={14} />
+                <div className="stat-content">
+                  <span className="stat-title">
+                    {batchMode ? 'Up to 10 resumes' : 'Single resume'}
+                  </span>
+                  <span className="stat-subtitle">
+                    {batchMode ? 'Batch processing' : 'Individual analysis'}
+                  </span>
                 </div>
-                <span>Up to 10 resumes</span>
               </div>
             </div>
           </div>
 
           {/* Right Column - Job Description */}
           <div className="job-description-card glass">
-            <div className="card-decoration"></div>
+            <div className="job-card-decoration"></div>
             <div className="card-header">
               <div className="header-icon-wrapper">
-                <Briefcase className="header-icon" />
+                <div className="icon-background" style={{ 
+                  background: 'linear-gradient(135deg, #f59e0b, #d97706)' 
+                }}>
+                  <Briefcase className="header-icon" />
+                </div>
               </div>
               <div>
                 <h2>Job Description</h2>
@@ -1304,6 +1423,23 @@ function App() {
             </div>
             
             <div className="textarea-wrapper">
+              <div className="textarea-header">
+                <div className="textarea-header-stats">
+                  <span className="stat-item">
+                    <Target size={14} />
+                    Required skills
+                  </span>
+                  <span className="stat-item">
+                    <Award size={14} />
+                    Qualifications
+                  </span>
+                  <span className="stat-item">
+                    <ListOrdered size={14} />
+                    Responsibilities
+                  </span>
+                </div>
+              </div>
+              
               <textarea
                 className="job-description-input"
                 placeholder={`• Paste job description here\n• Include required skills\n• Mention qualifications\n• List responsibilities\n• Add any specific requirements`}
@@ -1311,13 +1447,32 @@ function App() {
                 onChange={(e) => setJobDescription(e.target.value)}
                 rows={12}
               />
+              
               <div className="textarea-footer">
-                <span className="char-count">
-                  {jobDescription.length} characters
-                </span>
-                <span className="word-count">
-                  {jobDescription.trim() ? jobDescription.trim().split(/\s+/).length : 0} words
-                </span>
+                <div className="textarea-stats">
+                  <span className="char-stat">
+                    <Type size={14} />
+                    {jobDescription.length} characters
+                  </span>
+                  <span className="word-stat">
+                    <Hash size={14} />
+                    {jobDescription.trim() ? jobDescription.trim().split(/\s+/).length : 0} words
+                  </span>
+                </div>
+                
+                {jobDescription.length > 500 && (
+                  <div className="textarea-quality" style={{ 
+                    background: jobDescription.length > 1000 
+                      ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.05))' 
+                      : 'linear-gradient(135deg, rgba(251, 191, 36, 0.1), rgba(245, 158, 11, 0.05))',
+                    color: jobDescription.length > 1000 ? '#22c55e' : '#fbbf24'
+                  }}>
+                    <CheckCircle size={14} />
+                    <span>
+                      {jobDescription.length > 1000 ? 'Excellent detail' : 'Good detail'}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1325,8 +1480,13 @@ function App() {
 
         {error && (
           <div className="error-message glass">
-            <AlertCircle size={20} />
-            <span>{error}</span>
+            <div className="error-icon">
+              <AlertCircle size={24} />
+            </div>
+            <div className="error-content">
+              <span className="error-title">Analysis Error</span>
+              <span className="error-text">{error}</span>
+            </div>
             {error.includes('warming up') && (
               <button 
                 className="error-action-button"
@@ -1343,8 +1503,17 @@ function App() {
           <div className="loading-section glass">
             <div className="loading-container">
               <div className="loading-header">
-                <Loader className="spinner" />
-                <h3>{batchMode ? 'Batch Analysis' : 'Analysis in Progress'}</h3>
+                <div className="loading-icon">
+                  <Loader className="spinner" size={28} />
+                </div>
+                <div className="loading-title">
+                  <h3>{batchMode ? 'Batch Analysis' : 'Analysis in Progress'}</h3>
+                  <p className="loading-subtitle">
+                    {batchMode 
+                      ? `Processing ${resumeFiles.length} resume(s) with Groq AI` 
+                      : `Analyzing resume with ${getModelDisplayName(modelInfo)}`}
+                  </p>
+                </div>
               </div>
               
               <div className="progress-container">
@@ -1353,38 +1522,53 @@ function App() {
               
               <div className="loading-text">
                 <span className="loading-message">{loadingMessage}</span>
-                <span className="loading-subtext">
-                  {batchMode 
-                    ? `Processing ${resumeFiles.length} resume(s)...` 
-                    : `Using ${getModelDisplayName(modelInfo)}...`}
+                <span className="loading-percentage">
+                  {Math.round(batchMode ? batchProgress : progress)}%
                 </span>
               </div>
               
               <div className="progress-stats">
-                <span>{Math.round(batchMode ? batchProgress : progress)}%</span>
-                <span>•</span>
-                <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
-                <span>•</span>
-                <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
-                <span>•</span>
-                <span>Keys: {getAvailableKeysCount()}/3</span>
+                <div className="progress-stat">
+                  <span className="stat-label">Backend</span>
+                  <span className="stat-value" style={{ 
+                    color: backendStatus === 'ready' ? '#00ff9d' : '#ffd166'
+                  }}>
+                    {backendStatus === 'ready' ? 'Active' : 'Waking...'}
+                  </span>
+                </div>
+                <div className="progress-stat">
+                  <span className="stat-label">Groq AI</span>
+                  <span className="stat-value" style={{ 
+                    color: aiStatus === 'available' ? '#00ff9d' : '#ffd166'
+                  }}>
+                    {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}
+                  </span>
+                </div>
+                <div className="progress-stat">
+                  <span className="stat-label">Keys</span>
+                  <span className="stat-value" style={{ 
+                    color: getAvailableKeysCount() === 3 ? '#00ff9d' : '#ffd166'
+                  }}>
+                    {getAvailableKeysCount()}/3
+                  </span>
+                </div>
                 {modelInfo && (
-                  <>
-                    <span>•</span>
-                    <span>Model: {getModelDisplayName(modelInfo)}</span>
-                  </>
+                  <div className="progress-stat">
+                    <span className="stat-label">Model</span>
+                    <span className="stat-value">{getModelDisplayName(modelInfo)}</span>
+                  </div>
                 )}
                 {batchMode && (
-                  <>
-                    <span>•</span>
-                    <span>Batch Size: {resumeFiles.length}</span>
-                  </>
+                  <div className="progress-stat">
+                    <span className="stat-label">Batch Size</span>
+                    <span className="stat-value">{resumeFiles.length}</span>
+                  </div>
                 )}
               </div>
               
               <div className="loading-note info">
-                <Info size={14} />
-                <span>Processing resumes with AI analysis...</span>
+                <Info size={16} />
+                <span>Processing resumes with AI analysis. This may take a moment...</span>
               </div>
             </div>
           </div>
@@ -1411,9 +1595,13 @@ function App() {
           ) : (
             <>
               <div className="button-content">
-                <Brain size={20} />
+                <div className="button-icon-wrapper">
+                  <Brain size={24} />
+                </div>
                 <div className="button-text">
-                  <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
+                  <span className="button-main-text">
+                    {batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}
+                  </span>
                   <span className="button-subtext">
                     {batchMode 
                       ? `${resumeFiles.length} resume(s) • Groq AI` 
@@ -1421,7 +1609,9 @@ function App() {
                   </span>
                 </div>
               </div>
-              <ChevronRight size={20} />
+              <div className="button-arrow">
+                <ChevronRight size={24} />
+              </div>
             </>
           )}
         </button>
@@ -1429,32 +1619,62 @@ function App() {
         <div className="tips-section">
           {batchMode ? (
             <>
-              <div className="tip">
-                <Brain size={16} />
-                <span>Groq AI with 128K context length for comprehensive analysis</span>
+              <div className="tip" style={{ 
+                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(124, 58, 237, 0.05))'
+              }}>
+                <Brain size={18} />
+                <div className="tip-content">
+                  <span className="tip-title">Batch AI Analysis</span>
+                  <span className="tip-text">Groq AI with 128K context length for comprehensive batch analysis</span>
+                </div>
               </div>
-              <div className="tip">
-                <Users size={16} />
-                <span>Analyze multiple resumes simultaneously</span>
+              <div className="tip" style={{ 
+                background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(29, 78, 216, 0.05))'
+              }}>
+                <Users size={18} />
+                <div className="tip-content">
+                  <span className="tip-title">Parallel Processing</span>
+                  <span className="tip-text">Analyze multiple resumes simultaneously for efficient screening</span>
+                </div>
               </div>
-              <div className="tip">
-                <Download size={16} />
-                <span>Download comprehensive Excel report with candidate name & experience summary</span>
+              <div className="tip" style={{ 
+                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.05))'
+              }}>
+                <Download size={18} />
+                <div className="tip-content">
+                  <span className="tip-title">Comprehensive Report</span>
+                  <span className="tip-text">Download Excel report with candidate name & experience summary</span>
+                </div>
               </div>
             </>
           ) : (
             <>
-              <div className="tip">
-                <Brain size={16} />
-                <span>Groq AI offers ultra-fast resume analysis</span>
+              <div className="tip" style={{ 
+                background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(29, 78, 216, 0.05))'
+              }}>
+                <Brain size={18} />
+                <div className="tip-content">
+                  <span className="tip-title">Groq AI Analysis</span>
+                  <span className="tip-text">Ultra-fast resume analysis with detailed skill matching</span>
+                </div>
               </div>
-              <div className="tip">
-                <Activity size={16} />
-                <span>Backend stays awake with automatic pings every 3 minutes</span>
+              <div className="tip" style={{ 
+                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.05))'
+              }}>
+                <Activity size={18} />
+                <div className="tip-content">
+                  <span className="tip-title">Auto Keep-alive</span>
+                  <span className="tip-text">Backend stays awake with automatic pings every 3 minutes</span>
+                </div>
               </div>
-              <div className="tip">
-                <Cpu size={16} />
-                <span>Using: {getModelDisplayName(modelInfo)}</span>
+              <div className="tip" style={{ 
+                background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(217, 119, 6, 0.05))'
+              }}>
+                <Cpu size={18} />
+                <div className="tip-content">
+                  <span className="tip-title">Model Info</span>
+                  <span className="tip-text">Using: {getModelDisplayName(modelInfo)}</span>
+                </div>
               </div>
             </>
           )}
@@ -2036,7 +2256,7 @@ function App() {
                 <p className="recommendation-subtitle">
                   Powered by Groq AI
                 </p>
-            </div>
+              </div>
             </div>
             <div className="recommendation-content">
               <p className="recommendation-text">{candidate.recommendation}</p>
