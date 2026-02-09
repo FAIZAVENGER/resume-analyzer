@@ -1,3 +1,4 @@
+App.jsx:
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { 
@@ -861,7 +862,7 @@ function App() {
               <Brain className="logo-icon" size={32} />
             </div>
             <div className="login-logo-text">
-              <h1>AI Resume Analyzer</h1>
+              <h1>ResuGo</h1>
               <p className="login-subtitle">
                 <span className="groq-badge-login">⚡ Groq AI</span>
                 <span className="divider">•</span>
@@ -1089,24 +1090,7 @@ function App() {
             )}
           </div>
           
-          {/* Rate Limit Warning */}
-          {(backendStatus === 'ready' && aiStatus === 'available') && (
-            <div className="rate-limit-warning glass" style={{
-              background: 'rgba(255, 209, 102, 0.1)',
-              border: '1px solid rgba(255, 209, 102, 0.3)',
-              padding: '0.75rem 1rem',
-              borderRadius: '8px',
-              marginTop: '1rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}>
-              <AlertTriangle size={16} color="#ffd166" />
-              <span style={{ fontSize: '0.9rem' }}>
-                <strong>Rate Limit Protection:</strong> Staggered delays ensure you won't hit limits. 10 resumes take ~20-30s (safer).
-              </span>
-            </div>
-          )}
+          {/* Rate Limit Warning - REMOVED AS REQUESTED */}
           
           {/* Batch Mode Toggle */}
           <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
@@ -1164,7 +1148,7 @@ function App() {
                 {batchMode ? <Users className="header-icon" /> : <FileText className="header-icon" />}
               </div>
               <div>
-                <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
+                <h2>{batchMode ? 'Upload Resumes' : 'Upload Resume'}</h2>
                 <p className="card-subtitle">
                   {batchMode 
                     ? 'Upload multiple resumes (Max 10, 15MB each)' 
@@ -1424,7 +1408,7 @@ function App() {
               
               <div className="loading-note info">
                 <Info size={14} />
-                <span>Rate limit protection ensures stable operation. 10 resumes take ~20-30s.</span>
+                <span>Rate limit protection ensures stable operation.</span>
               </div>
             </div>
           </div>
@@ -1456,7 +1440,7 @@ function App() {
                   <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                   <span className="button-subtext">
                     {batchMode 
-                      ? `${resumeFiles.length} resume(s) • Rate Protection • ~${Math.ceil(resumeFiles.length * 2)}-${Math.ceil(resumeFiles.length * 3)}s` 
+                      ? `${resumeFiles.length} resume(s) • Rate Protection` 
                       : `${getModelDisplayName(modelInfo)} • Single`}
                   </span>
                 </div>
@@ -1479,7 +1463,7 @@ function App() {
               </div>
               <div className="tip">
                 <Zap size={16} />
-                <span>~20-30 seconds for 10 resumes (Slower but SAFE from rate limits)</span>
+                <span>Efficient processing for multiple resumes</span>
               </div>
               <div className="tip">
                 <Download size={16} />
@@ -1522,7 +1506,7 @@ function App() {
               <span>New Analysis</span>
             </button>
             <div className="navigation-title">
-              <h2>⚡ Resume Analysis Results (Groq)</h2>
+              <h2>⚡ Resume Analysis Results</h2>
               <p>{analysis.candidate_name}</p>
             </div>
             <div className="navigation-actions">
@@ -1623,9 +1607,9 @@ function App() {
             </div>
           </div>
 
-          {/* Skills Analysis - 5-8 skills each */}
+          {/* Skills Analysis */}
           <div className="section-title">
-            <h2>Skills Analysis (5-8 skills each)</h2>
+            <h2>Skills Analysis</h2>
             <p>Detailed breakdown of matched and missing skills</p>
           </div>
           
@@ -1693,7 +1677,7 @@ function App() {
 
           {/* Summary Section with Complete 4-5 sentences */}
           <div className="section-title">
-            <h2>Profile Summary (4-5 complete sentences each)</h2>
+            <h2>Profile Summary</h2>
             <p>Key insights extracted from resume (no truncation)</p>
           </div>
           
@@ -1727,9 +1711,9 @@ function App() {
             </div>
           </div>
 
-          {/* Insights Section - Only 3 items each */}
+          {/* Insights Section */}
           <div className="section-title">
-            <h2>Insights & Recommendations (3 items each)</h2>
+            <h2>Insights & Recommendations</h2>
             <p>Key strengths and areas for improvement</p>
           </div>
           
@@ -1740,7 +1724,7 @@ function App() {
                   <TrendingUp size={24} />
                 </div>
                 <div>
-                  <h3>Key Strengths (3)</h3>
+                  <h3>Key Strengths</h3>
                   <p className="insight-subtitle">Areas where candidate excels</p>
                 </div>
               </div>
@@ -1765,7 +1749,7 @@ function App() {
                   <Target size={24} />
                 </div>
                 <div>
-                  <h3>Areas for Improvement (3)</h3>
+                  <h3>Areas for Improvement</h3>
                   <p className="insight-subtitle">Opportunities to grow</p>
                 </div>
               </div>
@@ -1815,7 +1799,7 @@ function App() {
             <span>Back to Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>⚡ Batch Analysis Results (Groq with Rate Protection)</h2>
+            <h2>⚡ Batch Analysis Results</h2>
             <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
           </div>
           <div className="navigation-actions">
@@ -1923,7 +1907,7 @@ function App() {
 
         {/* Candidates Ranking */}
         <div className="section-title">
-          <h2>Candidate Rankings (5-8 skills analysis each)</h2>
+          <h2>Candidate Rankings</h2>
           <p>Sorted by ATS Score (Highest to Lowest)</p>
         </div>
         
@@ -2155,9 +2139,9 @@ function App() {
             </div>
           </div>
 
-          {/* Skills Analysis - 5-8 skills each */}
+          {/* Skills Analysis */}
           <div className="section-title">
-            <h2>Skills Analysis (5-8 skills each)</h2>
+            <h2>Skills Analysis</h2>
             <p>Detailed breakdown of matched and missing skills</p>
           </div>
           
@@ -2225,7 +2209,7 @@ function App() {
 
           {/* Summary Section with Complete 4-5 sentences */}
           <div className="section-title">
-            <h2>Profile Summary (4-5 complete sentences each)</h2>
+            <h2>Profile Summary</h2>
             <p>Key insights extracted from resume (no truncation)</p>
           </div>
           
@@ -2259,9 +2243,9 @@ function App() {
             </div>
           </div>
 
-          {/* Insights Section - Only 3 items each */}
+          {/* Insights Section */}
           <div className="section-title">
-            <h2>Insights & Recommendations (3 items each)</h2>
+            <h2>Insights & Recommendations</h2>
             <p>Key strengths and areas for improvement</p>
           </div>
           
@@ -2272,7 +2256,7 @@ function App() {
                   <TrendingUp size={24} />
                 </div>
                 <div>
-                  <h3>Key Strengths (3)</h3>
+                  <h3>Key Strengths</h3>
                   <p className="insight-subtitle">Areas where candidate excels</p>
                 </div>
               </div>
@@ -2297,7 +2281,7 @@ function App() {
                   <Target size={24} />
                 </div>
                 <div>
-                  <h3>Areas for Improvement (3)</h3>
+                  <h3>Areas for Improvement</h3>
                   <p className="insight-subtitle">Opportunities to grow</p>
                 </div>
               </div>
@@ -2358,12 +2342,12 @@ function App() {
                   <Brain className="logo-icon" />
                 </div>
                 <div className="logo-text">
-                  <h1>AI Resume Analyzer (Groq)</h1>
+                  <h1>ResuGo</h1>
                   <div className="logo-subtitle">
                     <span className="powered-by">Powered by</span>
                     <span className="groq-badge">⚡ Groq</span>
                     <span className="divider">•</span>
-                    <span className="tagline">5-8 Skills Analysis • Experience Summary • Years of Experience</span>
+                    <span className="tagline">Skills Analysis • Experience Summary • Years of Experience</span>
                   </div>
                 </div>
               </div>
@@ -2562,7 +2546,7 @@ function App() {
                 <div className="summary-item">
                   <div className="summary-label">Batch Performance</div>
                   <div className="summary-value warning">
-                    🐢 10 resumes: ~20-30s (SAFER)
+                    🐢 10 resumes: Stable Processing
                   </div>
                 </div>
               </div>
@@ -2652,7 +2636,7 @@ function App() {
                     </div>
                     <div className="status-indicator active">
                       <div className="indicator-dot" style={{ background: '#ff6b6b' }}></div>
-                      <span>Speed: ~20-30s (Safer)</span>
+                      <span>Speed: Stable Processing</span>
                     </div>
                   </>
                 )}
@@ -2691,10 +2675,10 @@ function App() {
             <div className="footer-brand">
               <div className="footer-logo">
                 <Brain size={20} />
-                <span>AI Resume Analyzer (Groq)</span>
+                <span>ResuGo</span>
               </div>
               <p className="footer-tagline">
-                Groq AI • 3-key with rate protection • 5-8 skills analysis • Experience summary • Years of experience
+                Groq AI • 3-key with rate protection • Skills analysis • Experience summary • Years of experience
               </p>
             </div>
             
@@ -2702,7 +2686,7 @@ function App() {
               <div className="footer-section">
                 <h4>Features</h4>
                 <a href="#">Groq AI</a>
-                <a href="#">5-8 Skills Analysis</a>
+                <a href="#">Skills Analysis</a>
                 <a href="#">Experience Summary</a>
                 <a href="#">Years of Experience</a>
               </div>
@@ -2726,7 +2710,7 @@ function App() {
           </div>
           
           <div className="footer-bottom">
-            <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
+            <p>© 2024 ResuGo. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
             <div className="footer-stats">
               <span className="stat">
                 <CloudLightning size={12} />
@@ -2756,7 +2740,7 @@ function App() {
               )}
               <span className="stat">
                 <Target size={12} />
-                Skills: 5-8 each
+                Skills: Comprehensive analysis
               </span>
               <span className="stat">
                 <Briefcase size={12} />
