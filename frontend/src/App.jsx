@@ -1089,24 +1089,7 @@ function App() {
             )}
           </div>
           
-          {/* Rate Limit Warning */}
-          {(backendStatus === 'ready' && aiStatus === 'available') && (
-            <div className="rate-limit-warning glass" style={{
-              background: 'rgba(255, 209, 102, 0.1)',
-              border: '1px solid rgba(255, 209, 102, 0.3)',
-              padding: '0.75rem 1rem',
-              borderRadius: '8px',
-              marginTop: '1rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}>
-              <AlertTriangle size={16} color="#ffd166" />
-              <span style={{ fontSize: '0.9rem' }}>
-                <strong>Rate Limit Protection:</strong> Staggered delays ensure you won't hit limits. 10 resumes take ~20-30s (safer).
-              </span>
-            </div>
-          )}
+          {/* REMOVED: Rate Limit Warning */}
           
           {/* Batch Mode Toggle */}
           <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
@@ -1393,7 +1376,7 @@ function App() {
                 <span className="loading-message">{loadingMessage}</span>
                 <span className="loading-subtext">
                   {batchMode 
-                    ? `Processing ${resumeFiles.length} resume(s) with rate limit protection...` 
+                    ? `Processing ${resumeFiles.length} resume(s)...` 
                     : `Using ${getModelDisplayName(modelInfo)}...`}
                 </span>
               </div>
@@ -1416,15 +1399,13 @@ function App() {
                   <>
                     <span>•</span>
                     <span>Batch Size: {resumeFiles.length}</span>
-                    <span>•</span>
-                    <span>Rate Protection: Active</span>
                   </>
                 )}
               </div>
               
               <div className="loading-note info">
                 <Info size={14} />
-                <span>Rate limit protection ensures stable operation. 10 resumes take ~20-30s.</span>
+                <span>Processing resumes with AI analysis...</span>
               </div>
             </div>
           </div>
@@ -1456,7 +1437,7 @@ function App() {
                   <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                   <span className="button-subtext">
                     {batchMode 
-                      ? `${resumeFiles.length} resume(s) • Rate Protection • ~${Math.ceil(resumeFiles.length * 2)}-${Math.ceil(resumeFiles.length * 3)}s` 
+                      ? `${resumeFiles.length} resume(s) • Groq AI` 
                       : `${getModelDisplayName(modelInfo)} • Single`}
                   </span>
                 </div>
@@ -1474,12 +1455,8 @@ function App() {
                 <span>Groq AI with 128K context length for comprehensive analysis</span>
               </div>
               <div className="tip">
-                <Activity size={16} />
-                <span>Rate limit protection with staggered delays prevents API limits</span>
-              </div>
-              <div className="tip">
-                <Zap size={16} />
-                <span>~20-30 seconds for 10 resumes (Slower but SAFE from rate limits)</span>
+                <Users size={16} />
+                <span>Analyze multiple resumes simultaneously</span>
               </div>
               <div className="tip">
                 <Download size={16} />
@@ -1491,10 +1468,6 @@ function App() {
               <div className="tip">
                 <Brain size={16} />
                 <span>Groq AI offers ultra-fast resume analysis</span>
-              </div>
-              <div className="tip">
-                <Thermometer size={16} />
-                <span>Groq API automatically warms up when idle</span>
               </div>
               <div className="tip">
                 <Activity size={16} />
@@ -1815,7 +1788,7 @@ function App() {
             <span>Back to Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>⚡ Batch Analysis Results (Groq with Rate Protection)</h2>
+            <h2>⚡ Batch Analysis Results</h2>
             <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
           </div>
           <div className="navigation-actions">
@@ -1826,36 +1799,17 @@ function App() {
           </div>
         </div>
 
-        {/* Rate Limit Protection Info */}
-        {batchAnalysis?.rate_limit_protection && (
-          <div className="rate-protection-info glass" style={{
-            background: 'rgba(0, 255, 157, 0.1)',
-            border: '1px solid rgba(0, 255, 157, 0.3)',
-            padding: '1rem',
-            borderRadius: '12px',
-            marginBottom: '1.5rem'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <ShieldCheck size={24} color="#00ff9d" />
-              <div>
-                <h4 style={{ margin: 0, color: '#00ff9d' }}>Rate Limit Protection Active</h4>
-                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.9rem', opacity: 0.9 }}>
-                  {batchAnalysis.rate_limit_protection} • Used sequential processing with staggered delays
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* REMOVED: Rate Limit Protection Info */}
 
-        {/* Stats */}
-        <div className="multi-key-stats-container glass">
+        {/* Stats - Only keep minimal stats */}
+        <div className="stats-container glass">
           <div className="stat-card">
             <div className="stat-icon success">
               <Check size={24} />
             </div>
             <div className="stat-content">
               <div className="stat-value">{batchAnalysis?.successfully_analyzed || 0}</div>
-              <div className="stat-label">Successful</div>
+              <div className="stat-label">Analyzed</div>
             </div>
           </div>
           
@@ -1877,49 +1831,12 @@ function App() {
             </div>
             <div className="stat-content">
               <div className="stat-value">{batchAnalysis?.total_files || 0}</div>
-              <div className="stat-label">Total Files</div>
-            </div>
-          </div>
-          
-          <div className="stat-card">
-            <div className="stat-icon success">
-              <Zap size={24} />
-            </div>
-            <div className="stat-content">
-              <div className="stat-value">{batchAnalysis?.available_keys || 0}</div>
-              <div className="stat-label">Keys Used</div>
+              <div className="stat-label">Total</div>
             </div>
           </div>
         </div>
 
-        {/* Key Usage Stats */}
-        {batchAnalysis?.key_statistics && (
-          <div className="key-usage-stats glass" style={{ marginBottom: '1.5rem' }}>
-            <h4>Key Usage Statistics</h4>
-            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              {batchAnalysis.key_statistics.map((stat, idx) => (
-                <div key={idx} style={{
-                  padding: '0.75rem',
-                  background: stat.status === 'cooling' ? 'rgba(255, 107, 107, 0.1)' : 'rgba(0, 255, 157, 0.1)',
-                  borderRadius: '8px',
-                  flex: 1,
-                  minWidth: '150px'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                    <Key size={16} color={stat.status === 'cooling' ? '#ff6b6b' : '#00ff9d'} />
-                    <strong>{stat.key}</strong>
-                  </div>
-                  <div style={{ fontSize: '0.85rem' }}>
-                    <div>Total: {stat.used}</div>
-                    <div>This minute: {stat.requests_this_minute}</div>
-                    <div>Errors: {stat.errors}</div>
-                    <div>Status: {stat.status}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* REMOVED: Key Usage Stats */}
 
         {/* Candidates Ranking */}
         <div className="section-title">
@@ -2455,12 +2372,6 @@ function App() {
                 </div>
               )}
               
-              {/* Rate Limit Protection */}
-              <div className="feature rate-limit">
-                <ShieldCheck size={16} />
-                <span>Rate Protection</span>
-              </div>
-              
               {/* Navigation Indicator */}
               {currentView !== 'main' && (
                 <div className="feature nav-indicator">
@@ -2503,7 +2414,7 @@ function App() {
             <svg viewBox="0 0 1200 120" preserveAspectRatio="none">
               <path d="M0,0V46.29c47.79,22.2,103.59,32.17,158,28,70.36-5.37,136.33-33.31,206.8-37.5C438.64,32.43,512.34,53.67,583,72.05c69.27,18,138.3,24.88,209.4,13.08,36.15-6,69.85-17.84,104.45,29.34C989.49,25,1113-14.29,1200,52.47V0Z" opacity=".25" fill="currentColor"></path>
               <path d="M0,0V15.81C13,36.92,27.64,56.86,47.69,72.05,99.41,111.27,165,111,224.58,91.58c31.15-10.15,60.09-26.07,89.67-39.8,40.92-19,84.73-46,130.83-49.67,36.26-2.85,70.9,9.42,98.6,31.56,31.77,25.39,62.32,62,103.63,73,40.44,10.79,81.35-6.69,119.13-24.28s75.16-39,116.92-43.05c59.73-5.85,113.28,22.88,168.9,38.84,30.2,8.66,59,6.17,87.09-7.5,22.43-10.89,48-26.93,60.65-49.24V0Z" opacity=".5" fill="currentColor"></path>
-              <path d="M0,0V5.63C149.93,59,314.09,71.32,475.83,42.57c43-7.64,84.23-20.12,127.61-26.46,59-8.63,112.48,12.24,165.56,35.4C827.93,77.22,886,95.24,951.2,90c86.53-7,172.46-45.71,248.8-84.81V0Z" fill="currentColor"></path>
+              <path d="M0,0V5.63C149.93,59,314.09,71.32,475.83,42.57c43-7.64,84.23-20.12,127.61-26.46,59-8.63,112.48,12.24,165.56,35.4C827.93,77.22,886,95.24,951.2,90c86.53-7,172.46'A5.71,248.8-84.81V0Z" fill="currentColor"></path>
             </svg>
           </div>
         </header>
@@ -2515,7 +2426,7 @@ function App() {
               <div className="quota-panel-header">
                 <div className="quota-title">
                   <Activity size={20} />
-                  <h3>Groq Service Status (Rate Limit Protection)</h3>
+                  <h3>Service Status</h3>
                 </div>
                 <button 
                   className="close-quota"
@@ -2554,36 +2465,6 @@ function App() {
                     {getModelDisplayName(modelInfo)}
                   </div>
                 </div>
-                <div className="summary-item">
-                  <div className="summary-label">Rate Limit Protection</div>
-                  <div className="summary-value success">
-                    🛡️ ACTIVE (Max 100/min/key)
-                  </div>
-                </div>
-                <div className="summary-item">
-                  <div className="summary-label">Processing Method</div>
-                  <div className="summary-value info">
-                    ⏳ Sequential with delays
-                  </div>
-                </div>
-                <div className="summary-item">
-                  <div className="summary-label">Batch Performance</div>
-                  <div className="summary-value warning">
-                    🐢 10 resumes: ~20-30s (SAFER)
-                  </div>
-                </div>
-              </div>
-              
-              <div className="rate-limit-explanation">
-                <h4>Why You Won't Hit Rate Limits Now:</h4>
-                <ul>
-                  <li>✅ Staggered delays (1-3s between requests)</li>
-                  <li>✅ Smart key rotation (load balancing)</li>
-                  <li>✅ 60s cooling on rate limit detection</li>
-                  <li>✅ Minute-by-minute request tracking</li>
-                  <li>✅ Sequential processing (not parallel)</li>
-                  <li>✅ Conservative limit: 100 requests/min/key (actual: 1000)</li>
-                </ul>
               </div>
               
               <div className="action-buttons-panel">
@@ -2610,7 +2491,7 @@ function App() {
             </div>
           )}
 
-          {/* Status Banner */}
+          {/* Status Banner - Simplified */}
           <div className="top-notice-bar glass">
             <div className="notice-content">
               <div className="status-indicators">
@@ -2624,67 +2505,12 @@ function App() {
                 </div>
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Keys: {getAvailableKeysCount()}/3</span>
-                </div>
-                {modelInfo && (
-                  <div className="status-indicator active">
-                    <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                    <span>Model: {getModelDisplayName(modelInfo)}</span>
-                  </div>
-                )}
-                <div className="status-indicator active">
-                  <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Excel: Name & Experience columns</span>
-                </div>
-                <div className="status-indicator active">
-                  <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
-                  <span>Rate Protection: ACTIVE</span>
-                </div>
-                <div className="status-indicator active">
-                  <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
                   <span>Mode: {currentView === 'single-results' ? 'Single' : 
                                 currentView === 'batch-results' ? 'Batch' : 
                                 currentView === 'candidate-detail' ? 'Details' : 
                                 batchMode ? 'Batch' : 'Single'}</span>
                 </div>
-                {batchMode && (
-                  <>
-                    <div className="status-indicator active">
-                      <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
-                      <span>Capacity: Up to 10 resumes</span>
-                    </div>
-                    <div className="status-indicator active">
-                      <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                      <span>Experience Analysis: Included</span>
-                    </div>
-                    <div className="status-indicator active">
-                      <div className="indicator-dot" style={{ background: '#ff6b6b' }}></div>
-                      <span>Speed: ~20-30s (Safer)</span>
-                    </div>
-                  </>
-                )}
               </div>
-              
-              {backendStatus !== 'ready' && (
-                <div className="wakeup-message">
-                  <AlertCircle size={16} />
-                  <span>Backend is waking up. Analysis may be slower for the first request.</span>
-                </div>
-              )}
-              
-              {aiStatus === 'warming' && (
-                <div className="wakeup-message">
-                  <Thermometer size={16} />
-                  <span>Groq API is warming up. This ensures high-quality responses.</span>
-                </div>
-              )}
-              
-              {batchMode && getAvailableKeysCount() > 0 && (
-                <div className="multi-key-message">
-                  <ShieldCheck size={16} />
-                  <span>Rate protection: Processing {resumeFiles.length} resumes sequentially with delays</span>
-                </div>
-              )}
             </div>
           </div>
 
@@ -2701,7 +2527,7 @@ function App() {
                 <span>AI Resume Analyzer (Groq)</span>
               </div>
               <p className="footer-tagline">
-                Groq AI • 3-key with rate protection • 5-8 skills analysis • Experience summary • Years of experience
+                Groq AI • 5-8 skills analysis • Experience summary • Years of experience
               </p>
             </div>
             
@@ -2715,8 +2541,6 @@ function App() {
               </div>
               <div className="footer-section">
                 <h4>Service</h4>
-                <a href="#">Rate Limit Protection</a>
-                <a href="#">3-Key Sequential</a>
                 <a href="#">Excel Reports</a>
                 <a href="#">Candidate Comparison</a>
               </div>
@@ -2736,31 +2560,9 @@ function App() {
             <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
             <div className="footer-stats">
               <span className="stat">
-                <CloudLightning size={12} />
-                Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
-              </span>
-              <span className="stat">
                 <Brain size={12} />
-                Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming'}
+                Groq AI Analysis
               </span>
-              <span className="stat">
-                <Key size={12} />
-                Keys: {getAvailableKeysCount()}/3
-              </span>
-              <span className="stat">
-                <Cpu size={12} />
-                Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
-              </span>
-              <span className="stat">
-                <ShieldCheck size={12} />
-                Rate Protection: Active
-              </span>
-              {batchMode && (
-                <span className="stat">
-                  <Activity size={12} />
-                  Batch: {resumeFiles.length} resumes
-                </span>
-              )}
               <span className="stat">
                 <Target size={12} />
                 Skills: 5-8 each
