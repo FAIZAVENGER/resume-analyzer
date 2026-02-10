@@ -1,3 +1,4 @@
+App.jsx:
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { 
@@ -445,7 +446,7 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 12)); // CHANGED: Now 12 files max
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 6));
       setError('');
     }
   };
@@ -994,7 +995,7 @@ function App() {
               </div>
               <div className="benefit-content">
                 <h3>Batch Processing</h3>
-                <p>Analyze multiple resumes simultaneously (Up to 12)</p>
+                <p>Analyze multiple resumes simultaneously</p>
               </div>
             </div>
             <div className="benefit">
@@ -1094,7 +1095,7 @@ function App() {
                 gap: '0.5rem'
               }}
             >
-              <Users size={16} /> Multiple Resumes (Up to 12)
+              <Users size={16} /> Multiple Resumes (Up to 6)
             </button>
           </div>
         </div>
@@ -1111,7 +1112,7 @@ function App() {
                 <h2>{batchMode ? 'Upload Resumes' : 'Upload Resume'}</h2>
                 <p className="card-subtitle">
                   {batchMode 
-                    ? 'Upload multiple resumes (Max 12, 15MB each)'
+                    ? 'Upload multiple resumes (Max 6, 15MB each)'
                     : 'Supported: PDF, DOC, DOCX, TXT (Max 15MB)'}
                 </p>
               </div>
@@ -1226,7 +1227,7 @@ function App() {
                         <span className="upload-text">
                           Drag & drop multiple files or click to browse
                         </span>
-                        <span className="upload-hint">Max 12 files, 15MB each</span>
+                        <span className="upload-hint">Max 6 files, 15MB each</span>
                       </>
                     )}
                   </div>
@@ -1363,7 +1364,7 @@ function App() {
                     <span>•</span>
                     <span>Rate Protection: Active</span>
                     <span>•</span>
-                    <span>Max: 12 resumes</span>
+                    <span>Max: 6 resumes</span>
                     <span>•</span>
                     <span>Scoring: Granular unique</span>
                   </>
@@ -2477,7 +2478,7 @@ function App() {
                 <div className="summary-item">
                   <div className="summary-label">Max Batch Size</div>
                   <div className="summary-value warning">
-                    📁 12 resumes (Increased from 6)
+                    📁 6 resumes (Reduced from 10)
                   </div>
                 </div>
                 <div className="summary-item">
@@ -2554,7 +2555,7 @@ function App() {
                 )}
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                    <span>Excel: Name & Experience columns</span>
+                  <span>Excel: Name & Experience columns</span>
                 </div>
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
@@ -2645,7 +2646,7 @@ function App() {
               {batchMode && (
                 <span className="stat">
                   <Activity size={12} />
-                  Batch: {resumeFiles.length} resumes (Max 12)
+                  Batch: {resumeFiles.length} resumes (Max 6)
                 </span>
               )}
               <span className="stat">
