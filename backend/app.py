@@ -784,7 +784,7 @@ def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis
     resume_hash = calculate_resume_hash(resume_text, job_description)
     cached_score = get_cached_score(resume_hash)
     
-    # Enhanced prompt for more accurate and granular scoring
+    # Enhanced prompt for more accurate and granular scoring - UPDATED to request bullet points
     prompt = f"""Analyze resume against job description and provide precise scoring:
 
 RESUME:
@@ -798,8 +798,8 @@ Provide analysis in this JSON format:
     "candidate_name": "Extracted name or filename",
     "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
     "skills_missing": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
-    "experience_summary": "Provide a concise 4-5 sentence summary of candidate's experience. Focus on key roles, achievements, and relevance. Make sure each sentence is complete and not truncated. Write full sentences.",
-    "education_summary": "Provide a concise 4-5 sentence summary of education. Include degrees, institutions, and relevance. Make sure each sentence is complete and not truncated. Write full sentences.",
+    "experience_summary": "• Provide a concise 4-5 bullet point summary of candidate's experience. Focus on key roles, achievements, and relevance. Each bullet should be a complete sentence.\\n• Example: • 5+ years experience in software development with Python and Java\\n• • Led a team of 5 developers on a successful product launch\\n• • Demonstrated expertise in cloud technologies and agile methodologies",
+    "education_summary": "• Provide a concise 4-5 bullet point summary of education. Include degrees, institutions, and relevance. Each bullet should be a complete sentence.\\n• Example: • Bachelor of Science in Computer Science from XYZ University\\n• • Master's degree in Business Administration with focus on technology management\\n• • Certified in project management and agile methodologies",
     "years_of_experience": "X years",  # Add years of experience
     "overall_score": 82.5,
     "recommendation": "Strongly Recommended/Recommended/Consider/Not Recommended",
@@ -807,7 +807,7 @@ Provide analysis in this JSON format:
     "areas_for_improvement": ["area1", "area2", "area3"]
 }}
 
-IMPORTANT SCORING GUIDELINES:
+IMPORTANT GUIDELINES:
 1. Use granular scores (e.g., 82.5, 76.3, 88.7, 91.2) - NOT just multiples of 5
 2. Consider these factors for scoring:
    - Skills match percentage (weight: 40%)
@@ -815,8 +815,9 @@ IMPORTANT SCORING GUIDELINES:
    - Education alignment (weight: 20%)
    - Years of experience (weight: 10%)
 3. Provide EXACTLY 3 key_strengths and 3 areas_for_improvement
-4. Write full, complete sentences. Do not cut off sentences mid-way.
-5. Ensure proper sentence endings with periods.
+4. Write bullet points for experience_summary and education_summary (4-5 bullets each)
+5. Each bullet point should start with a bullet character (•) and be a complete sentence
+6. Ensure proper sentence endings with periods.
 
 SCORING RANGES:
 - 90-100: Exceptional match (Strongly Recommended)
@@ -924,7 +925,7 @@ SCORING RANGES:
         return generate_fallback_analysis(filename, f"Analysis Error: {str(e)[:100]}")
     
 def validate_analysis(analysis, filename):
-    """Validate analysis data and fill missing fields - FIXED to ensure complete sentences"""
+    """Validate analysis data and fill missing fields - UPDATED for bullet points"""
     # Generate a unique granular base score for fallback
     base_score = random.uniform(65, 82)
     unique_score = generate_unique_score(base_score, filename)
@@ -933,8 +934,8 @@ def validate_analysis(analysis, filename):
         'candidate_name': 'Professional Candidate',
         'skills_matched': ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Team Collaboration', 'Project Management', 'Agile Methodology'],
         'skills_missing': ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX Design', 'Cybersecurity', 'Mobile Development', 'Database Administration'],
-        'experience_summary': 'The candidate demonstrates relevant professional experience with progressive responsibility. Their background shows expertise in key areas relevant to modern industry demands. They have experience collaborating with teams and delivering measurable results. Additional experience in specific domains enhances their suitability.',
-        'education_summary': 'The candidate holds relevant educational qualifications from reputable institutions. Their academic background provides strong foundational knowledge in core subjects. Additional certifications enhance their professional profile. The education aligns well with industry requirements.',
+        'experience_summary': '• 5+ years of professional experience in software development\n• Demonstrated expertise in multiple programming languages and frameworks\n• Successfully led cross-functional teams on complex projects\n• Strong background in agile methodologies and project delivery',
+        'education_summary': '• Bachelor\'s degree in Computer Science or related field\n• Additional certifications in relevant technologies and methodologies\n• Strong academic background with practical applications\n• Continuous learning through professional development courses',
         'years_of_experience': '3-5 years',  # Added default years of experience
         'overall_score': unique_score,  # Use unique granular score
         'recommendation': 'Consider for Interview',
@@ -975,36 +976,41 @@ def validate_analysis(analysis, filename):
     analysis['key_strengths'] = analysis.get('key_strengths', [])[:3]
     analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:3]
     
-    # FIXED: Ensure complete sentences for summaries (don't truncate)
+    # FIXED: Ensure bullet point format for summaries
     for field in ['experience_summary', 'education_summary']:
         if field in analysis:
             text = analysis[field]
-            # Remove any trailing ellipsis or incomplete sentences
-            if '...' in text:
-                # Find the last complete sentence before ellipsis
-                sentences = text.split('. ')
-                complete_sentences = []
-                for sentence in sentences:
-                    if '...' in sentence:
-                        # Remove the incomplete part
-                        sentence = sentence.split('...')[0]
-                        if sentence.strip():
-                            complete_sentences.append(sentence.strip() + '.')
-                        break
-                    elif sentence.strip():
-                        complete_sentences.append(sentence.strip() + '.')
-                analysis[field] = ' '.join(complete_sentences)
             
-            # Ensure proper sentence endings
-            if not analysis[field].strip().endswith(('.', '!', '?')):
-                analysis[field] = analysis[field].strip() + '.'
+            # Convert to bullet points if not already
+            if not any(bullet in text for bullet in ['•', '●', '- ', '* ']):
+                # Convert sentences to bullet points
+                sentences = [s.strip() for s in text.split('.') if s.strip()]
+                bullet_points = []
+                for sentence in sentences[:5]:  # Limit to 5 bullet points
+                    if sentence and not sentence.startswith(('•', '●', '- ', '* ')):
+                        bullet_points.append(f"• {sentence.strip()}.")
+                    elif sentence:
+                        bullet_points.append(sentence.strip())
+                analysis[field] = '\n'.join(bullet_points)
             
-            # Limit to reasonable length but keep sentences complete
-            if len(analysis[field]) > 800:
-                # Take first 5 sentences instead of truncating
-                sentences = analysis[field].split('. ')
-                if len(sentences) > 5:
-                    analysis[field] = '. '.join(sentences[:5]) + '.'
+            # Ensure proper bullet point format
+            lines = analysis[field].split('\n')
+            formatted_lines = []
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith(('•', '●', '- ', '* ')):
+                    formatted_lines.append(f"• {line}")
+                elif line:
+                    formatted_lines.append(line)
+            
+            # Limit to 5 bullet points and ensure they end with periods
+            final_bullets = []
+            for line in formatted_lines[:5]:
+                if not line.endswith(('.', '!', '?')):
+                    line = line + '.'
+                final_bullets.append(line)
+            
+            analysis[field] = '\n'.join(final_bullets)
     
     # Remove unwanted fields
     unwanted_fields = ['job_title_suggestion', 'industry_fit', 'salary_expectation']
@@ -1015,7 +1021,7 @@ def validate_analysis(analysis, filename):
     return analysis
 
 def generate_fallback_analysis(filename, reason, partial_success=False):
-    """Generate a fallback analysis with unique granular scoring"""
+    """Generate a fallback analysis with unique granular scoring - UPDATED for bullet points"""
     candidate_name = "Professional Candidate"
     
     if filename:
@@ -1035,8 +1041,8 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "candidate_name": candidate_name,
             "skills_matched": ['Python Programming', 'JavaScript Development', 'Database Management', 'Communication Skills', 'Problem Solving', 'Team Collaboration'],
             "skills_missing": ['Machine Learning Algorithms', 'Cloud Platform Expertise', 'Advanced Data Analysis', 'DevOps Practices', 'UI/UX Design Principles'],
-            "experience_summary": 'The candidate has demonstrated professional experience in relevant technical roles. Their background includes working with modern technologies and methodologies. They have contributed to multiple projects with measurable outcomes. Additional experience enhances their suitability for the role.',
-            "education_summary": 'The candidate possesses educational qualifications that provide a strong foundation for professional work. Their academic background includes relevant coursework and projects. Additional training complements their formal education. The educational profile aligns with industry requirements.',
+            "experience_summary": '• Professional experience in technical roles with modern technologies\n• Demonstrated ability to work on multiple projects with measurable outcomes\n• Experience collaborating with cross-functional teams\n• Strong background in software development methodologies',
+            "education_summary": '• Educational qualifications providing strong foundation for professional work\n• Academic background includes relevant coursework and projects\n• Additional training complements formal education\n• Educational profile aligns with industry requirements',
             "years_of_experience": "3-5 years",
             "overall_score": unique_score,
             "recommendation": "Needs Full Analysis",
@@ -1051,8 +1057,8 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
             "candidate_name": candidate_name,
             "skills_matched": ['Basic Programming', 'Communication Skills', 'Problem Solving', 'Teamwork', 'Technical Knowledge', 'Learning Ability'],
             "skills_missing": ['Advanced Technical Skills', 'Industry Experience', 'Specialized Knowledge', 'Certifications', 'Project Management'],
-            "experience_summary": 'Professional experience analysis will be available once the Groq AI service is fully initialized. The candidate appears to have relevant background based on initial file processing. Additional details will be available with full analysis.',
-            "education_summary": 'Educational background analysis will be available shortly upon service initialization. Academic qualifications assessment is pending full AI processing. Further details will be provided with complete analysis.',
+            "experience_summary": '• Professional experience analysis pending Groq AI service initialization\n• Candidate appears to have relevant background based on initial file processing\n• Additional details will be available with full analysis\n• Analysis requires complete AI processing',
+            "education_summary": '• Educational background analysis pending service initialization\n• Academic qualifications assessment requires full AI processing\n• Further details will be provided with complete analysis\n• Additional certifications and training information pending',
             "years_of_experience": "Not specified",
             "overall_score": unique_score,
             "recommendation": "Service Warming Up - Please Retry",
@@ -1261,6 +1267,7 @@ def home():
                     <li>Unique scores for each candidate</li>
                     <li>Weighted scoring: Skills (40%), Experience (30%), Education (20%), Years (10%)</li>
                     <li>Precision to 1 decimal place</li>
+                    <li>Experience & Education summaries in bullet points</li>
                 </ul>
             </div>
             
@@ -1285,6 +1292,7 @@ def home():
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
             <p><strong>Processing:</strong> Rate-limited round-robin with staggered delays</p>
             <p><strong>Scoring:</strong> Granular unique scores with 1 decimal precision</p>
+            <p><strong>Summaries:</strong> Experience & Education in bullet points</p>
             <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/5</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
             
@@ -1481,6 +1489,7 @@ def analyze_resume_batch():
         print(f"🔄 Processing {len(resume_files)} resumes with {available_keys} keys...")
         print(f"⚠️ RATE LIMIT PROTECTION: Staggered delays, max {MAX_REQUESTS_PER_MINUTE_PER_KEY} requests/minute/key")
         print(f"🎯 SCORING: Granular unique scores with 1 decimal precision")
+        print(f"📝 SUMMARIES: Experience & Education in bullet points")
         
         # Process sequentially with delays (safer than parallel for rate limits)
         for index, resume_file in enumerate(resume_files):
@@ -1667,7 +1676,7 @@ def get_resume_original(analysis_id):
         return jsonify({'error': f'Failed to download resume: {str(e)}'}), 500
 
 def create_single_report(analysis, job_description, filename="single_analysis.xlsx"):
-    """Create a single candidate Excel report"""
+    """Create a single candidate Excel report with bullet points"""
     try:
         wb = Workbook()
         ws = wb.active
@@ -1678,6 +1687,7 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         header_font = Font(bold=True, color="FFFFFF", size=11)
         label_font = Font(bold=True, size=10)
         value_font = Font(size=10)
+        bullet_font = Font(size=10)
         
         # Color scheme
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")  # Blue
@@ -1699,7 +1709,7 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         )
         
         # Title Section
-        ws.merge_cells('A1:H1')
+        ws.merge_cells('A1:I1')
         title_cell = ws['A1']
         title_cell.value = "RESUME ANALYSIS REPORT - SINGLE CANDIDATE"
         title_cell.font = title_font
@@ -1722,11 +1732,11 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         ws['B5'] = job_description[:100] + "..." if len(job_description) > 100 else job_description
         ws['A5'].font = label_font
         ws['B5'].font = value_font
-        ws.merge_cells('B5:H5')
+        ws.merge_cells('B5:I5')
         
         # Candidate Information Section
         start_row = 7
-        ws.merge_cells(f'A{start_row}:H{start_row}')
+        ws.merge_cells(f'A{start_row}:I{start_row}')
         section_cell = ws[f'A{start_row}']
         section_cell.value = "CANDIDATE INFORMATION"
         section_cell.font = header_font
@@ -1736,6 +1746,7 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         
         # Candidate Data
         data_rows = [
+            ("Candidate Name", analysis.get('candidate_name', 'N/A')),
             ("File Name", analysis.get('filename', 'N/A')),
             ("ATS Score", f"{analysis.get('overall_score', 0):.1f}/100"),
             ("Years of Experience", analysis.get('years_of_experience', 'Not specified')),
@@ -1759,11 +1770,11 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
                     ws[f'B{row}'].font = Font(bold=True, color="FFC000", size=10)
                 else:
                     ws[f'B{row}'].font = Font(bold=True, color="FF0000", size=10)
-            ws.merge_cells(f'B{row}:H{row}')
+            ws.merge_cells(f'B{row}:I{row}')
         
         # Skills Matched Section
         skills_row = start_row + len(data_rows) + 2
-        ws.merge_cells(f'A{skills_row}:H{skills_row}')
+        ws.merge_cells(f'A{skills_row}:I{skills_row}')
         skills_header = ws[f'A{skills_row}']
         skills_header.value = "SKILLS MATCHED (5-8 skills)"
         skills_header.font = header_font
@@ -1781,11 +1792,11 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
             ws[f'B{row}'] = skill
             ws[f'B{row}'].font = value_font
             ws[f'B{row}'].border = thin_border
-            ws.merge_cells(f'B{row}:H{row}')
+            ws.merge_cells(f'B{row}:I{row}')
         
         # Skills Missing Section
         missing_start = skills_row + len(skills_matched) + 2
-        ws.merge_cells(f'A{missing_start}:H{missing_start}')
+        ws.merge_cells(f'A{missing_start}:I{missing_start}')
         missing_header = ws[f'A{missing_start}']
         missing_header.value = "SKILLS MISSING (5-8 skills)"
         missing_header.font = header_font
@@ -1803,29 +1814,65 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
             ws[f'B{row}'] = skill
             ws[f'B{row}'].font = Font(size=10, color="FF0000")
             ws[f'B{row}'].border = thin_border
-            ws.merge_cells(f'B{row}:H{row}')
+            ws.merge_cells(f'B{row}:I{row}')
         
-        # Experience Summary Section
+        # Experience Summary Section (in bullet points)
         exp_start = missing_start + len(skills_missing) + 2
-        ws.merge_cells(f'A{exp_start}:H{exp_start}')
+        ws.merge_cells(f'A{exp_start}:I{exp_start}')
         exp_header = ws[f'A{exp_start}']
-        exp_header.value = "EXPERIENCE SUMMARY"
+        exp_header.value = "EXPERIENCE SUMMARY (Bullet Points)"
         exp_header.font = header_font
         exp_header.fill = section_fill
         exp_header.alignment = Alignment(horizontal='center')
         exp_header.border = thin_border
         
-        ws.merge_cells(f'A{exp_start + 1}:H{exp_start + 1}')
-        exp_cell = ws[f'A{exp_start + 1}']
-        exp_cell.value = analysis.get('experience_summary', 'No experience summary available.')
-        exp_cell.font = value_font
-        exp_cell.alignment = Alignment(wrap_text=True, vertical='top')
-        exp_cell.border = thin_border
-        ws.row_dimensions[exp_start + 1].height = 60
+        # Process bullet points
+        exp_summary = analysis.get('experience_summary', 'No experience summary available.')
+        exp_lines = exp_summary.split('\n')
+        for idx, line in enumerate(exp_lines):
+            row = exp_start + idx + 1
+            ws.merge_cells(f'A{row}:I{row}')
+            exp_cell = ws[f'A{row}']
+            exp_cell.value = line
+            exp_cell.font = bullet_font
+            exp_cell.alignment = Alignment(wrap_text=True, vertical='top', horizontal='left')
+            exp_cell.border = thin_border
+            ws.row_dimensions[row].height = 20
+        
+        # Set height for experience section
+        exp_end_row = exp_start + len(exp_lines)
+        ws.row_dimensions[exp_start + 1].height = 15 * min(len(exp_lines), 5)
+        
+        # Education Summary Section (in bullet points)
+        edu_start = exp_end_row + 2
+        ws.merge_cells(f'A{edu_start}:I{edu_start}')
+        edu_header = ws[f'A{edu_start}']
+        edu_header.value = "EDUCATION SUMMARY (Bullet Points)"
+        edu_header.font = header_font
+        edu_header.fill = section_fill
+        edu_header.alignment = Alignment(horizontal='center')
+        edu_header.border = thin_border
+        
+        # Process bullet points
+        edu_summary = analysis.get('education_summary', 'No education summary available.')
+        edu_lines = edu_summary.split('\n')
+        for idx, line in enumerate(edu_lines):
+            row = edu_start + idx + 1
+            ws.merge_cells(f'A{row}:I{row}')
+            edu_cell = ws[f'A{row}']
+            edu_cell.value = line
+            edu_cell.font = bullet_font
+            edu_cell.alignment = Alignment(wrap_text=True, vertical='top', horizontal='left')
+            edu_cell.border = thin_border
+            ws.row_dimensions[row].height = 20
+        
+        # Set height for education section
+        edu_end_row = edu_start + len(edu_lines)
+        ws.row_dimensions[edu_start + 1].height = 15 * min(len(edu_lines), 5)
         
         # Key Strengths Section
-        strengths_start = exp_start + 3
-        ws.merge_cells(f'A{strengths_start}:H{strengths_start}')
+        strengths_start = edu_end_row + 2
+        ws.merge_cells(f'A{strengths_start}:I{strengths_start}')
         strengths_header = ws[f'A{strengths_start}']
         strengths_header.value = "KEY STRENGTHS (3)"
         strengths_header.font = header_font
@@ -1843,11 +1890,11 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
             ws[f'B{row}'] = strength
             ws[f'B{row}'].font = Font(size=10, color="00B050")
             ws[f'B{row}'].border = thin_border
-            ws.merge_cells(f'B{row}:H{row}')
+            ws.merge_cells(f'B{row}:I{row}')
         
         # Areas for Improvement Section
         improve_start = strengths_start + len(key_strengths) + 2
-        ws.merge_cells(f'A{improve_start}:H{improve_start}')
+        ws.merge_cells(f'A{improve_start}:I{improve_start}')
         improve_header = ws[f'A{improve_start}']
         improve_header.value = "AREAS FOR IMPROVEMENT (3)"
         improve_header.font = header_font
@@ -1865,7 +1912,7 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
             ws[f'B{row}'] = area
             ws[f'B{row}'].font = Font(size=10, color="FF6600")
             ws[f'B{row}'].border = thin_border
-            ws.merge_cells(f'B{row}:H{row}')
+            ws.merge_cells(f'B{row}:I{row}')
         
         # Set column widths
         column_widths = {'A': 20, 'B': 60}
@@ -1895,7 +1942,7 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         return filepath
 
 def create_comprehensive_batch_report(analyses, job_description, filename="batch_resume_analysis.xlsx"):
-    """Create a comprehensive batch Excel report with professional formatting"""
+    """Create a comprehensive batch Excel report with professional formatting and candidate name column"""
     try:
         wb = Workbook()
         
@@ -1909,6 +1956,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
         subheader_font = Font(bold=True, color="000000", size=10)
         normal_font = Font(size=10)
         bold_font = Font(bold=True, size=10)
+        bullet_font = Font(size=9)
         
         # Color scheme
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")  # Blue
@@ -1932,7 +1980,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
         )
         
         # Title Section
-        ws_comparison.merge_cells('A1:K1')
+        ws_comparison.merge_cells('A1:L1')
         title_cell = ws_comparison['A1']
         title_cell.value = "RESUME ANALYSIS REPORT - BATCH COMPARISON"
         title_cell.font = title_font
@@ -1953,19 +2001,21 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ws_comparison.cell(row=info_row, column=1 + i*3, value=label).font = bold_font
             ws_comparison.cell(row=info_row, column=2 + i*3, value=value).font = normal_font
         
-        # Candidate Comparison Table Headers (REMOVED Candidate Name column)
+        # Candidate Comparison Table Headers - UPDATED: Added Candidate Name column
         start_row = 5
         headers = [
             ("Rank", 8),
-            ("File Name", 30),  # Increased width since we removed candidate name
+            ("Candidate Name", 25),  # ADDED: Candidate Name column
+            ("File Name", 25),
             ("Years of Experience", 15),
             ("ATS Score", 12),
             ("Recommendation", 20),
             ("Experience Summary", 40),
-            ("Skills Matched", 30),
-            ("Skills Missing", 30),
-            ("Key Strengths", 25),
-            ("Areas for Improvement", 25)
+            ("Education Summary", 40),  # ADDED: Education Summary column
+            ("Skills Matched", 25),
+            ("Skills Missing", 25),
+            ("Key Strengths", 20),
+            ("Areas for Improvement", 20)
         ]
         
         # Write headers
@@ -1989,22 +2039,28 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             cell.fill = row_fill
             cell.border = thin_border
             
-            # File Name (Now column 2 since we removed candidate name)
-            cell = ws_comparison.cell(row=row, column=2, value=analysis.get('filename', 'Unknown'))
+            # Candidate Name (Column 2)
+            cell = ws_comparison.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
+            cell.font = Font(bold=True, size=10)
+            cell.fill = row_fill
+            cell.border = thin_border
+            
+            # File Name (Column 3)
+            cell = ws_comparison.cell(row=row, column=3, value=analysis.get('filename', 'Unknown'))
             cell.font = normal_font
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Years of Experience
-            cell = ws_comparison.cell(row=row, column=3, value=analysis.get('years_of_experience', 'Not specified'))
+            # Years of Experience (Column 4)
+            cell = ws_comparison.cell(row=row, column=4, value=analysis.get('years_of_experience', 'Not specified'))
             cell.font = normal_font
             cell.alignment = Alignment(horizontal='center')
             cell.fill = row_fill
             cell.border = thin_border
             
-            # ATS Score with color coding - Now shows granular score
+            # ATS Score with color coding (Column 5)
             score = analysis.get('overall_score', 0)
-            cell = ws_comparison.cell(row=row, column=4, value=f"{score:.1f}")
+            cell = ws_comparison.cell(row=row, column=5, value=f"{score:.1f}")
             cell.alignment = Alignment(horizontal='center')
             cell.fill = row_fill
             cell.border = thin_border
@@ -2015,48 +2071,61 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             else:
                 cell.font = Font(bold=True, color="FF0000", size=10)  # Red
             
-            # Recommendation
-            cell = ws_comparison.cell(row=row, column=5, value=analysis.get('recommendation', 'N/A'))
+            # Recommendation (Column 6)
+            cell = ws_comparison.cell(row=row, column=6, value=analysis.get('recommendation', 'N/A'))
             cell.font = normal_font
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Experience Summary
+            # Experience Summary - Bullet Points (Column 7)
             exp_summary = analysis.get('experience_summary', 'No summary available.')
-            # Truncate if too long
-            cell = ws_comparison.cell(row=row, column=6, value=exp_summary)
-            cell.font = Font(size=9)
+            # Format bullet points for Excel
+            exp_lines = exp_summary.split('\n')
+            formatted_exp = "\n".join([line.strip() for line in exp_lines if line.strip()])
+            cell = ws_comparison.cell(row=row, column=7, value=formatted_exp)
+            cell.font = bullet_font
             cell.alignment = Alignment(wrap_text=True, vertical='top')
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Skills Matched (5-8 skills)
+            # Education Summary - Bullet Points (Column 8)
+            edu_summary = analysis.get('education_summary', 'No summary available.')
+            # Format bullet points for Excel
+            edu_lines = edu_summary.split('\n')
+            formatted_edu = "\n".join([line.strip() for line in edu_lines if line.strip()])
+            cell = ws_comparison.cell(row=row, column=8, value=formatted_edu)
+            cell.font = bullet_font
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+            cell.fill = row_fill
+            cell.border = thin_border
+            
+            # Skills Matched (5-8 skills) (Column 9)
             skills_matched = analysis.get('skills_matched', [])
-            cell = ws_comparison.cell(row=row, column=7, value="\n".join([f"• {skill}" for skill in skills_matched[:8]]))
+            cell = ws_comparison.cell(row=row, column=9, value="\n".join([f"• {skill}" for skill in skills_matched[:8]]))
             cell.font = Font(size=9)
             cell.alignment = Alignment(wrap_text=True, vertical='top')
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Skills Missing (5-8 skills)
+            # Skills Missing (5-8 skills) (Column 10)
             skills_missing = analysis.get('skills_missing', [])
-            cell = ws_comparison.cell(row=row, column=8, value="\n".join([f"• {skill}" for skill in skills_missing[:8]]))
+            cell = ws_comparison.cell(row=row, column=10, value="\n".join([f"• {skill}" for skill in skills_missing[:8]]))
             cell.font = Font(size=9, color="FF0000")
             cell.alignment = Alignment(wrap_text=True, vertical='top')
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Key Strengths (3 items)
+            # Key Strengths (3 items) (Column 11)
             strengths = analysis.get('key_strengths', [])
-            cell = ws_comparison.cell(row=row, column=9, value="\n".join([f"• {strength}" for strength in strengths[:3]]))
+            cell = ws_comparison.cell(row=row, column=11, value="\n".join([f"• {strength}" for strength in strengths[:3]]))
             cell.font = Font(size=9, color="00B050")
             cell.alignment = Alignment(wrap_text=True, vertical='top')
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Areas for Improvement (3 items)
+            # Areas for Improvement (3 items) (Column 12)
             improvements = analysis.get('areas_for_improvement', [])
-            cell = ws_comparison.cell(row=row, column=10, value="\n".join([f"• {area}" for area in improvements[:3]]))
+            cell = ws_comparison.cell(row=row, column=12, value="\n".join([f"• {area}" for area in improvements[:3]]))
             cell.font = Font(size=9, color="FF6600")
             cell.alignment = Alignment(wrap_text=True, vertical='top')
             cell.fill = row_fill
@@ -2128,12 +2197,13 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             candidate_header_font = Font(bold=True, size=11, color="000000")
             candidate_label_font = Font(bold=True, size=10, color="000000")
             candidate_value_font = Font(size=10, color="000000")
+            candidate_bullet_font = Font(size=10, color="000000")
             
             candidate_title_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
             candidate_section_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
             
             # Title Section
-            ws_candidate.merge_cells('A1:H1')
+            ws_candidate.merge_cells('A1:I1')
             title_cell = ws_candidate['A1']
             title_cell.value = f"CANDIDATE ANALYSIS REPORT - {candidate_name.upper()}"
             title_cell.font = candidate_title_font
@@ -2157,73 +2227,131 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ws_candidate['A5'].font = candidate_label_font
             ws_candidate['B5'].font = candidate_value_font
             
+            # Candidate Name
+            ws_candidate.merge_cells('A7:I7')
+            name_header = ws_candidate['A7']
+            name_header.value = "CANDIDATE NAME"
+            name_header.font = candidate_header_font
+            name_header.fill = candidate_section_fill
+            name_header.alignment = Alignment(horizontal='center')
+            name_header.border = thin_border
+            
+            ws_candidate.merge_cells('A8:I8')
+            name_cell = ws_candidate['A8']
+            name_cell.value = candidate_name
+            name_cell.font = Font(bold=True, size=12, color="4472C4")
+            name_cell.alignment = Alignment(horizontal='center')
+            name_cell.border = thin_border
+            
             # File Name
-            ws_candidate.merge_cells('A7:H7')
-            file_header = ws_candidate['A7']
+            ws_candidate.merge_cells('A10:I10')
+            file_header = ws_candidate['A10']
             file_header.value = "FILE NAME"
             file_header.font = candidate_header_font
             file_header.fill = candidate_section_fill
             file_header.alignment = Alignment(horizontal='center')
             file_header.border = thin_border
             
-            ws_candidate.merge_cells('A8:H8')
-            file_cell = ws_candidate['A8']
+            ws_candidate.merge_cells('A11:I11')
+            file_cell = ws_candidate['A11']
             file_cell.value = analysis.get('filename', 'N/A')
             file_cell.font = candidate_value_font
             file_cell.border = thin_border
             
             # Years of Experience
-            ws_candidate.merge_cells('A10:H10')
-            exp_header = ws_candidate['A10']
+            ws_candidate.merge_cells('A13:I13')
+            exp_header = ws_candidate['A13']
             exp_header.value = "YEARS OF EXPERIENCE"
             exp_header.font = candidate_header_font
             exp_header.fill = candidate_section_fill
             exp_header.alignment = Alignment(horizontal='center')
             exp_header.border = thin_border
             
-            ws_candidate.merge_cells('A11:H11')
-            exp_cell = ws_candidate['A11']
+            ws_candidate.merge_cells('A14:I14')
+            exp_cell = ws_candidate['A14']
             exp_cell.value = analysis.get('years_of_experience', 'Not specified')
             exp_cell.font = Font(bold=True, size=12, color="4472C4")
             exp_cell.alignment = Alignment(horizontal='center')
             exp_cell.border = thin_border
             
             # ATS Score - Now shows granular score
-            ws_candidate.merge_cells('A13:H13')
-            score_header = ws_candidate['A13']
+            ws_candidate.merge_cells('A16:I16')
+            score_header = ws_candidate['A16']
             score_header.value = "ATS SCORE"
             score_header.font = candidate_header_font
             score_header.fill = candidate_section_fill
             score_header.alignment = Alignment(horizontal='center')
             score_header.border = thin_border
             
-            ws_candidate.merge_cells('A14:H14')
-            score_cell = ws_candidate['A14']
+            ws_candidate.merge_cells('A17:I17')
+            score_cell = ws_candidate['A17']
             score_cell.value = f"{analysis.get('overall_score', 0):.1f}/100"
             score_cell.font = Font(bold=True, size=12, color=get_score_color(analysis.get('overall_score', 0)))
             score_cell.alignment = Alignment(horizontal='center')
             score_cell.border = thin_border
             
             # Recommendation
-            ws_candidate.merge_cells('A16:H16')
-            rec_header = ws_candidate['A16']
+            ws_candidate.merge_cells('A19:I19')
+            rec_header = ws_candidate['A19']
             rec_header.value = "RECOMMENDATION"
             rec_header.font = candidate_header_font
             rec_header.fill = candidate_section_fill
             rec_header.alignment = Alignment(horizontal='center')
             rec_header.border = thin_border
             
-            ws_candidate.merge_cells('A17:H17')
-            rec_cell = ws_candidate['A17']
+            ws_candidate.merge_cells('A20:I20')
+            rec_cell = ws_candidate['A20']
             rec_cell.value = analysis.get('recommendation', 'N/A')
             rec_cell.font = Font(bold=True, size=11, color=get_score_color(analysis.get('overall_score', 0)))
             rec_cell.alignment = Alignment(horizontal='center')
             rec_cell.border = thin_border
             
+            # Experience Summary (Bullet Points)
+            exp_start = 22
+            ws_candidate.merge_cells(f'A{exp_start}:I{exp_start}')
+            exp_summary_header = ws_candidate[f'A{exp_start}']
+            exp_summary_header.value = "EXPERIENCE SUMMARY (Bullet Points)"
+            exp_summary_header.font = candidate_header_font
+            exp_summary_header.fill = candidate_section_fill
+            exp_summary_header.alignment = Alignment(horizontal='center')
+            exp_summary_header.border = thin_border
+            
+            exp_summary = analysis.get('experience_summary', 'No experience summary available.')
+            exp_lines = exp_summary.split('\n')
+            for idx, line in enumerate(exp_lines[:5]):  # Limit to 5 bullet points
+                row = exp_start + idx + 1
+                ws_candidate.merge_cells(f'A{row}:I{row}')
+                cell = ws_candidate.cell(row=row, column=1, value=line)
+                cell.font = candidate_bullet_font
+                cell.alignment = Alignment(wrap_text=True, vertical='top', horizontal='left')
+                cell.border = thin_border
+                ws_candidate.row_dimensions[row].height = 20
+            
+            # Education Summary (Bullet Points)
+            edu_start = exp_start + len(exp_lines) + 2
+            ws_candidate.merge_cells(f'A{edu_start}:I{edu_start}')
+            edu_summary_header = ws_candidate[f'A{edu_start}']
+            edu_summary_header.value = "EDUCATION SUMMARY (Bullet Points)"
+            edu_summary_header.font = candidate_header_font
+            edu_summary_header.fill = candidate_section_fill
+            edu_summary_header.alignment = Alignment(horizontal='center')
+            edu_summary_header.border = thin_border
+            
+            edu_summary = analysis.get('education_summary', 'No education summary available.')
+            edu_lines = edu_summary.split('\n')
+            for idx, line in enumerate(edu_lines[:5]):  # Limit to 5 bullet points
+                row = edu_start + idx + 1
+                ws_candidate.merge_cells(f'A{row}:I{row}')
+                cell = ws_candidate.cell(row=row, column=1, value=line)
+                cell.font = candidate_bullet_font
+                cell.alignment = Alignment(wrap_text=True, vertical='top', horizontal='left')
+                cell.border = thin_border
+                ws_candidate.row_dimensions[row].height = 20
+            
             # Skills Matched (5-8 skills)
-            skills_row = 19
-            ws_candidate.merge_cells(f'A{skills_row}:H{skills_row}')
-            skills_header = ws_candidate[f'A{skills_row}']
+            skills_start = edu_start + len(edu_lines) + 2
+            ws_candidate.merge_cells(f'A{skills_start}:I{skills_start}')
+            skills_header = ws_candidate[f'A{skills_start}']
             skills_header.value = "SKILLS MATCHED (5-8 skills)"
             skills_header.font = candidate_header_font
             skills_header.fill = candidate_section_fill
@@ -2232,15 +2360,15 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             
             skills_matched = analysis.get('skills_matched', [])
             for idx, skill in enumerate(skills_matched[:8]):
-                row = skills_row + idx + 1
-                ws_candidate.merge_cells(f'A{row}:H{row}')
+                row = skills_start + idx + 1
+                ws_candidate.merge_cells(f'A{row}:I{row}')
                 cell = ws_candidate.cell(row=row, column=1, value=f"{idx + 1}. {skill}")
                 cell.font = Font(size=10, color="00B050")
                 cell.border = thin_border
             
             # Skills Missing (5-8 skills)
-            missing_start = skills_row + len(skills_matched) + 2
-            ws_candidate.merge_cells(f'A{missing_start}:H{missing_start}')
+            missing_start = skills_start + len(skills_matched) + 2
+            ws_candidate.merge_cells(f'A{missing_start}:I{missing_start}')
             missing_header = ws_candidate[f'A{missing_start}']
             missing_header.value = "SKILLS MISSING (5-8 skills)"
             missing_header.font = candidate_header_font
@@ -2251,32 +2379,14 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             skills_missing = analysis.get('skills_missing', [])
             for idx, skill in enumerate(skills_missing[:8]):
                 row = missing_start + idx + 1
-                ws_candidate.merge_cells(f'A{row}:H{row}')
+                ws_candidate.merge_cells(f'A{row}:I{row}')
                 cell = ws_candidate.cell(row=row, column=1, value=f"{idx + 1}. {skill}")
                 cell.font = Font(size=10, color="FF0000")
                 cell.border = thin_border
             
-            # Experience Summary
-            exp_start = missing_start + len(skills_missing) + 2
-            ws_candidate.merge_cells(f'A{exp_start}:H{exp_start}')
-            exp_header = ws_candidate[f'A{exp_start}']
-            exp_header.value = "EXPERIENCE SUMMARY"
-            exp_header.font = candidate_header_font
-            exp_header.fill = candidate_section_fill
-            exp_header.alignment = Alignment(horizontal='center')
-            exp_header.border = thin_border
-            
-            ws_candidate.merge_cells(f'A{exp_start + 1}:H{exp_start + 5}')
-            exp_cell = ws_candidate[f'A{exp_start + 1}']
-            exp_cell.value = analysis.get('experience_summary', 'No experience summary available.')
-            exp_cell.font = candidate_value_font
-            exp_cell.alignment = Alignment(wrap_text=True, vertical='top')
-            exp_cell.border = thin_border
-            ws_candidate.row_dimensions[exp_start + 1].height = 80
-            
             # Key Strengths (3 items)
-            strengths_start = exp_start + 7
-            ws_candidate.merge_cells(f'A{strengths_start}:H{strengths_start}')
+            strengths_start = missing_start + len(skills_missing) + 2
+            ws_candidate.merge_cells(f'A{strengths_start}:I{strengths_start}')
             strengths_header = ws_candidate[f'A{strengths_start}']
             strengths_header.value = "KEY STRENGTHS (3)"
             strengths_header.font = candidate_header_font
@@ -2287,14 +2397,14 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             key_strengths = analysis.get('key_strengths', [])
             for idx, strength in enumerate(key_strengths[:3]):
                 row = strengths_start + idx + 1
-                ws_candidate.merge_cells(f'A{row}:H{row}')
+                ws_candidate.merge_cells(f'A{row}:I{row}')
                 cell = ws_candidate.cell(row=row, column=1, value=f"{idx + 1}. {strength}")
                 cell.font = Font(size=10, color="00B050")
                 cell.border = thin_border
             
             # Areas for Improvement (3 items)
             improve_start = strengths_start + len(key_strengths) + 2
-            ws_candidate.merge_cells(f'A{improve_start}:H{improve_start}')
+            ws_candidate.merge_cells(f'A{improve_start}:I{improve_start}')
             improve_header = ws_candidate[f'A{improve_start}']
             improve_header.value = "AREAS FOR IMPROVEMENT (3)"
             improve_header.font = candidate_header_font
@@ -2305,7 +2415,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             areas_for_improvement = analysis.get('areas_for_improvement', [])
             for idx, area in enumerate(areas_for_improvement[:3]):
                 row = improve_start + idx + 1
-                ws_candidate.merge_cells(f'A{row}:H{row}')
+                ws_candidate.merge_cells(f'A{row}:I{row}')
                 cell = ws_candidate.cell(row=row, column=1, value=f"{idx + 1}. {area}")
                 cell.font = Font(size=10, color="FF6600")
                 cell.border = thin_border
@@ -2344,13 +2454,13 @@ def create_minimal_batch_report(analyses, job_description, filename):
         # Title
         ws['A1'] = "Batch Resume Analysis Report"
         ws['A1'].font = Font(bold=True, size=16)
-        ws.merge_cells('A1:K1')
+        ws.merge_cells('A1:L1')
         
         ws['A2'] = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         ws['A3'] = f"Total Candidates: {len(analyses)}"
         
-        # Headers (WITHOUT candidate name column)
-        headers = ["Rank", "File Name", "Years of Experience", "ATS Score", "Recommendation", "Experience Summary", "Skills Matched", "Skills Missing", "Key Strengths", "Areas for Improvement"]
+        # Headers - UPDATED: Added Candidate Name column
+        headers = ["Rank", "Candidate Name", "File Name", "Years of Experience", "ATS Score", "Recommendation", "Experience Summary", "Education Summary", "Skills Matched", "Skills Missing", "Key Strengths", "Areas for Improvement"]
         for col, header in enumerate(headers, start=1):
             cell = ws.cell(row=5, column=col, value=header)
             cell.font = Font(bold=True)
@@ -2359,27 +2469,35 @@ def create_minimal_batch_report(analyses, job_description, filename):
         for idx, analysis in enumerate(analyses):
             row = 6 + idx
             ws.cell(row=row, column=1, value=analysis.get('rank', '-'))
-            ws.cell(row=row, column=2, value=analysis.get('filename', 'Unknown'))
-            ws.cell(row=row, column=3, value=analysis.get('years_of_experience', 'Not specified'))
-            ws.cell(row=row, column=4, value=f"{analysis.get('overall_score', 0):.1f}")  # Show granular score
-            ws.cell(row=row, column=5, value=analysis.get('recommendation', 'N/A'))
+            ws.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))  # Candidate Name
+            ws.cell(row=row, column=3, value=analysis.get('filename', 'Unknown'))
+            ws.cell(row=row, column=4, value=analysis.get('years_of_experience', 'Not specified'))
+            ws.cell(row=row, column=5, value=f"{analysis.get('overall_score', 0):.1f}")  # Show granular score
+            ws.cell(row=row, column=6, value=analysis.get('recommendation', 'N/A'))
             
+            # Experience Summary - bullet points
             exp_summary = analysis.get('experience_summary', 'No summary available.')
-            if len(exp_summary) > 100:
-                exp_summary = exp_summary[:97] + "..."
-            ws.cell(row=row, column=6, value=exp_summary)
+            if len(exp_summary) > 150:
+                exp_summary = exp_summary[:147] + "..."
+            ws.cell(row=row, column=7, value=exp_summary)
+            
+            # Education Summary - bullet points
+            edu_summary = analysis.get('education_summary', 'No summary available.')
+            if len(edu_summary) > 150:
+                edu_summary = edu_summary[:147] + "..."
+            ws.cell(row=row, column=8, value=edu_summary)
             
             skills_matched = analysis.get('skills_matched', [])
-            ws.cell(row=row, column=7, value=", ".join(skills_matched[:8]))
+            ws.cell(row=row, column=9, value=", ".join(skills_matched[:8]))
             
             skills_missing = analysis.get('skills_missing', [])
-            ws.cell(row=row, column=8, value=", ".join(skills_missing[:8]))
+            ws.cell(row=row, column=10, value=", ".join(skills_missing[:8]))
             
             key_strengths = analysis.get('key_strengths', [])
-            ws.cell(row=row, column=9, value=", ".join(key_strengths[:3]))
+            ws.cell(row=row, column=11, value=", ".join(key_strengths[:3]))
             
             areas_for_improvement = analysis.get('areas_for_improvement', [])
-            ws.cell(row=row, column=10, value=", ".join(areas_for_improvement[:3]))
+            ws.cell(row=row, column=12, value=", ".join(areas_for_improvement[:3]))
         
         # Auto-size columns
         for column in ws.columns:
@@ -2561,7 +2679,8 @@ def quick_check():
                             'processing_method': 'rate_limited_sequential',
                             'skills_analysis': '5-8 skills per category',
                             'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
-                            'scoring_method': 'Granular unique scores (1 decimal)'
+                            'scoring_method': 'Granular unique scores (1 decimal)',
+                            'summary_format': 'Experience & Education in bullet points'
                         })
                 except:
                     continue
@@ -2606,6 +2725,8 @@ def ping():
         'skills_analysis': '5-8 skills per category',
         'years_experience': 'Included in analysis',
         'scoring_method': 'Granular unique scores (1 decimal precision)',
+        'summary_format': 'Experience & Education in bullet points',
+        'excel_columns': 'Candidate Name included',
         'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY} requests/minute/key)"
     })
 
@@ -2653,7 +2774,7 @@ def health_check():
         'resume_previews_folder_exists': os.path.exists(RESUME_PREVIEW_FOLDER),
         'resume_previews_stored': len(resume_storage),
         'inactive_minutes': inactive_minutes,
-        'version': '3.1.0',
+        'version': '3.2.0',
         'key_status': key_status,
         'available_keys': available_keys,
         'configuration': {
@@ -2667,9 +2788,9 @@ def health_check():
         'processing_method': 'rate_limited_sequential',
         'performance_target': '6 resumes in 20-30 seconds (safer)',
         'skills_analysis': '5-8 skills per category',
-        'summaries': 'Complete 4-5 sentences each',
+        'summaries': 'Experience & Education in bullet points',
         'years_experience': 'Included in analysis',
-        'excel_report': 'Candidate name & experience summary included',
+        'excel_report': 'Candidate Name column added',
         'insights': '3 strengths & 3 improvements',
         'scoring_enhancements': {
             'method': 'Granular unique scoring',
@@ -2741,8 +2862,8 @@ if __name__ == '__main__':
     print(f"🎯 ENHANCED SCORING: Granular unique scores (1 decimal place)")
     print(f"🎯 Scoring Method: Weighted (Skills 40%, Experience 30%, Education 20%, Years 10%)")
     print(f"🎯 Unique Scores: Each candidate gets distinct score")
-    print(f"✅ Excel Report: Experience summary column added (Candidate name removed from comparison sheet)")
-    print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
+    print(f"✅ Excel Report: Candidate Name column added (Column 2)")
+    print(f"✅ Summaries: Experience & Education in bullet points (4-5 bullets each)")
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
     print(f"⚠️ Performance: ~6 resumes in 20-30 seconds (SAFER for rate limits)")
