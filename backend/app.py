@@ -1,3 +1,4 @@
+app.py:
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from PyPDF2 import PdfReader, PdfWriter
@@ -66,9 +67,9 @@ print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
 score_cache = {}
 cache_lock = threading.Lock()
 
-# Batch processing configuration - CHANGED from 6 to 12
+# Batch processing configuration - CHANGED from 10 to 6
 MAX_CONCURRENT_REQUESTS = 5
-MAX_BATCH_SIZE = 12  # CHANGED: Increased from 6 to 12
+MAX_BATCH_SIZE = 6
 MIN_SKILLS_TO_SHOW = 5  # Minimum skills to show
 MAX_SKILLS_TO_SHOW = 8  # Maximum skills to show (5-8 range)
 
@@ -2665,7 +2666,7 @@ def health_check():
             'years_experience_analysis': True
         },
         'processing_method': 'rate_limited_sequential',
-        'performance_target': '12 resumes in 40-60 seconds (safer)',
+        'performance_target': '6 resumes in 20-30 seconds (safer)',
         'skills_analysis': '5-8 skills per category',
         'summaries': 'Complete 4-5 sentences each',
         'years_experience': 'Included in analysis',
@@ -2735,7 +2736,7 @@ if __name__ == '__main__':
     print(f"⏳ Staggered delays: 1-3 seconds between requests")
     print(f"🔀 Key rotation: Smart load balancing (5 keys)")
     print(f"🛡️ Cooling: 60s on rate limits")
-    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes (CHANGED from 6 to 12)")
+    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes (CHANGED from 10 to 6)")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
     print(f"✅ Years of Experience: Included in analysis")
     print(f"🎯 ENHANCED SCORING: Granular unique scores (1 decimal place)")
@@ -2745,7 +2746,7 @@ if __name__ == '__main__':
     print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
-    print(f"⚠️ Performance: ~12 resumes in 40-60 seconds (SAFER for rate limits)")
+    print(f"⚠️ Performance: ~6 resumes in 20-30 seconds (SAFER for rate limits)")
     print(f"✅ Excel Reports: Single & Batch with Individual Sheets")
     print(f"✅ Always Awake: Backend will stay active with self-pinging")
     print("="*50 + "\n")
