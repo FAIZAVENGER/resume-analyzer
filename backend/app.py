@@ -68,7 +68,7 @@ cache_lock = threading.Lock()
 
 # Batch processing configuration - CHANGED from 6 to 12
 MAX_CONCURRENT_REQUESTS = 5
-MAX_BATCH_SIZE = 12  # CHANGED from 6 to 12
+MAX_BATCH_SIZE = 12  # CHANGED: Increased from 6 to 12
 MIN_SKILLS_TO_SHOW = 5  # Minimum skills to show
 MAX_SKILLS_TO_SHOW = 8  # Maximum skills to show (5-8 range)
 
@@ -1072,15 +1072,15 @@ def process_single_resume(args):
         
         # IMPORTANT: Add staggered delays to prevent rate limits
         if index > 0:
-            # Progressive delays based on position (optimized for 12 resumes)
-            if index < 4:
-                base_delay = 0.8  # Faster for first few
-            elif index < 8:
-                base_delay = 1.2  # Moderate for middle
+            # Progressive delays based on position
+            if index < 3:
+                base_delay = 1.0  # Increased from 0.5
+            elif index < 6:
+                base_delay = 2.0  # Increased from 1.0
             else:
-                base_delay = 1.5  # Slightly longer for last ones
+                base_delay = 3.0  # Increased from 1.5
             
-            delay = base_delay + random.uniform(0, 0.3)  # Reduced randomness
+            delay = base_delay + random.uniform(0, 0.5)
             print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
             time.sleep(delay)
         
@@ -1481,9 +1481,8 @@ def analyze_resume_batch():
         print(f"🔄 Processing {len(resume_files)} resumes with {available_keys} keys...")
         print(f"⚠️ RATE LIMIT PROTECTION: Staggered delays, max {MAX_REQUESTS_PER_MINUTE_PER_KEY} requests/minute/key")
         print(f"🎯 SCORING: Granular unique scores with 1 decimal precision")
-        print(f"⚡ OPTIMIZED FOR: Up to {MAX_BATCH_SIZE} resumes (changed from 6 to 12)")
         
-        # Process sequentially with optimized delays for 12 resumes
+        # Process sequentially with delays (safer than parallel for rate limits)
         for index, resume_file in enumerate(resume_files):
             if resume_file.filename == '':
                 errors.append({
@@ -1507,13 +1506,11 @@ def analyze_resume_batch():
                     'index': result.get('index')
                 })
             
-            # Check if any key needs cooling (optimized for larger batches)
-            if index % 3 == 0:  # Check every 3 resumes
-                for i in range(5):
-                    if key_usage[i]['requests_this_minute'] >= MAX_REQUESTS_PER_MINUTE_PER_KEY - 3:
-                        print(f"⚠️ Key {i+1} near limit ({key_usage[i]['requests_this_minute']}/{MAX_REQUESTS_PER_MINUTE_PER_KEY})")
-                        if not key_usage[i]['cooling']:
-                            mark_key_cooling(i, 20)  # Shorter cooling for batch processing
+            # Check if any key needs cooling
+            for i in range(5):
+                if key_usage[i]['requests_this_minute'] >= MAX_REQUESTS_PER_MINUTE_PER_KEY - 2:
+                    print(f"⚠️ Key {i+1} near limit, marking for cooling")
+                    mark_key_cooling(i, 30)
         
         all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
         
@@ -1570,7 +1567,7 @@ def analyze_resume_batch():
             'ai_provider': "groq",
             'ai_status': "Warmed up" if warmup_complete else "Warming up",
             'processing_time': f"{total_time:.2f}s",
-            'processing_method': 'optimized_sequential_12_resumes',
+            'processing_method': 'rate_limited_sequential',
             'key_statistics': key_stats,
             'available_keys': available_keys,
             'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
@@ -1583,12 +1580,6 @@ def analyze_resume_batch():
                 'total_candidates': len(all_analyses),
                 'scoring_method': 'granular_1_decimal',
                 'unique_scoring': unique_scores == len(all_analyses) if all_analyses else False
-            },
-            'batch_configuration': {
-                'max_batch_size': MAX_BATCH_SIZE,
-                'optimized_for': '12 resumes',
-                'delays': 'adaptive_staggered',
-                'cooling': 'short_20s_for_batches'
             }
         }
         
@@ -1597,7 +1588,6 @@ def analyze_resume_batch():
         for stat in key_stats:
             print(f"  {stat['key']}: {stat['used']} total, {stat['requests_this_minute']}/min, {stat['errors']} errors, {stat['status']}")
         print(f"🎯 Scoring Quality: Avg: {avg_score:.2f}, Range: {score_range}, Unique scores: {unique_scores}/{len(all_analyses)}")
-        print(f"⚡ Batch Size: {len(resume_files)} resumes (Max: {MAX_BATCH_SIZE})")
         print("="*50 + "\n")
         
         return jsonify(batch_summary)
@@ -2568,7 +2558,7 @@ def quick_check():
                             'available_keys': available_keys,
                             'tested_key': f"Key {i+1}",
                             'max_batch_size': MAX_BATCH_SIZE,
-                            'processing_method': 'optimized_sequential_12_resumes',
+                            'processing_method': 'rate_limited_sequential',
                             'skills_analysis': '5-8 skills per category',
                             'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
                             'scoring_method': 'Granular unique scores (1 decimal)'
@@ -2612,7 +2602,7 @@ def ping():
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
         'keep_alive_active': True,
         'max_batch_size': MAX_BATCH_SIZE,
-        'processing_method': 'optimized_sequential_12_resumes',
+        'processing_method': 'rate_limited_sequential',
         'skills_analysis': '5-8 skills per category',
         'years_experience': 'Included in analysis',
         'scoring_method': 'Granular unique scores (1 decimal precision)',
@@ -2663,7 +2653,7 @@ def health_check():
         'resume_previews_folder_exists': os.path.exists(RESUME_PREVIEW_FOLDER),
         'resume_previews_stored': len(resume_storage),
         'inactive_minutes': inactive_minutes,
-        'version': '3.2.0',
+        'version': '3.1.0',
         'key_status': key_status,
         'available_keys': available_keys,
         'configuration': {
@@ -2674,8 +2664,8 @@ def health_check():
             'max_skills_to_show': MAX_SKILLS_TO_SHOW,
             'years_experience_analysis': True
         },
-        'processing_method': 'optimized_sequential_12_resumes',
-        'performance_target': f'{MAX_BATCH_SIZE} resumes in 40-60 seconds (optimized)',
+        'processing_method': 'rate_limited_sequential',
+        'performance_target': '12 resumes in 40-60 seconds (safer)',
         'skills_analysis': '5-8 skills per category',
         'summaries': 'Complete 4-5 sentences each',
         'years_experience': 'Included in analysis',
@@ -2688,7 +2678,7 @@ def health_check():
             'range': '0-100 with weighted factors',
             'weighting': 'Skills (40%), Experience (30%), Education (20%), Years (10%)'
         },
-        'rate_limit_protection': 'ACTIVE - Optimized staggered delays, minute tracking, short cooling for batches',
+        'rate_limit_protection': 'ACTIVE - Staggered delays, minute tracking, automatic cooling',
         'always_awake': True
     })
 
@@ -2742,9 +2732,9 @@ if __name__ == '__main__':
     print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
     print(f"⚠️ RATE LIMIT PROTECTION: ACTIVE")
     print(f"📊 Max requests/minute/key: {MAX_REQUESTS_PER_MINUTE_PER_KEY}")
-    print(f"⏳ Staggered delays: 0.8-1.5 seconds between requests (optimized for 12)")
+    print(f"⏳ Staggered delays: 1-3 seconds between requests")
     print(f"🔀 Key rotation: Smart load balancing (5 keys)")
-    print(f"🛡️ Cooling: 20s on rate limits for batches")
+    print(f"🛡️ Cooling: 60s on rate limits")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes (CHANGED from 6 to 12)")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
     print(f"✅ Years of Experience: Included in analysis")
@@ -2755,7 +2745,7 @@ if __name__ == '__main__':
     print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
-    print(f"⚡ Performance: ~12 resumes in 40-60 seconds (OPTIMIZED)")
+    print(f"⚠️ Performance: ~12 resumes in 40-60 seconds (SAFER for rate limits)")
     print(f"✅ Excel Reports: Single & Batch with Individual Sheets")
     print(f"✅ Always Awake: Backend will stay active with self-pinging")
     print("="*50 + "\n")
