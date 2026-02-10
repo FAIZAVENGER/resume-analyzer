@@ -1,3 +1,4 @@
+App.jsx:
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { 
@@ -445,7 +446,7 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 12)); // Changed from 6 to 12
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 12)); // CHANGED: Now 12 files max
       setError('');
     }
   };
@@ -994,7 +995,7 @@ function App() {
               </div>
               <div className="benefit-content">
                 <h3>Batch Processing</h3>
-                <p>Analyze multiple resumes simultaneously (up to 12)</p>
+                <p>Analyze multiple resumes simultaneously (Up to 12)</p>
               </div>
             </div>
             <div className="benefit">
@@ -1359,11 +1360,11 @@ function App() {
                 {batchMode && (
                   <>
                     <span>•</span>
-                    <span>Batch Size: {resumeFiles.length} (Max 12)</span>
+                    <span>Batch Size: {resumeFiles.length}</span>
                     <span>•</span>
                     <span>Rate Protection: Active</span>
                     <span>•</span>
-                    <span>Optimized for 12 resumes</span>
+                    <span>Max: 12 resumes</span>
                     <span>•</span>
                     <span>Scoring: Granular unique</span>
                   </>
@@ -1398,7 +1399,7 @@ function App() {
                   <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                   <span className="button-subtext">
                     {batchMode 
-                      ? `${resumeFiles.length} resume(s) • Granular Scoring • Optimized for 12` 
+                      ? `${resumeFiles.length} resume(s) • Granular Scoring` 
                       : `${getModelDisplayName(modelInfo)} • Granular Scoring`}
                   </span>
                 </div>
@@ -1417,7 +1418,7 @@ function App() {
               </div>
               <div className="tip">
                 <Activity size={16} />
-                <span>Optimized rate limit protection for up to 12 resumes</span>
+                <span>Rate limit protection with staggered delays prevents API limits</span>
               </div>
               <div className="tip">
                 <TargetIcon size={16} />
@@ -1426,10 +1427,6 @@ function App() {
               <div className="tip">
                 <Download size={16} />
                 <span>Download comprehensive Excel report with candidate name & experience summary</span>
-              </div>
-              <div className="tip">
-                <Zap size={16} />
-                <span>Optimized processing for 12 resumes with adaptive delays</span>
               </div>
             </>
           ) : (
@@ -2487,7 +2484,7 @@ function App() {
                 <div className="summary-item">
                   <div className="summary-label">Processing Method</div>
                   <div className="summary-value info">
-                    ⏳ Optimized sequential for 12 resumes
+                    ⏳ Sequential with delays
                   </div>
                 </div>
                 <div className="summary-item">
@@ -2558,7 +2555,7 @@ function App() {
                 )}
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Excel: Name & Experience columns</span>
+                    <span>Excel: Name & Experience columns</span>
                 </div>
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
@@ -2575,12 +2572,6 @@ function App() {
                                 currentView === 'candidate-detail' ? 'Details' : 
                                 batchMode ? 'Batch' : 'Single'}</span>
                 </div>
-                {batchMode && (
-                  <div className="status-indicator active">
-                    <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                    <span>Max Batch: 12 resumes</span>
-                  </div>
-                )}
               </div>
             </div>
           </div>
