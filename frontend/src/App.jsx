@@ -770,17 +770,20 @@ function App() {
     return modelInfo.name || 'Groq AI';
   };
 
-  // Format summary to show bullet points
+  // Format summary to show complete sentences
   const formatSummary = (text) => {
     if (!text) return "No summary available.";
     
     let cleanText = text.trim();
     
-    // If text doesn't have bullet points, add them
-    if (!cleanText.includes('•') && !cleanText.includes('●') && !cleanText.includes('- ')) {
+    if (cleanText.includes('...') || !cleanText.endsWith('.') || cleanText.endsWith('..')) {
       const sentences = cleanText.split(/[.!?]+/).filter(s => s.trim().length > 0);
-      const bulletPoints = sentences.slice(0, 5).map(sentence => `• ${sentence.trim()}.`);
-      cleanText = bulletPoints.join('\n');
+      const completeSentences = sentences.slice(0, 5);
+      cleanText = completeSentences.join('. ') + '.';
+    }
+    
+    if (!cleanText.endsWith('.') && !cleanText.endsWith('!') && !cleanText.endsWith('?')) {
+      cleanText = cleanText + '.';
     }
     
     return cleanText;
@@ -1422,7 +1425,7 @@ function App() {
               </div>
               <div className="tip">
                 <Download size={16} />
-                <span>Download comprehensive Excel report with Candidate Name column & bullet point summaries</span>
+                <span>Download comprehensive Excel report with candidate name & experience summary</span>
               </div>
             </>
           ) : (
@@ -1637,10 +1640,10 @@ function App() {
             </div>
           </div>
 
-          {/* Summary Section with Bullet Points */}
+          {/* Summary Section with Complete 4-5 sentences */}
           <div className="section-title">
             <h2>Profile Summary</h2>
-            <p>Key insights extracted from resume (in bullet points)</p>
+            <p>Key insights extracted from resume (no truncation)</p>
           </div>
           
           <div className="summary-grid">
@@ -1652,20 +1655,9 @@ function App() {
                 <h3>Experience Summary</h3>
               </div>
               <div className="summary-content">
-                <div className="bullet-point-summary">
-                  {formatSummary(analysis.experience_summary).split('\n').map((line, index) => (
-                    <div key={index} className="bullet-point" style={{ 
-                      display: 'flex', 
-                      gap: '0.5rem', 
-                      marginBottom: '0.5rem',
-                      fontSize: '0.9rem',
-                      lineHeight: '1.4'
-                    }}>
-                      <span style={{ color: 'var(--primary)', flexShrink: 0 }}>•</span>
-                      <span style={{ flex: 1 }}>{line.replace('•', '').trim()}</span>
-                    </div>
-                  ))}
-                </div>
+                <p className="complete-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+                  {formatSummary(analysis.experience_summary)}
+                </p>
               </div>
             </div>
 
@@ -1677,20 +1669,9 @@ function App() {
                 <h3>Education Summary</h3>
               </div>
               <div className="summary-content">
-                <div className="bullet-point-summary">
-                  {formatSummary(analysis.education_summary).split('\n').map((line, index) => (
-                    <div key={index} className="bullet-point" style={{ 
-                      display: 'flex', 
-                      gap: '0.5rem', 
-                      marginBottom: '0.5rem',
-                      fontSize: '0.9rem',
-                      lineHeight: '1.4'
-                    }}>
-                      <span style={{ color: 'var(--primary)', flexShrink: 0 }}>•</span>
-                      <span style={{ flex: 1 }}>{line.replace('•', '').trim()}</span>
-                    </div>
-                  ))}
-                </div>
+                <p className="complete-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+                  {formatSummary(analysis.education_summary)}
+                </p>
               </div>
             </div>
           </div>
@@ -1757,7 +1738,7 @@ function App() {
           <div className="action-section glass">
             <div className="action-content">
               <h3>Analysis Complete</h3>
-              <p>Download the Excel report with candidate name column and bullet point summaries</p>
+              <p>Download the Excel report with granular scores or start a new analysis</p>
             </div>
             <div className="action-buttons">
               <button className="download-button" onClick={() => handleIndividualDownload(analysis.analysis_id)}>
@@ -1814,7 +1795,7 @@ function App() {
               <div className="stat-content">
                 <div className="stat-value">{batchAnalysis?.failed_files || 0}</div>
                 <div className="stat-label">Failed</div>
-            </div>
+              </div>
             </div>
           )}
           
@@ -1892,26 +1873,9 @@ function App() {
                   
                   <div className="complete-summary-section">
                     <h4>Experience Summary:</h4>
-                    <div className="bullet-point-summary" style={{ fontSize: '0.85rem', lineHeight: '1.3' }}>
-                      {formatSummary(candidate.experience_summary).split('\n').map((line, idx) => (
-                        <div key={idx} className="bullet-point" style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                          <span style={{ color: 'var(--primary)', flexShrink: 0 }}>•</span>
-                          <span style={{ flex: 1 }}>{line.replace('•', '').trim()}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  
-                  <div className="complete-summary-section" style={{ marginTop: '0.75rem' }}>
-                    <h4>Education Summary:</h4>
-                    <div className="bullet-point-summary" style={{ fontSize: '0.85rem', lineHeight: '1.3' }}>
-                      {formatSummary(candidate.education_summary).split('\n').map((line, idx) => (
-                        <div key={idx} className="bullet-point" style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                          <span style={{ color: 'var(--primary)', flexShrink: 0 }}>•</span>
-                          <span style={{ flex: 1 }}>{line.replace('•', '').trim()}</span>
-                        </div>
-                      ))}
-                    </div>
+                    <p className="complete-text" style={{ fontSize: '0.9rem', lineHeight: '1.4' }}>
+                      {formatSummary(candidate.experience_summary)}
+                    </p>
                   </div>
                   
                   <div className="skills-preview">
@@ -1965,7 +1929,7 @@ function App() {
         <div className="action-section glass">
           <div className="action-content">
             <h3>Batch Analysis Complete</h3>
-            <p>Download comprehensive Excel report with candidate name column and bullet point summaries</p>
+            <p>Download comprehensive Excel report with granular scoring and unique candidate analysis</p>
           </div>
           <div className="action-buttons">
             <button className="download-button" onClick={handleBatchDownload}>
@@ -2171,10 +2135,10 @@ function App() {
             </div>
           </div>
 
-          {/* Summary Section with Bullet Points */}
+          {/* Summary Section with Complete 4-5 sentences */}
           <div className="section-title">
             <h2>Profile Summary</h2>
-            <p>Key insights extracted from resume (in bullet points)</p>
+            <p>Key insights extracted from resume (no truncation)</p>
           </div>
           
           <div className="summary-grid">
@@ -2186,20 +2150,9 @@ function App() {
                 <h3>Experience Summary</h3>
               </div>
               <div className="summary-content">
-                <div className="bullet-point-summary">
-                  {formatSummary(candidate.experience_summary).split('\n').map((line, index) => (
-                    <div key={index} className="bullet-point" style={{ 
-                      display: 'flex', 
-                      gap: '0.5rem', 
-                      marginBottom: '0.5rem',
-                      fontSize: '0.9rem',
-                      lineHeight: '1.4'
-                    }}>
-                      <span style={{ color: 'var(--primary)', flexShrink: 0 }}>•</span>
-                      <span style={{ flex: 1 }}>{line.replace('•', '').trim()}</span>
-                    </div>
-                  ))}
-                </div>
+                <p className="complete-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+                  {formatSummary(candidate.experience_summary)}
+                </p>
               </div>
             </div>
 
@@ -2211,20 +2164,9 @@ function App() {
                 <h3>Education Summary</h3>
               </div>
               <div className="summary-content">
-                <div className="bullet-point-summary">
-                  {formatSummary(candidate.education_summary).split('\n').map((line, index) => (
-                    <div key={index} className="bullet-point" style={{ 
-                      display: 'flex', 
-                      gap: '0.5rem', 
-                      marginBottom: '0.5rem',
-                      fontSize: '0.9rem',
-                      lineHeight: '1.4'
-                    }}>
-                      <span style={{ color: 'var(--primary)', flexShrink: 0 }}>•</span>
-                      <span style={{ flex: 1 }}>{line.replace('•', '').trim()}</span>
-                    </div>
-                  ))}
-                </div>
+                <p className="complete-summary" style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+                  {formatSummary(candidate.education_summary)}
+                </p>
               </div>
             </div>
           </div>
@@ -2333,7 +2275,7 @@ function App() {
                     <span className="powered-by">Powered by</span>
                     <span className="groq-badge">⚡ Groq</span>
                     <span className="divider">•</span>
-                    <span className="tagline">Candidate Name Column • Bullet Point Summaries</span>
+                    <span className="tagline">Granular Scoring • Experience Summary • Years of Experience</span>
                   </div>
                 </div>
               </div>
@@ -2430,16 +2372,10 @@ function App() {
                 <span>Rate Protection</span>
               </div>
               
-              {/* Excel Features */}
-              <div className="feature excel-feature">
-                <FileSpreadsheet size={16} />
-                <span>Candidate Name Column</span>
-              </div>
-              
-              {/* Bullet Points Feature */}
-              <div className="feature bullet-feature">
-                <ListOrdered size={16} />
-                <span>Bullet Point Summaries</span>
+              {/* Scoring Feature */}
+              <div className="feature scoring-feature">
+                <TargetIcon size={16} />
+                <span>Granular Scoring</span>
               </div>
               
               {/* Navigation Indicator */}
@@ -2533,18 +2469,6 @@ function App() {
                   </div>
                 </div>
                 <div className="summary-item">
-                  <div className="summary-label">Excel Report</div>
-                  <div className="summary-value success">
-                    📊 Candidate Name column added
-                  </div>
-                </div>
-                <div className="summary-item">
-                  <div className="summary-label">Summary Format</div>
-                  <div className="summary-value success">
-                    📝 Experience & Education in bullet points
-                  </div>
-                </div>
-                <div className="summary-item">
                   <div className="summary-label">Rate Limit Protection</div>
                   <div className="summary-value success">
                     🛡️ ACTIVE (Max 100/min/key)
@@ -2562,17 +2486,23 @@ function App() {
                     ⏳ Sequential with delays
                   </div>
                 </div>
+                <div className="summary-item">
+                  <div className="summary-label">Concurrent Users</div>
+                  <div className="summary-value success">
+                    👥 Multiple users supported
+                  </div>
+                </div>
               </div>
               
               <div className="scoring-explanation">
-                <h4>🎯 Enhanced Excel Reports:</h4>
+                <h4>🎯 Enhanced Granular Scoring:</h4>
                 <ul>
-                  <li>✅ Candidate Name column added (Column 2)</li>
-                  <li>✅ Experience summary in bullet points (4-5 bullets)</li>
-                  <li>✅ Education summary in bullet points (4-5 bullets)</li>
-                  <li>✅ Granular scores like 82.5, 76.3 (1 decimal place)</li>
-                  <li>✅ Unique scores for each candidate</li>
-                  <li>✅ Professional formatting with color coding</li>
+                  <li>✅ Scores like 82.5, 76.3, 88.7 (NOT just multiples of 5)</li>
+                  <li>✅ Unique scores for each candidate (no duplicates)</li>
+                  <li>✅ 1 decimal place precision</li>
+                  <li>✅ Weighted scoring: Skills (40%), Experience (30%), Education (20%), Years (10%)</li>
+                  <li>✅ Deterministic variations based on resume content</li>
+                  <li>✅ Ensures meaningful differentiation between candidates</li>
                 </ul>
               </div>
               
@@ -2624,11 +2554,7 @@ function App() {
                 )}
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Excel: Candidate Name column</span>
-                </div>
-                <div className="status-indicator active">
-                  <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
-                  <span>Summaries: Bullet points</span>
+                  <span>Excel: Name & Experience columns</span>
                 </div>
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
@@ -2662,7 +2588,7 @@ function App() {
                 <span>ResuGo</span>
               </div>
               <p className="footer-tagline">
-                Groq AI • 5-key with rate protection • Candidate Name column • Bullet point summaries • Experience & Education summaries
+                Groq AI • 5-key with rate protection • Granular scoring • Experience summary • Years of experience
               </p>
             </div>
             
@@ -2670,9 +2596,9 @@ function App() {
               <div className="footer-section">
                 <h4>Features</h4>
                 <a href="#">Groq AI</a>
-                <a href="#">Candidate Name Column</a>
-                <a href="#">Bullet Point Summaries</a>
                 <a href="#">Granular Scoring</a>
+                <a href="#">Experience Summary</a>
+                <a href="#">Years of Experience</a>
               </div>
               <div className="footer-section">
                 <h4>Service</h4>
@@ -2694,7 +2620,7 @@ function App() {
           </div>
           
           <div className="footer-bottom">
-            <p>© 2024 ResuGo. Built with React + Flask + Groq AI. Excel reports with candidate name column & bullet point summaries.</p>
+            <p>© 2024 ResuGo. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
             <div className="footer-stats">
               <span className="stat">
                 <CloudLightning size={12} />
@@ -2716,14 +2642,6 @@ function App() {
                 <TargetIcon size={12} />
                 Scoring: Granular unique
               </span>
-              <span className="stat">
-                <FileSpreadsheet size={12} />
-                Excel: Candidate Name column
-              </span>
-              <span className="stat">
-                <ListOrdered size={12} />
-                Summaries: Bullet points
-              </span>
               {batchMode && (
                 <span className="stat">
                   <Activity size={12} />
@@ -2736,11 +2654,11 @@ function App() {
               </span>
               <span className="stat">
                 <Briefcase size={12} />
-                Experience: Bullet points
+                Experience: Summary included
               </span>
               <span className="stat">
-                <BookOpen size={12} />
-                Education: Bullet points
+                <Calendar size={12} />
+                Years: Analysis included
               </span>
               <span className="stat">
                 <Users size={12} />
