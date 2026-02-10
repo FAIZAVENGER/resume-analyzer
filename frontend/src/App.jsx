@@ -445,7 +445,7 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 6));
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 12)); // Changed from 6 to 12
       setError('');
     }
   };
@@ -994,7 +994,7 @@ function App() {
               </div>
               <div className="benefit-content">
                 <h3>Batch Processing</h3>
-                <p>Analyze multiple resumes simultaneously</p>
+                <p>Analyze multiple resumes simultaneously (up to 12)</p>
               </div>
             </div>
             <div className="benefit">
@@ -1094,7 +1094,7 @@ function App() {
                 gap: '0.5rem'
               }}
             >
-              <Users size={16} /> Multiple Resumes (Up to 6)
+              <Users size={16} /> Multiple Resumes (Up to 12)
             </button>
           </div>
         </div>
@@ -1111,7 +1111,7 @@ function App() {
                 <h2>{batchMode ? 'Upload Resumes' : 'Upload Resume'}</h2>
                 <p className="card-subtitle">
                   {batchMode 
-                    ? 'Upload multiple resumes (Max 6, 15MB each)'
+                    ? 'Upload multiple resumes (Max 12, 15MB each)'
                     : 'Supported: PDF, DOC, DOCX, TXT (Max 15MB)'}
                 </p>
               </div>
@@ -1226,7 +1226,7 @@ function App() {
                         <span className="upload-text">
                           Drag & drop multiple files or click to browse
                         </span>
-                        <span className="upload-hint">Max 6 files, 15MB each</span>
+                        <span className="upload-hint">Max 12 files, 15MB each</span>
                       </>
                     )}
                   </div>
@@ -1359,11 +1359,11 @@ function App() {
                 {batchMode && (
                   <>
                     <span>•</span>
-                    <span>Batch Size: {resumeFiles.length}</span>
+                    <span>Batch Size: {resumeFiles.length} (Max 12)</span>
                     <span>•</span>
                     <span>Rate Protection: Active</span>
                     <span>•</span>
-                    <span>Max: 6 resumes</span>
+                    <span>Optimized for 12 resumes</span>
                     <span>•</span>
                     <span>Scoring: Granular unique</span>
                   </>
@@ -1398,7 +1398,7 @@ function App() {
                   <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                   <span className="button-subtext">
                     {batchMode 
-                      ? `${resumeFiles.length} resume(s) • Granular Scoring` 
+                      ? `${resumeFiles.length} resume(s) • Granular Scoring • Optimized for 12` 
                       : `${getModelDisplayName(modelInfo)} • Granular Scoring`}
                   </span>
                 </div>
@@ -1417,7 +1417,7 @@ function App() {
               </div>
               <div className="tip">
                 <Activity size={16} />
-                <span>Rate limit protection with staggered delays prevents API limits</span>
+                <span>Optimized rate limit protection for up to 12 resumes</span>
               </div>
               <div className="tip">
                 <TargetIcon size={16} />
@@ -1426,6 +1426,10 @@ function App() {
               <div className="tip">
                 <Download size={16} />
                 <span>Download comprehensive Excel report with candidate name & experience summary</span>
+              </div>
+              <div className="tip">
+                <Zap size={16} />
+                <span>Optimized processing for 12 resumes with adaptive delays</span>
               </div>
             </>
           ) : (
@@ -2477,13 +2481,13 @@ function App() {
                 <div className="summary-item">
                   <div className="summary-label">Max Batch Size</div>
                   <div className="summary-value warning">
-                    📁 6 resumes (Reduced from 10)
+                    📁 12 resumes (Increased from 6)
                   </div>
                 </div>
                 <div className="summary-item">
                   <div className="summary-label">Processing Method</div>
                   <div className="summary-value info">
-                    ⏳ Sequential with delays
+                    ⏳ Optimized sequential for 12 resumes
                   </div>
                 </div>
                 <div className="summary-item">
@@ -2571,6 +2575,12 @@ function App() {
                                 currentView === 'candidate-detail' ? 'Details' : 
                                 batchMode ? 'Batch' : 'Single'}</span>
                 </div>
+                {batchMode && (
+                  <div className="status-indicator active">
+                    <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                    <span>Max Batch: 12 resumes</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -2645,7 +2655,7 @@ function App() {
               {batchMode && (
                 <span className="stat">
                   <Activity size={12} />
-                  Batch: {resumeFiles.length} resumes (Max 6)
+                  Batch: {resumeFiles.length} resumes (Max 12)
                 </span>
               )}
               <span className="stat">
