@@ -1,5 +1,3 @@
-app.py:
-
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from PyPDF2 import PdfReader, PdfWriter
