@@ -1,3 +1,5 @@
+app.py:
+
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from PyPDF2 import PdfReader, PdfWriter
@@ -260,10 +262,14 @@ def detect_job_domain(job_description):
     
     return None, {'score': 0, 'matches': 0, 'threshold': 0.1, 'weight': 1.0}
 
+# ========================================================================
+#  MODIFIED SCORING FUNCTION - More generous, count‑based
+# ========================================================================
 def calculate_domain_match_score(resume_text, job_description):
     """
-    Calculate strict domain match score.
-    This is the core of the professional ATS scoring system.
+    Calculate professional ATS match score.
+    Now uses a generous count‑based mapping so that candidates with a
+    reasonable number of matched keywords receive scores in the 70–90+ range.
     """
     resume_lower = resume_text.lower()
     jd_lower = job_description.lower()
@@ -271,103 +277,69 @@ def calculate_domain_match_score(resume_text, job_description):
     # Detect job domain
     detected_domain, domain_info = detect_job_domain(job_description)
     
-    # Base score starts at 50 (not 0)
-    base_score = 50
-    
-    # If domain detected, apply strict matching
+    # ---------- Domain‑specific scoring ----------
     if detected_domain:
         domain_keywords = DOMAIN_KEYWORDS[detected_domain]
         primary_keywords = domain_keywords['primary']
         
-        # Count matches in resume
+        # Count how many domain keywords appear in the resume
         matches = 0
-        matched_keywords = []
-        
         for keyword in primary_keywords:
             if keyword in resume_lower:
                 matches += 1
-                matched_keywords.append(keyword)
         
-        # Calculate match percentage
-        match_percentage = matches / len(primary_keywords) if len(primary_keywords) > 0 else 0
+        # ----- Reward based on ABSOLUTE number of matches (not percentage) -----
+        # For large keyword lists (50+), 5–8 matches is decent, 10+ is strong.
+        if matches >= 20:
+            score = 95 + min(matches - 20, 5)   # 95–100
+        elif matches >= 15:
+            score = 85 + (matches - 15) * 2     # 85–94
+        elif matches >= 10:
+            score = 75 + (matches - 10) * 2     # 75–84
+        elif matches >= 5:
+            score = 60 + (matches - 5) * 3      # 60–74
+        elif matches >= 3:
+            score = 50 + (matches - 3) * 5      # 50–59
+        elif matches >= 1:
+            score = 40 + matches * 3            # 43–49
+        else:
+            score = 35                          # no match at all
         
-        # STRICT SCORING - Real ATS behavior
-        if match_percentage < 0.05:  # Less than 5% keyword match
-            return round(15 + (match_percentage * 20), 1)  # Score: 15-20
-        elif match_percentage < 0.10:  # 5-10% keyword match
-            return round(20 + ((match_percentage - 0.05) * 100), 1)  # Score: 20-25
-        elif match_percentage < 0.15:  # 10-15% keyword match
-            return round(25 + ((match_percentage - 0.10) * 100), 1)  # Score: 25-30
-        elif match_percentage < 0.20:  # 15-20% keyword match
-            return round(30 + ((match_percentage - 0.15) * 100), 1)  # Score: 30-35
-        elif match_percentage < 0.25:  # 20-25% keyword match
-            return round(35 + ((match_percentage - 0.20) * 100), 1)  # Score: 35-40
-        elif match_percentage < 0.30:  # 25-30% keyword match
-            return round(40 + ((match_percentage - 0.25) * 100), 1)  # Score: 40-45
-        elif match_percentage < 0.35:  # 30-35% keyword match
-            return round(45 + ((match_percentage - 0.30) * 100), 1)  # Score: 45-50
-        elif match_percentage < 0.40:  # 35-40% keyword match
-            return round(50 + ((match_percentage - 0.35) * 100), 1)  # Score: 50-55
-        elif match_percentage < 0.45:  # 40-45% keyword match
-            return round(55 + ((match_percentage - 0.40) * 100), 1)  # Score: 55-60
-        elif match_percentage < 0.50:  # 45-50% keyword match
-            return round(60 + ((match_percentage - 0.45) * 100), 1)  # Score: 60-65
-        elif match_percentage < 0.55:  # 50-55% keyword match
-            return round(65 + ((match_percentage - 0.50) * 100), 1)  # Score: 65-70
-        elif match_percentage < 0.60:  # 55-60% keyword match
-            return round(70 + ((match_percentage - 0.55) * 100), 1)  # Score: 70-75
-        elif match_percentage < 0.65:  # 60-65% keyword match
-            return round(75 + ((match_percentage - 0.60) * 100), 1)  # Score: 75-80
-        elif match_percentage < 0.70:  # 65-70% keyword match
-            return round(80 + ((match_percentage - 0.65) * 100), 1)  # Score: 80-85
-        elif match_percentage < 0.75:  # 70-75% keyword match
-            return round(85 + ((match_percentage - 0.70) * 100), 1)  # Score: 85-90
-        elif match_percentage < 0.80:  # 75-80% keyword match
-            return round(90 + ((match_percentage - 0.75) * 100), 1)  # Score: 90-95
-        else:  # >80% keyword match
-            return round(95 + (min(match_percentage, 1.0) - 0.80) * 25, 1)  # Score: 95-100
+        score = min(100, max(30, score))
+        return round(score, 1)
     
-    # If no domain detected, use general matching but with stricter scoring
-    # Extract key terms from job description
+    # ---------- Fallback: no clear domain detected ----------
+    # Extract important terms from job description (similar to original)
     words = re.findall(r'\b[a-z]{3,}\b', jd_lower)
     word_freq = {}
     for word in words:
         if word not in ['the', 'and', 'for', 'with', 'this', 'that', 'have', 'from']:
             word_freq[word] = word_freq.get(word, 0) + 1
     
-    # Get top 20 most frequent meaningful words
+    # Use top 20 most frequent meaningful words
     top_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:20]
     top_keywords = [word for word, _ in top_words]
     
-    # Count matches
+    # Count matches in resume
     matches = 0
     for keyword in top_keywords:
         if keyword in resume_lower:
             matches += 1
     
-    match_percentage = matches / len(top_keywords) if top_keywords else 0
-    
-    # STRICT scoring for general case
-    if match_percentage < 0.1:
-        return round(20 + (match_percentage * 50), 1)
-    elif match_percentage < 0.2:
-        return round(25 + ((match_percentage - 0.1) * 75), 1)
-    elif match_percentage < 0.3:
-        return round(32.5 + ((match_percentage - 0.2) * 75), 1)
-    elif match_percentage < 0.4:
-        return round(40 + ((match_percentage - 0.3) * 100), 1)
-    elif match_percentage < 0.5:
-        return round(50 + ((match_percentage - 0.4) * 100), 1)
-    elif match_percentage < 0.6:
-        return round(60 + ((match_percentage - 0.5) * 100), 1)
-    elif match_percentage < 0.7:
-        return round(70 + ((match_percentage - 0.6) * 100), 1)
-    elif match_percentage < 0.8:
-        return round(80 + ((match_percentage - 0.7) * 100), 1)
+    # ----- Generous count‑based mapping for general case -----
+    if matches >= 10:
+        score = 85 + (matches - 10) * 1.5   # 85–100
+    elif matches >= 7:
+        score = 70 + (matches - 7) * 5      # 70–84
+    elif matches >= 4:
+        score = 55 + (matches - 4) * 5      # 55–69
+    elif matches >= 1:
+        score = 40 + matches * 5            # 45–59
     else:
-        return round(90 + (min(match_percentage, 1.0) - 0.8) * 50, 1)
+        score = 35                         # no match
     
-    return round(base_score, 1)
+    score = min(100, max(35, score))
+    return round(score, 1)
 
 def generate_recommendation(score):
     """
