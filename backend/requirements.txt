@@ -4,10 +4,6 @@ PyPDF2
 python-docx
 openpyxl
 python-dotenv
+google-genai
 gunicorn
 openai
-requests
-psutil
-reportlab
-docx2pdf
-pillow
