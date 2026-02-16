@@ -70,7 +70,7 @@ analysis_cache_lock = threading.Lock()
 
 # Batch processing configuration
 MAX_CONCURRENT_REQUESTS = 5
-MAX_BATCH_SIZE = 6
+MAX_BATCH_SIZE = 10  # UPDATED: Increased from 6 to 10
 MIN_SKILLS_TO_SHOW = 5
 MAX_SKILLS_TO_SHOW = 8
 
@@ -3016,7 +3016,7 @@ if __name__ == '__main__':
     print(f"⏳ Staggered delays: 1-3 seconds between requests")
     print(f"🔀 Key rotation: Smart load balancing (5 keys)")
     print(f"🛡️ Cooling: 60s on rate limits")
-    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
+    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")  # UPDATED: Shows 10 resumes
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
     print(f"✅ Years of Experience: Included in analysis")
     print(f"🏢 PROFESSIONAL ATS SCORING: STRICT DOMAIN MATCHING")
