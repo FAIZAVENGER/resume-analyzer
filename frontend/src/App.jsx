@@ -57,7 +57,7 @@ import {
   MailCheck, LockKeyhole, Eye as EyeIcon,
   EyeOff as EyeOffIcon, AlertTriangle as AlertTriangleIcon,
   Target as TargetIcon, TrendingUp as TrendingUpIcon,
-  BarChart as BarChartIcon, Award as AwardIcon
+  BarChart as BarChartIcon
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
