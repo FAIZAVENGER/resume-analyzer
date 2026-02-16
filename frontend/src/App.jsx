@@ -55,9 +55,7 @@ import {
   Meh, Laugh, Angry, Surprised,
   LogIn, KeyRound, Fingerprint, UserCog,
   MailCheck, LockKeyhole, Eye as EyeIcon,
-  EyeOff as EyeOffIcon, AlertTriangle as AlertTriangleIcon,
-  Target as TargetIcon, TrendingUp as TrendingUpIcon,
-  BarChart as BarChartIcon, Award as AwardIcon
+  EyeOff as EyeOffIcon, AlertTriangle as AlertTriangleIcon
 } from 'lucide-react';
 import './App.css';
 import logoImage from './leadsoc.png';
@@ -87,7 +85,7 @@ function App() {
   const [batchProgress, setBatchProgress] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [aiStatus, setAiStatus] = useState('idle');
-  const [backendStatus, setBackendStatus] = useState('ready');
+  const [backendStatus, setBackendStatus] = useState('checking');
   const [groqWarmup, setGroqWarmup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
@@ -99,7 +97,7 @@ function App() {
   const [serviceStatus, setServiceStatus] = useState({
     enhancedFallback: true,
     validKeys: 0,
-    totalKeys: 5
+    totalKeys: 0
   });
   
   // View management for navigation
@@ -219,21 +217,37 @@ function App() {
   const initializeService = async () => {
     try {
       setIsWarmingUp(true);
-      setBackendStatus('ready');
+      setBackendStatus('waking');
       setAiStatus('checking');
       
-      // Immediately start health check without waiting
-      checkBackendHealth();
+      await wakeUpBackend();
       
-      // Start periodic checks
+      const healthResponse = await axios.get(`${API_BASE_URL}/health`, {
+        timeout: 10000
+      }).catch(() => null);
+      
+      if (healthResponse?.data) {
+        const availableKeys = healthResponse.data.available_keys || 0;
+        setServiceStatus({
+          enhancedFallback: healthResponse.data.ai_provider_configured || false,
+          validKeys: availableKeys,
+          totalKeys: 3
+        });
+        
+        setGroqWarmup(healthResponse.data.ai_warmup_complete || false);
+        setModelInfo(healthResponse.data.model_info || { name: healthResponse.data.model });
+        setBackendStatus('ready');
+      }
+      
+      await forceGroqWarmup();
+      
       setupPeriodicChecks();
       
     } catch (err) {
       console.log('Service initialization error:', err.message);
-      // Even if error, set backend as ready (will recover)
-      setBackendStatus('ready');
+      setBackendStatus('sleeping');
       
-      setTimeout(() => checkBackendHealth(), 3000);
+      setTimeout(() => initializeService(), 5000);
     } finally {
       setIsWarmingUp(false);
     }
@@ -241,30 +255,35 @@ function App() {
 
   const wakeUpBackend = async () => {
     try {
-      console.log('🔔 Ensuring backend is active...');
-      setLoadingMessage('Ensuring backend is active...');
+      console.log('🔔 Waking up backend...');
+      setLoadingMessage('Waking up backend...');
       
-      // Try multiple endpoints
       const pingPromises = [
-        axios.get(`${API_BASE_URL}/ping`, { timeout: 5000 }),
-        axios.get(`${API_BASE_URL}/health`, { timeout: 8000 }),
-        axios.get(`${API_BASE_URL}/quick-check`, { timeout: 8000 })
+        axios.get(`${API_BASE_URL}/ping`, { timeout: 8000 }),
+        axios.get(`${API_BASE_URL}/health`, { timeout: 10000 })
       ];
       
-      await Promise.any(pingPromises);
+      await Promise.allSettled(pingPromises);
       
       console.log('✅ Backend is responding');
       setBackendStatus('ready');
       setLoadingMessage('');
       
     } catch (error) {
-      console.log('⚠️ Backend check failed, but service will continue...');
-      setBackendStatus('ready');
+      console.log('⚠️ Backend is waking up...');
+      setBackendStatus('waking');
       
-      // Schedule another check
       setTimeout(() => {
-        checkBackendHealth();
-      }, 5000);
+        axios.get(`${API_BASE_URL}/ping`, { timeout: 15000 })
+          .then(() => {
+            setBackendStatus('ready');
+            console.log('✅ Backend fully awake');
+          })
+          .catch(() => {
+            setBackendStatus('sleeping');
+            console.log('❌ Backend still sleeping');
+          });
+      }, 3000);
     }
   };
 
@@ -342,41 +361,28 @@ function App() {
         setAiStatus('warming');
       }
       
-      // Update service status
-      setServiceStatus({
-        enhancedFallback: response.data.ai_provider_configured || false,
-        validKeys: response.data.available_keys || 0,
-        totalKeys: 5
-      });
-      
     } catch (error) {
       console.log('Backend health check failed:', error.message);
-      setBackendStatus('ready');
-      
-      // Try again in 10 seconds
-      setTimeout(() => checkBackendHealth(), 10000);
+      setBackendStatus('sleeping');
     }
   };
 
   const setupPeriodicChecks = () => {
-    // Keep-alive ping every 2 minutes (increased frequency)
     backendWakeInterval.current = setInterval(() => {
       axios.get(`${API_BASE_URL}/ping`, { timeout: 5000 })
         .then(() => console.log('Keep-alive ping successful'))
-        .catch(() => console.log('Keep-alive ping failed, but service continues'));
-    }, 2 * 60 * 1000);
+        .catch(() => console.log('Keep-alive ping failed'));
+    }, 3 * 60 * 1000);
     
-    // Health check every 30 seconds (increased frequency)
     warmupCheckInterval.current = setInterval(() => {
       checkBackendHealth();
-    }, 30 * 1000);
+    }, 60 * 1000);
     
-    // Groq status check every minute if needed
     const statusCheckInterval = setInterval(() => {
       if (aiStatus === 'warming' || aiStatus === 'checking') {
         checkGroqStatus();
       }
-    }, 60000);
+    }, 30000);
     
     keepAliveInterval.current = statusCheckInterval;
   };
@@ -445,7 +451,7 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 6));
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10));
       setError('');
     }
   };
@@ -481,6 +487,12 @@ function App() {
       return;
     }
 
+    if (backendStatus !== 'ready') {
+      setError('Backend is warming up. Please wait a moment...');
+      await wakeUpBackend();
+      return;
+    }
+
     setLoading(true);
     setError('');
     setAnalysis(null);
@@ -503,7 +515,7 @@ function App() {
       }, 500);
 
       if (aiStatus === 'available' && groqWarmup) {
-        setLoadingMessage('Groq AI analysis with granular scoring...');
+        setLoadingMessage('Groq AI analysis...');
       } else {
         setLoadingMessage('Enhanced analysis (Warming up Groq)...');
       }
@@ -548,8 +560,9 @@ function App() {
       if (progressInterval) clearInterval(progressInterval);
       
       if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Request timeout. Trying to reconnect...');
-        setTimeout(() => checkBackendHealth(), 2000);
+        setError('Request timeout. The backend might be waking up. Please try again in 30 seconds.');
+        setBackendStatus('sleeping');
+        wakeUpBackend();
       } else if (err.response?.status === 429) {
         setError('Rate limit reached. Groq API has limits. Please try again later.');
       } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
@@ -573,6 +586,12 @@ function App() {
     }
     if (!jobDescription.trim()) {
       setError('Please enter a job description');
+      return;
+    }
+
+    if (backendStatus !== 'ready') {
+      setError('Backend is warming up. Please wait a moment...');
+      await wakeUpBackend();
       return;
     }
 
@@ -636,8 +655,9 @@ function App() {
       if (progressInterval) clearInterval(progressInterval);
       
       if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Batch analysis timeout. Trying to reconnect...');
-        setTimeout(() => checkBackendHealth(), 2000);
+        setError('Batch analysis timeout. The backend might be waking up. Please try again.');
+        setBackendStatus('sleeping');
+        wakeUpBackend();
       } else if (err.response?.status === 429) {
         setError('Groq API rate limit reached. Please try again later or reduce batch size.');
       } else {
@@ -682,20 +702,40 @@ function App() {
   };
 
   const getScoreGrade = (score) => {
-    if (score >= 90) return 'Exceptional Match 🎯';
-    if (score >= 80) return 'Very Good Match ✨';
+    if (score >= 90) return 'Excellent Match 🎯';
+    if (score >= 80) return 'Great Match ✨';
     if (score >= 70) return 'Good Match 👍';
     if (score >= 60) return 'Fair Match 📊';
     return 'Needs Improvement 📈';
   };
 
   const getBackendStatusMessage = () => {
-    return { 
-      text: 'Backend Active', 
-      color: '#00ff9d', 
-      icon: <CloudLightning size={16} />,
-      bgColor: 'rgba(0, 255, 157, 0.1)'
-    };
+    switch(backendStatus) {
+      case 'ready': return { 
+        text: 'Backend Active', 
+        color: '#00ff9d', 
+        icon: <CloudLightning size={16} />,
+        bgColor: 'rgba(0, 255, 157, 0.1)'
+      };
+      case 'waking': return { 
+        text: 'Backend Waking', 
+        color: '#ffd166', 
+        icon: <CloudRain size={16} />,
+        bgColor: 'rgba(255, 209, 102, 0.1)'
+      };
+      case 'sleeping': return { 
+        text: 'Backend Sleeping', 
+        color: '#ff6b6b', 
+        icon: <CloudOff size={16} />,
+        bgColor: 'rgba(255, 107, 107, 0.1)'
+      };
+      default: return { 
+        text: 'Checking...', 
+        color: '#94a3b8', 
+        icon: <Loader size={16} className="spinner" />,
+        bgColor: 'rgba(148, 163, 184, 0.1)'
+      };
+    }
   };
 
   const getAiStatusMessage = () => {
@@ -774,27 +814,27 @@ function App() {
   const formatSummary = (text) => {
     if (!text) return "No summary available.";
     
+    // Remove any trailing ellipsis or incomplete text
     let cleanText = text.trim();
     
+    // If text ends with ellipsis or incomplete sentence, find the last complete sentence
     if (cleanText.includes('...') || !cleanText.endsWith('.') || cleanText.endsWith('..')) {
+      // Split by sentences
       const sentences = cleanText.split(/[.!?]+/).filter(s => s.trim().length > 0);
+      
+      // Take only complete sentences (4-5 sentences)
       const completeSentences = sentences.slice(0, 5);
+      
+      // Join with periods and ensure proper ending
       cleanText = completeSentences.join('. ') + '.';
     }
     
+    // Ensure proper sentence endings
     if (!cleanText.endsWith('.') && !cleanText.endsWith('!') && !cleanText.endsWith('?')) {
       cleanText = cleanText + '.';
     }
     
     return cleanText;
-  };
-
-  // Format score display with 1 decimal place
-  const formatScore = (score) => {
-    if (typeof score === 'number') {
-      return score.toFixed(1);
-    }
-    return score || '0.0';
   };
 
   // Render Login Page
@@ -821,7 +861,7 @@ function App() {
               <Brain className="logo-icon" size={32} />
             </div>
             <div className="login-logo-text">
-              <h1>ResuGo</h1>
+              <h1>AI Resume Analyzer</h1>
               <p className="login-subtitle">
                 <span className="groq-badge-login">⚡ Groq AI</span>
                 <span className="divider">•</span>
@@ -1040,17 +1080,33 @@ function App() {
               <ZapIcon size={14} /> Rate Limit Protection
             </span>
             <span className="status-badge keys">
-              <Key size={14} /> {getAvailableKeysCount()}/5 Keys
+              <Key size={14} /> {getAvailableKeysCount()}/3 Keys
             </span>
             {modelInfo && (
               <span className="status-badge model">
                 <Cpu size={14} /> {getModelDisplayName(modelInfo)}
               </span>
             )}
-            <span className="status-badge scoring">
-              <TargetIcon size={14} /> Granular Scoring
-            </span>
           </div>
+          
+          {/* Rate Limit Warning */}
+          {(backendStatus === 'ready' && aiStatus === 'available') && (
+            <div className="rate-limit-warning glass" style={{
+              background: 'rgba(255, 209, 102, 0.1)',
+              border: '1px solid rgba(255, 209, 102, 0.3)',
+              padding: '0.75rem 1rem',
+              borderRadius: '8px',
+              marginTop: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              <AlertTriangle size={16} color="#ffd166" />
+              <span style={{ fontSize: '0.9rem' }}>
+                <strong>Rate Limit Protection:</strong> Staggered delays ensure you won't hit limits. 10 resumes take ~20-30s (safer).
+              </span>
+            </div>
+          )}
           
           {/* Batch Mode Toggle */}
           <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
@@ -1094,7 +1150,7 @@ function App() {
                 gap: '0.5rem'
               }}
             >
-              <Users size={16} /> Multiple Resumes (Up to 6)
+              <Users size={16} /> Multiple Resumes (Up to 10)
             </button>
           </div>
         </div>
@@ -1108,10 +1164,10 @@ function App() {
                 {batchMode ? <Users className="header-icon" /> : <FileText className="header-icon" />}
               </div>
               <div>
-                <h2>{batchMode ? 'Upload Resumes' : 'Upload Resume'}</h2>
+                <h2>{batchMode ? 'Upload Resumes (Batch)' : 'Upload Resume'}</h2>
                 <p className="card-subtitle">
                   {batchMode 
-                    ? 'Upload multiple resumes (Max 6, 15MB each)'
+                    ? 'Upload multiple resumes (Max 10, 15MB each)' 
                     : 'Supported: PDF, DOC, DOCX, TXT (Max 15MB)'}
                 </p>
               </div>
@@ -1226,7 +1282,7 @@ function App() {
                         <span className="upload-text">
                           Drag & drop multiple files or click to browse
                         </span>
-                        <span className="upload-hint">Max 6 files, 15MB each</span>
+                        <span className="upload-hint">Max 10 files, 15MB each</span>
                       </>
                     )}
                   </div>
@@ -1265,9 +1321,9 @@ function App() {
               </div>
               <div className="stat">
                 <div className="stat-icon">
-                  <TargetIcon size={14} />
+                  <Users size={14} />
                 </div>
-                <span>Granular Scoring</span>
+                <span>Up to 10 resumes</span>
               </div>
             </div>
           </div>
@@ -1312,10 +1368,10 @@ function App() {
             {error.includes('warming up') && (
               <button 
                 className="error-action-button"
-                onClick={checkBackendHealth}
+                onClick={wakeUpBackend}
               >
                 <Activity size={16} />
-                Refresh Status
+                Wake Backend
               </button>
             )}
           </div>
@@ -1338,18 +1394,18 @@ function App() {
                 <span className="loading-subtext">
                   {batchMode 
                     ? `Processing ${resumeFiles.length} resume(s) with rate limit protection...` 
-                    : `Using ${getModelDisplayName(modelInfo)} with granular scoring...`}
+                    : `Using ${getModelDisplayName(modelInfo)}...`}
                 </span>
               </div>
               
               <div className="progress-stats">
                 <span>{Math.round(batchMode ? batchProgress : progress)}%</span>
                 <span>•</span>
-                <span>Backend: Always Active</span>
+                <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking...'}</span>
                 <span>•</span>
                 <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
                 <span>•</span>
-                <span>Keys: {getAvailableKeysCount()}/5</span>
+                <span>Keys: {getAvailableKeysCount()}/3</span>
                 {modelInfo && (
                   <>
                     <span>•</span>
@@ -1362,17 +1418,13 @@ function App() {
                     <span>Batch Size: {resumeFiles.length}</span>
                     <span>•</span>
                     <span>Rate Protection: Active</span>
-                    <span>•</span>
-                    <span>Max: 6 resumes</span>
-                    <span>•</span>
-                    <span>Scoring: Granular unique</span>
                   </>
                 )}
               </div>
               
               <div className="loading-note info">
                 <Info size={14} />
-                <span>Rate limit protection ensures stable operation. Backend is always active.</span>
+                <span>Rate limit protection ensures stable operation. 10 resumes take ~20-30s.</span>
               </div>
             </div>
           </div>
@@ -1383,12 +1435,18 @@ function App() {
           onClick={batchMode ? handleBatchAnalyze : handleAnalyze}
           disabled={loading || batchLoading || 
                    (batchMode ? resumeFiles.length === 0 : !resumeFile) || 
-                   !jobDescription.trim()}
+                   !jobDescription.trim() || 
+                   backendStatus === 'sleeping'}
         >
           {(loading || batchLoading) ? (
             <div className="button-loading-content">
               <Loader className="spinner" />
               <span>{batchMode ? 'Analyzing Batch...' : 'Analyzing...'}</span>
+            </div>
+          ) : backendStatus === 'sleeping' ? (
+            <div className="button-waking-content">
+              <Activity className="spinner" />
+              <span>Waking Backend...</span>
             </div>
           ) : (
             <>
@@ -1398,8 +1456,8 @@ function App() {
                   <span>{batchMode ? 'Analyze Multiple Resumes' : 'Analyze Resume'}</span>
                   <span className="button-subtext">
                     {batchMode 
-                      ? `${resumeFiles.length} resume(s) • Granular Scoring` 
-                      : `${getModelDisplayName(modelInfo)} • Granular Scoring`}
+                      ? `${resumeFiles.length} resume(s) • Rate Protection • ~${Math.ceil(resumeFiles.length * 2)}-${Math.ceil(resumeFiles.length * 3)}s` 
+                      : `${getModelDisplayName(modelInfo)} • Single`}
                   </span>
                 </div>
               </div>
@@ -1413,15 +1471,15 @@ function App() {
             <>
               <div className="tip">
                 <Brain size={16} />
-                <span>Groq AI with enhanced granular scoring for precise analysis</span>
+                <span>Groq AI with 128K context length for comprehensive analysis</span>
               </div>
               <div className="tip">
                 <Activity size={16} />
                 <span>Rate limit protection with staggered delays prevents API limits</span>
               </div>
               <div className="tip">
-                <TargetIcon size={16} />
-                <span>Unique granular scores for each candidate (e.g., 82.5, 76.3)</span>
+                <Zap size={16} />
+                <span>~20-30 seconds for 10 resumes (Slower but SAFE from rate limits)</span>
               </div>
               <div className="tip">
                 <Download size={16} />
@@ -1432,19 +1490,19 @@ function App() {
             <>
               <div className="tip">
                 <Brain size={16} />
-                <span>Groq AI offers ultra-fast resume analysis with granular scoring</span>
+                <span>Groq AI offers ultra-fast resume analysis</span>
               </div>
               <div className="tip">
-                <TargetIcon size={16} />
-                <span>Precise scoring: 1 decimal place, weighted factors, unique scores</span>
+                <Thermometer size={16} />
+                <span>Groq API automatically warms up when idle</span>
               </div>
               <div className="tip">
                 <Activity size={16} />
-                <span>Backend is always active with self-pinging</span>
+                <span>Backend stays awake with automatic pings every 3 minutes</span>
               </div>
               <div className="tip">
                 <Cpu size={16} />
-                <span>Using: {getModelDisplayName(modelInfo)} with enhanced scoring</span>
+                <span>Using: {getModelDisplayName(modelInfo)}</span>
               </div>
             </>
           )}
@@ -1455,9 +1513,6 @@ function App() {
     const renderSingleAnalysisView = () => {
       if (!analysis) return null;
 
-      const score = analysis.overall_score || 0;
-      const formattedScore = formatScore(score);
-
       return (
         <div className="results-section">
           {/* Navigation Header */}
@@ -1467,7 +1522,7 @@ function App() {
               <span>New Analysis</span>
             </button>
             <div className="navigation-title">
-              <h2>⚡ Resume Analysis Results</h2>
+              <h2>⚡ Resume Analysis Results (Groq)</h2>
               <p>{analysis.candidate_name}</p>
             </div>
             <div className="navigation-actions">
@@ -1509,27 +1564,27 @@ function App() {
             <div className="score-display">
               <div className="score-circle-wrapper">
                 <div className="score-circle-glow" style={{ 
-                  background: `radial-gradient(circle, ${getScoreColor(score)}22 0%, transparent 70%)` 
+                  background: `radial-gradient(circle, ${getScoreColor(analysis.overall_score)}22 0%, transparent 70%)` 
                 }}></div>
                 <div 
                   className="score-circle" 
                   style={{ 
-                    borderColor: getScoreColor(score),
-                    background: `conic-gradient(${getScoreColor(score)} ${score * 3.6}deg, #2d3749 0deg)` 
+                    borderColor: getScoreColor(analysis.overall_score),
+                    background: `conic-gradient(${getScoreColor(analysis.overall_score)} ${analysis.overall_score * 3.6}deg, #2d3749 0deg)` 
                   }}
                 >
                   <div className="score-inner">
-                    <div className="score-value" style={{ color: getScoreColor(score) }}>
-                      {formattedScore}
+                    <div className="score-value" style={{ color: getScoreColor(analysis.overall_score) }}>
+                      {analysis.overall_score}
                     </div>
                     <div className="score-label">ATS Score</div>
                   </div>
                 </div>
               </div>
               <div className="score-info">
-                <h3 className="score-grade">{getScoreGrade(score)}</h3>
+                <h3 className="score-grade">{getScoreGrade(analysis.overall_score)}</h3>
                 <p className="score-description">
-                  Granular scoring with 1 decimal precision
+                  Based on skill matching, experience relevance, and qualifications
                 </p>
                 <div className="score-meta">
                   <span className="meta-item">
@@ -1540,10 +1595,6 @@ function App() {
                     <XCircle size={12} />
                     {analysis.skills_missing?.length || 0} skills missing
                   </span>
-                  <span className="meta-item">
-                    <TargetIcon size={12} />
-                    Score: {formattedScore}/100
-                  </span>
                 </div>
               </div>
             </div>
@@ -1551,30 +1602,30 @@ function App() {
 
           {/* Recommendation Card */}
           <div className="recommendation-card glass" style={{
-            background: `linear-gradient(135deg, ${getScoreColor(score)}15, ${getScoreColor(score)}08)`,
-            borderLeft: `4px solid ${getScoreColor(score)}`
+            background: `linear-gradient(135deg, ${getScoreColor(analysis.overall_score)}15, ${getScoreColor(analysis.overall_score)}08)`,
+            borderLeft: `4px solid ${getScoreColor(analysis.overall_score)}`
           }}>
             <div className="recommendation-header">
-              <AwardIcon size={28} style={{ color: getScoreColor(score) }} />
+              <AwardIcon size={28} style={{ color: getScoreColor(analysis.overall_score) }} />
               <div>
                 <h3>Analysis Recommendation</h3>
                 <p className="recommendation-subtitle">
-                  Powered by Groq AI with granular scoring
+                  Powered by Groq AI
                 </p>
               </div>
             </div>
             <div className="recommendation-content">
               <p className="recommendation-text">{analysis.recommendation}</p>
               <div className="confidence-badge">
-                <TargetIcon size={16} />
-                <span>Granular Score: {formattedScore}/100</span>
+                <Brain size={16} />
+                <span>Groq AI Analysis</span>
               </div>
             </div>
           </div>
 
-          {/* Skills Analysis */}
+          {/* Skills Analysis - 5-8 skills each */}
           <div className="section-title">
-            <h2>Skills Analysis</h2>
+            <h2>Skills Analysis (5-8 skills each)</h2>
             <p>Detailed breakdown of matched and missing skills</p>
           </div>
           
@@ -1642,7 +1693,7 @@ function App() {
 
           {/* Summary Section with Complete 4-5 sentences */}
           <div className="section-title">
-            <h2>Profile Summary</h2>
+            <h2>Profile Summary (4-5 complete sentences each)</h2>
             <p>Key insights extracted from resume (no truncation)</p>
           </div>
           
@@ -1676,9 +1727,9 @@ function App() {
             </div>
           </div>
 
-          {/* Insights Section */}
+          {/* Insights Section - Only 3 items each */}
           <div className="section-title">
-            <h2>Insights & Recommendations</h2>
+            <h2>Insights & Recommendations (3 items each)</h2>
             <p>Key strengths and areas for improvement</p>
           </div>
           
@@ -1689,7 +1740,7 @@ function App() {
                   <TrendingUp size={24} />
                 </div>
                 <div>
-                  <h3>Key Strengths</h3>
+                  <h3>Key Strengths (3)</h3>
                   <p className="insight-subtitle">Areas where candidate excels</p>
                 </div>
               </div>
@@ -1714,7 +1765,7 @@ function App() {
                   <Target size={24} />
                 </div>
                 <div>
-                  <h3>Areas for Improvement</h3>
+                  <h3>Areas for Improvement (3)</h3>
                   <p className="insight-subtitle">Opportunities to grow</p>
                 </div>
               </div>
@@ -1738,7 +1789,7 @@ function App() {
           <div className="action-section glass">
             <div className="action-content">
               <h3>Analysis Complete</h3>
-              <p>Download the Excel report with granular scores or start a new analysis</p>
+              <p>Download the Excel report or start a new analysis</p>
             </div>
             <div className="action-buttons">
               <button className="download-button" onClick={() => handleIndividualDownload(analysis.analysis_id)}>
@@ -1764,7 +1815,7 @@ function App() {
             <span>Back to Analysis</span>
           </button>
           <div className="navigation-title">
-            <h2>⚡ Batch Analysis Results</h2>
+            <h2>⚡ Batch Analysis Results (Groq with Rate Protection)</h2>
             <p>{batchAnalysis?.successfully_analyzed || 0} resumes analyzed</p>
           </div>
           <div className="navigation-actions">
@@ -1774,6 +1825,27 @@ function App() {
             </button>
           </div>
         </div>
+
+        {/* Rate Limit Protection Info */}
+        {batchAnalysis?.rate_limit_protection && (
+          <div className="rate-protection-info glass" style={{
+            background: 'rgba(0, 255, 157, 0.1)',
+            border: '1px solid rgba(0, 255, 157, 0.3)',
+            padding: '1rem',
+            borderRadius: '12px',
+            marginBottom: '1.5rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <ShieldCheck size={24} color="#00ff9d" />
+              <div>
+                <h4 style={{ margin: 0, color: '#00ff9d' }}>Rate Limit Protection Active</h4>
+                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.9rem', opacity: 0.9 }}>
+                  {batchAnalysis.rate_limit_protection} • Used sequential processing with staggered delays
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Stats */}
         <div className="multi-key-stats-container glass">
@@ -1809,127 +1881,146 @@ function App() {
             </div>
           </div>
           
-          {/* Scoring Stats */}
-          {batchAnalysis?.scoring_quality && (
-            <div className="stat-card">
-              <div className="stat-icon scoring">
-                <TargetIcon size={24} />
-              </div>
-              <div className="stat-content">
-                <div className="stat-value">
-                  {batchAnalysis.scoring_quality.unique_scores || 0}/{batchAnalysis.scoring_quality.total_candidates || 0}
-                </div>
-                <div className="stat-label">Unique Scores</div>
-              </div>
+          <div className="stat-card">
+            <div className="stat-icon success">
+              <Zap size={24} />
             </div>
-          )}
+            <div className="stat-content">
+              <div className="stat-value">{batchAnalysis?.available_keys || 0}</div>
+              <div className="stat-label">Keys Used</div>
+            </div>
+          </div>
         </div>
+
+        {/* Key Usage Stats */}
+        {batchAnalysis?.key_statistics && (
+          <div className="key-usage-stats glass" style={{ marginBottom: '1.5rem' }}>
+            <h4>Key Usage Statistics</h4>
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              {batchAnalysis.key_statistics.map((stat, idx) => (
+                <div key={idx} style={{
+                  padding: '0.75rem',
+                  background: stat.status === 'cooling' ? 'rgba(255, 107, 107, 0.1)' : 'rgba(0, 255, 157, 0.1)',
+                  borderRadius: '8px',
+                  flex: 1,
+                  minWidth: '150px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <Key size={16} color={stat.status === 'cooling' ? '#ff6b6b' : '#00ff9d'} />
+                    <strong>{stat.key}</strong>
+                  </div>
+                  <div style={{ fontSize: '0.85rem' }}>
+                    <div>Total: {stat.used}</div>
+                    <div>This minute: {stat.requests_this_minute}</div>
+                    <div>Errors: {stat.errors}</div>
+                    <div>Status: {stat.status}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Candidates Ranking */}
         <div className="section-title">
-          <h2>Candidate Rankings</h2>
-          <p>Sorted by ATS Score (Highest to Lowest) - Granular Scoring</p>
+          <h2>Candidate Rankings (5-8 skills analysis each)</h2>
+          <p>Sorted by ATS Score (Highest to Lowest)</p>
         </div>
         
         <div className="batch-results-grid">
-          {batchAnalysis?.analyses?.map((candidate, index) => {
-            const score = candidate.overall_score || 0;
-            const formattedScore = formatScore(score);
-            
-            return (
-              <div key={index} className="batch-candidate-card glass">
-                <div className="batch-card-header">
-                  <div className="candidate-rank">
-                    <div className="rank-badge">#{candidate.rank}</div>
-                    <div className="candidate-main-info">
-                      <h3 className="candidate-name">{candidate.candidate_name}</h3>
-                      <div className="candidate-meta">
-                        <span className="file-info">{candidate.filename}</span>
-                        {candidate.years_of_experience && (
-                          <span className="experience-info">
-                            <Calendar size={12} />
-                            {candidate.years_of_experience}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="candidate-score-display">
-                    <div className="score-large" style={{ color: getScoreColor(score) }}>
-                      {formattedScore}
-                    </div>
-                    <div className="score-label">ATS Score</div>
-                  </div>
-                </div>
-                
-                <div className="batch-card-content">
-                  <div className="recommendation-badge" style={{ 
-                    background: getScoreColor(score) + '20',
-                    color: getScoreColor(score),
-                    border: `1px solid ${getScoreColor(score)}40`
-                  }}>
-                    {candidate.recommendation}
-                  </div>
-                  
-                  <div className="complete-summary-section">
-                    <h4>Experience Summary:</h4>
-                    <p className="complete-text" style={{ fontSize: '0.9rem', lineHeight: '1.4' }}>
-                      {formatSummary(candidate.experience_summary)}
-                    </p>
-                  </div>
-                  
-                  <div className="skills-preview">
-                    <div className="skills-section">
-                      <div className="skills-header">
-                        <CheckCircle size={14} />
-                        <span>Matched Skills ({candidate.skills_matched?.length || 0})</span>
-                      </div>
-                      <div className="skills-list">
-                        {candidate.skills_matched?.slice(0, 4).map((skill, idx) => (
-                          <span key={idx} className="skill-tag success">{skill}</span>
-                        ))}
-                        {candidate.skills_matched?.length > 4 && (
-                          <span className="more-skills">+{candidate.skills_matched.length - 4} more</span>
-                        )}
-                      </div>
-                    </div>
-                    
-                    <div className="skills-section">
-                      <div className="skills-header">
-                        <XCircle size={14} />
-                        <span>Missing Skills ({candidate.skills_missing?.length || 0})</span>
-                      </div>
-                      <div className="skills-list">
-                        {candidate.skills_missing?.slice(0, 4).map((skill, idx) => (
-                          <span key={idx} className="skill-tag error">{skill}</span>
-                        ))}
-                        {candidate.skills_missing?.length > 4 && (
-                          <span className="more-skills">+{candidate.skills_missing.length - 4} more</span>
-                        )}
-                      </div>
+          {batchAnalysis?.analyses?.map((candidate, index) => (
+            <div key={index} className="batch-candidate-card glass">
+              <div className="batch-card-header">
+                <div className="candidate-rank">
+                  <div className="rank-badge">#{candidate.rank}</div>
+                  <div className="candidate-main-info">
+                    <h3 className="candidate-name">{candidate.candidate_name}</h3>
+                    <div className="candidate-meta">
+                      <span className="file-info">{candidate.filename}</span>
+                      {candidate.years_of_experience && (
+                        <span className="experience-info">
+                          <Calendar size={12} />
+                          {candidate.years_of_experience}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
-                
-                <div className="batch-card-footer">
-                  <button 
-                    className="view-details-btn"
-                    onClick={() => navigateToCandidateDetail(index)}
-                  >
-                    View Full Details
-                    <ChevronRight size={16} />
-                  </button>
+                <div className="candidate-score-display">
+                  <div className="score-large" style={{ color: getScoreColor(candidate.overall_score) }}>
+                    {candidate.overall_score}
+                  </div>
+                  <div className="score-label">ATS Score</div>
                 </div>
               </div>
-            );
-          })}
+              
+              <div className="batch-card-content">
+                <div className="recommendation-badge" style={{ 
+                  background: getScoreColor(candidate.overall_score) + '20',
+                  color: getScoreColor(candidate.overall_score),
+                  border: `1px solid ${getScoreColor(candidate.overall_score)}40`
+                }}>
+                  {candidate.recommendation}
+                </div>
+                
+                <div className="complete-summary-section">
+                  <h4>Experience Summary:</h4>
+                  <p className="complete-text" style={{ fontSize: '0.9rem', lineHeight: '1.4' }}>
+                    {formatSummary(candidate.experience_summary)}
+                  </p>
+                </div>
+                
+                <div className="skills-preview">
+                  <div className="skills-section">
+                    <div className="skills-header">
+                      <CheckCircle size={14} />
+                      <span>Matched Skills ({candidate.skills_matched?.length || 0})</span>
+                    </div>
+                    <div className="skills-list">
+                      {candidate.skills_matched?.slice(0, 4).map((skill, idx) => (
+                        <span key={idx} className="skill-tag success">{skill}</span>
+                      ))}
+                      {candidate.skills_matched?.length > 4 && (
+                        <span className="more-skills">+{candidate.skills_matched.length - 4} more</span>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="skills-section">
+                    <div className="skills-header">
+                      <XCircle size={14} />
+                      <span>Missing Skills ({candidate.skills_missing?.length || 0})</span>
+                    </div>
+                    <div className="skills-list">
+                      {candidate.skills_missing?.slice(0, 4).map((skill, idx) => (
+                        <span key={idx} className="skill-tag error">{skill}</span>
+                      ))}
+                      {candidate.skills_missing?.length > 4 && (
+                        <span className="more-skills">+{candidate.skills_missing.length - 4} more</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="batch-card-footer">
+                <button 
+                  className="view-details-btn"
+                  onClick={() => navigateToCandidateDetail(index)}
+                >
+                  View Full Details
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* Action Buttons */}
         <div className="action-section glass">
           <div className="action-content">
             <h3>Batch Analysis Complete</h3>
-            <p>Download comprehensive Excel report with granular scoring and unique candidate analysis</p>
+            <p>Download comprehensive Excel report with candidate analysis including candidate name and experience summary</p>
           </div>
           <div className="action-buttons">
             <button className="download-button" onClick={handleBatchDownload}>
@@ -1960,9 +2051,6 @@ function App() {
           </div>
         );
       }
-
-      const score = candidate.overall_score || 0;
-      const formattedScore = formatScore(score);
 
       return (
         <div className="results-section">
@@ -2008,27 +2096,27 @@ function App() {
             <div className="score-display">
               <div className="score-circle-wrapper">
                 <div className="score-circle-glow" style={{ 
-                  background: `radial-gradient(circle, ${getScoreColor(score)}22 0%, transparent 70%)` 
+                  background: `radial-gradient(circle, ${getScoreColor(candidate.overall_score)}22 0%, transparent 70%)` 
                 }}></div>
                 <div 
                   className="score-circle" 
                   style={{ 
-                    borderColor: getScoreColor(score),
-                    background: `conic-gradient(${getScoreColor(score)} ${score * 3.6}deg, #2d3749 0deg)` 
+                    borderColor: getScoreColor(candidate.overall_score),
+                    background: `conic-gradient(${getScoreColor(candidate.overall_score)} ${candidate.overall_score * 3.6}deg, #2d3749 0deg)` 
                   }}
                 >
                   <div className="score-inner">
-                    <div className="score-value" style={{ color: getScoreColor(score) }}>
-                      {formattedScore}
+                    <div className="score-value" style={{ color: getScoreColor(candidate.overall_score) }}>
+                      {candidate.overall_score}
                     </div>
                     <div className="score-label">ATS Score</div>
                   </div>
                 </div>
               </div>
               <div className="score-info">
-                <h3 className="score-grade">{getScoreGrade(score)}</h3>
+                <h3 className="score-grade">{getScoreGrade(candidate.overall_score)}</h3>
                 <p className="score-description">
-                  Granular scoring with 1 decimal precision
+                  Based on skill matching and experience relevance
                 </p>
                 <div className="score-meta">
                   <span className="meta-item">
@@ -2046,30 +2134,30 @@ function App() {
 
           {/* Recommendation Card */}
           <div className="recommendation-card glass" style={{
-            background: `linear-gradient(135deg, ${getScoreColor(score)}15, ${getScoreColor(score)}08)`,
-            borderLeft: `4px solid ${getScoreColor(score)}`
+            background: `linear-gradient(135deg, ${getScoreColor(candidate.overall_score)}15, ${getScoreColor(candidate.overall_score)}08)`,
+            borderLeft: `4px solid ${getScoreColor(candidate.overall_score)}`
           }}>
             <div className="recommendation-header">
-              <AwardIcon size={28} style={{ color: getScoreColor(score) }} />
+              <AwardIcon size={28} style={{ color: getScoreColor(candidate.overall_score) }} />
               <div>
                 <h3>Analysis Recommendation</h3>
                 <p className="recommendation-subtitle">
-                  Powered by Groq AI with granular scoring
+                  Powered by Groq AI
                 </p>
-              </div>
+            </div>
             </div>
             <div className="recommendation-content">
               <p className="recommendation-text">{candidate.recommendation}</p>
               <div className="confidence-badge">
-                <TargetIcon size={16} />
-                <span>Granular Score: {formattedScore}/100</span>
+                <Brain size={16} />
+                <span>Groq AI Analysis</span>
               </div>
             </div>
           </div>
 
-          {/* Skills Analysis */}
+          {/* Skills Analysis - 5-8 skills each */}
           <div className="section-title">
-            <h2>Skills Analysis</h2>
+            <h2>Skills Analysis (5-8 skills each)</h2>
             <p>Detailed breakdown of matched and missing skills</p>
           </div>
           
@@ -2137,7 +2225,7 @@ function App() {
 
           {/* Summary Section with Complete 4-5 sentences */}
           <div className="section-title">
-            <h2>Profile Summary</h2>
+            <h2>Profile Summary (4-5 complete sentences each)</h2>
             <p>Key insights extracted from resume (no truncation)</p>
           </div>
           
@@ -2171,9 +2259,9 @@ function App() {
             </div>
           </div>
 
-          {/* Insights Section */}
+          {/* Insights Section - Only 3 items each */}
           <div className="section-title">
-            <h2>Insights & Recommendations</h2>
+            <h2>Insights & Recommendations (3 items each)</h2>
             <p>Key strengths and areas for improvement</p>
           </div>
           
@@ -2184,7 +2272,7 @@ function App() {
                   <TrendingUp size={24} />
                 </div>
                 <div>
-                  <h3>Key Strengths</h3>
+                  <h3>Key Strengths (3)</h3>
                   <p className="insight-subtitle">Areas where candidate excels</p>
                 </div>
               </div>
@@ -2209,7 +2297,7 @@ function App() {
                   <Target size={24} />
                 </div>
                 <div>
-                  <h3>Areas for Improvement</h3>
+                  <h3>Areas for Improvement (3)</h3>
                   <p className="insight-subtitle">Opportunities to grow</p>
                 </div>
               </div>
@@ -2233,7 +2321,7 @@ function App() {
           <div className="action-section glass">
             <div className="action-content">
               <h3>Candidate Analysis Complete</h3>
-              <p>Granular score: {formattedScore}/100 • Go back to rankings</p>
+              <p>Go back to rankings or download the full batch report</p>
             </div>
             <div className="action-buttons">
               <button className="download-button" onClick={navigateBack}>
@@ -2270,12 +2358,12 @@ function App() {
                   <Brain className="logo-icon" />
                 </div>
                 <div className="logo-text">
-                  <h1>ResuGo</h1>
+                  <h1>AI Resume Analyzer (Groq)</h1>
                   <div className="logo-subtitle">
                     <span className="powered-by">Powered by</span>
                     <span className="groq-badge">⚡ Groq</span>
                     <span className="divider">•</span>
-                    <span className="tagline">Granular Scoring • Experience Summary • Years of Experience</span>
+                    <span className="tagline">5-8 Skills Analysis • Experience Summary • Years of Experience</span>
                   </div>
                 </div>
               </div>
@@ -2325,7 +2413,7 @@ function App() {
             </div>
             
             <div className="header-features">
-              {/* Backend Status - Always Active */}
+              {/* Backend Status */}
               <div 
                 className="feature backend-status-indicator" 
                 style={{ 
@@ -2335,7 +2423,8 @@ function App() {
                 }}
               >
                 {backendStatusInfo.icon}
-                <span>Always Active</span>
+                <span>{backendStatusInfo.text}</span>
+                {backendStatus === 'waking' && <Loader size={12} className="pulse-spinner" />}
               </div>
               
               {/* AI Status */}
@@ -2355,7 +2444,7 @@ function App() {
               {/* Key Status */}
               <div className="feature key-status">
                 <Key size={16} />
-                <span>{getAvailableKeysCount()}/5 Keys</span>
+                <span>{getAvailableKeysCount()}/3 Keys</span>
               </div>
               
               {/* Model Info */}
@@ -2370,12 +2459,6 @@ function App() {
               <div className="feature rate-limit">
                 <ShieldCheck size={16} />
                 <span>Rate Protection</span>
-              </div>
-              
-              {/* Scoring Feature */}
-              <div className="feature scoring-feature">
-                <TargetIcon size={16} />
-                <span>Granular Scoring</span>
               </div>
               
               {/* Navigation Indicator */}
@@ -2416,6 +2499,13 @@ function App() {
             </div>
           </div>
           
+          <div className="header-wave">
+            <svg viewBox="0 0 1200 120" preserveAspectRatio="none">
+              <path d="M0,0V46.29c47.79,22.2,103.59,32.17,158,28,70.36-5.37,136.33-33.31,206.8-37.5C438.64,32.43,512.34,53.67,583,72.05c69.27,18,138.3,24.88,209.4,13.08,36.15-6,69.85-17.84,104.45,29.34C989.49,25,1113-14.29,1200,52.47V0Z" opacity=".25" fill="currentColor"></path>
+              <path d="M0,0V15.81C13,36.92,27.64,56.86,47.69,72.05,99.41,111.27,165,111,224.58,91.58c31.15-10.15,60.09-26.07,89.67-39.8,40.92-19,84.73-46,130.83-49.67,36.26-2.85,70.9,9.42,98.6,31.56,31.77,25.39,62.32,62,103.63,73,40.44,10.79,81.35-6.69,119.13-24.28s75.16-39,116.92-43.05c59.73-5.85,113.28,22.88,168.9,38.84,30.2,8.66,59,6.17,87.09-7.5,22.43-10.89,48-26.93,60.65-49.24V0Z" opacity=".5" fill="currentColor"></path>
+              <path d="M0,0V5.63C149.93,59,314.09,71.32,475.83,42.57c43-7.64,84.23-20.12,127.61-26.46,59-8.63,112.48,12.24,165.56,35.4C827.93,77.22,886,95.24,951.2,90c86.53-7,172.46-45.71,248.8-84.81V0Z" fill="currentColor"></path>
+            </svg>
+          </div>
         </header>
 
         <main className="main-content">
@@ -2438,8 +2528,10 @@ function App() {
               <div className="quota-summary">
                 <div className="summary-item">
                   <div className="summary-label">Backend Status</div>
-                  <div className="summary-value success">
-                    ✅ Always Active (No Sleeping)
+                  <div className={`summary-value ${backendStatus === 'ready' ? 'success' : backendStatus === 'waking' ? 'warning' : 'error'}`}>
+                    {backendStatus === 'ready' ? '✅ Active' : 
+                     backendStatus === 'waking' ? '🔥 Waking Up' : 
+                     '💤 Sleeping'}
                   </div>
                 </div>
                 <div className="summary-item">
@@ -2452,8 +2544,8 @@ function App() {
                 </div>
                 <div className="summary-item">
                   <div className="summary-label">Available Keys</div>
-                  <div className={`summary-value ${getAvailableKeysCount() >= 3 ? 'success' : getAvailableKeysCount() >= 2 ? 'warning' : 'error'}`}>
-                    🔑 {getAvailableKeysCount()}/5 keys
+                  <div className={`summary-value ${getAvailableKeysCount() >= 2 ? 'success' : getAvailableKeysCount() === 1 ? 'warning' : 'error'}`}>
+                    🔑 {getAvailableKeysCount()}/3 keys
                   </div>
                 </div>
                 <div className="summary-item">
@@ -2463,21 +2555,9 @@ function App() {
                   </div>
                 </div>
                 <div className="summary-item">
-                  <div className="summary-label">Scoring Method</div>
-                  <div className="summary-value success">
-                    🎯 Granular unique scores (1 decimal)
-                  </div>
-                </div>
-                <div className="summary-item">
                   <div className="summary-label">Rate Limit Protection</div>
                   <div className="summary-value success">
                     🛡️ ACTIVE (Max 100/min/key)
-                  </div>
-                </div>
-                <div className="summary-item">
-                  <div className="summary-label">Max Batch Size</div>
-                  <div className="summary-value warning">
-                    📁 6 resumes (Reduced from 10)
                   </div>
                 </div>
                 <div className="summary-item">
@@ -2487,22 +2567,22 @@ function App() {
                   </div>
                 </div>
                 <div className="summary-item">
-                  <div className="summary-label">Concurrent Users</div>
-                  <div className="summary-value success">
-                    👥 Multiple users supported
+                  <div className="summary-label">Batch Performance</div>
+                  <div className="summary-value warning">
+                    🐢 10 resumes: ~20-30s (SAFER)
                   </div>
                 </div>
               </div>
               
-              <div className="scoring-explanation">
-                <h4>🎯 Enhanced Granular Scoring:</h4>
+              <div className="rate-limit-explanation">
+                <h4>Why You Won't Hit Rate Limits Now:</h4>
                 <ul>
-                  <li>✅ Scores like 82.5, 76.3, 88.7 (NOT just multiples of 5)</li>
-                  <li>✅ Unique scores for each candidate (no duplicates)</li>
-                  <li>✅ 1 decimal place precision</li>
-                  <li>✅ Weighted scoring: Skills (40%), Experience (30%), Education (20%), Years (10%)</li>
-                  <li>✅ Deterministic variations based on resume content</li>
-                  <li>✅ Ensures meaningful differentiation between candidates</li>
+                  <li>✅ Staggered delays (1-3s between requests)</li>
+                  <li>✅ Smart key rotation (load balancing)</li>
+                  <li>✅ 60s cooling on rate limit detection</li>
+                  <li>✅ Minute-by-minute request tracking</li>
+                  <li>✅ Sequential processing (not parallel)</li>
+                  <li>✅ Conservative limit: 100 requests/min/key (actual: 1000)</li>
                 </ul>
               </div>
               
@@ -2534,9 +2614,9 @@ function App() {
           <div className="top-notice-bar glass">
             <div className="notice-content">
               <div className="status-indicators">
-                <div className="status-indicator active">
-                  <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Backend: Always Active</span>
+                <div className={`status-indicator ${backendStatus === 'ready' ? 'active' : 'inactive'}`}>
+                  <div className="indicator-dot"></div>
+                  <span>Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}</span>
                 </div>
                 <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
                   <div className="indicator-dot"></div>
@@ -2544,7 +2624,7 @@ function App() {
                 </div>
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Keys: {getAvailableKeysCount()}/5</span>
+                  <span>Keys: {getAvailableKeysCount()}/3</span>
                 </div>
                 {modelInfo && (
                   <div className="status-indicator active">
@@ -2558,10 +2638,6 @@ function App() {
                 </div>
                 <div className="status-indicator active">
                   <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
-                  <span>Scoring: Granular unique</span>
-                </div>
-                <div className="status-indicator active">
-                  <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
                   <span>Rate Protection: ACTIVE</span>
                 </div>
                 <div className="status-indicator active">
@@ -2571,7 +2647,44 @@ function App() {
                                 currentView === 'candidate-detail' ? 'Details' : 
                                 batchMode ? 'Batch' : 'Single'}</span>
                 </div>
+                {batchMode && (
+                  <>
+                    <div className="status-indicator active">
+                      <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
+                      <span>Capacity: Up to 10 resumes</span>
+                    </div>
+                    <div className="status-indicator active">
+                      <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
+                      <span>Experience Analysis: Included</span>
+                    </div>
+                    <div className="status-indicator active">
+                      <div className="indicator-dot" style={{ background: '#ff6b6b' }}></div>
+                      <span>Speed: ~20-30s (Safer)</span>
+                    </div>
+                  </>
+                )}
               </div>
+              
+              {backendStatus !== 'ready' && (
+                <div className="wakeup-message">
+                  <AlertCircle size={16} />
+                  <span>Backend is waking up. Analysis may be slower for the first request.</span>
+                </div>
+              )}
+              
+              {aiStatus === 'warming' && (
+                <div className="wakeup-message">
+                  <Thermometer size={16} />
+                  <span>Groq API is warming up. This ensures high-quality responses.</span>
+                </div>
+              )}
+              
+              {batchMode && getAvailableKeysCount() > 0 && (
+                <div className="multi-key-message">
+                  <ShieldCheck size={16} />
+                  <span>Rate protection: Processing {resumeFiles.length} resumes sequentially with delays</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2585,10 +2698,10 @@ function App() {
             <div className="footer-brand">
               <div className="footer-logo">
                 <Brain size={20} />
-                <span>ResuGo</span>
+                <span>AI Resume Analyzer (Groq)</span>
               </div>
               <p className="footer-tagline">
-                Groq AI • 5-key with rate protection • Granular scoring • Experience summary • Years of experience
+                Groq AI • 3-key with rate protection • 5-8 skills analysis • Experience summary • Years of experience
               </p>
             </div>
             
@@ -2596,14 +2709,14 @@ function App() {
               <div className="footer-section">
                 <h4>Features</h4>
                 <a href="#">Groq AI</a>
-                <a href="#">Granular Scoring</a>
+                <a href="#">5-8 Skills Analysis</a>
                 <a href="#">Experience Summary</a>
                 <a href="#">Years of Experience</a>
               </div>
               <div className="footer-section">
                 <h4>Service</h4>
                 <a href="#">Rate Limit Protection</a>
-                <a href="#">5-Key Sequential</a>
+                <a href="#">3-Key Sequential</a>
                 <a href="#">Excel Reports</a>
                 <a href="#">Candidate Comparison</a>
               </div>
@@ -2620,11 +2733,11 @@ function App() {
           </div>
           
           <div className="footer-bottom">
-            <p>© 2024 ResuGo. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
+            <p>© 2024 AI Resume Analyzer. Built with React + Flask + Groq AI. Excel reports with candidate name & experience summary.</p>
             <div className="footer-stats">
               <span className="stat">
                 <CloudLightning size={12} />
-                Backend: Always Active
+                Backend: {backendStatus === 'ready' ? 'Active' : 'Waking'}
               </span>
               <span className="stat">
                 <Brain size={12} />
@@ -2632,25 +2745,25 @@ function App() {
               </span>
               <span className="stat">
                 <Key size={12} />
-                Keys: {getAvailableKeysCount()}/5
+                Keys: {getAvailableKeysCount()}/3
               </span>
               <span className="stat">
                 <Cpu size={12} />
                 Model: {modelInfo ? getModelDisplayName(modelInfo) : 'Loading...'}
               </span>
               <span className="stat">
-                <TargetIcon size={12} />
-                Scoring: Granular unique
+                <ShieldCheck size={12} />
+                Rate Protection: Active
               </span>
               {batchMode && (
                 <span className="stat">
                   <Activity size={12} />
-                  Batch: {resumeFiles.length} resumes (Max 6)
+                  Batch: {resumeFiles.length} resumes
                 </span>
               )}
               <span className="stat">
-                <BarChartIcon size={12} />
-                Scores: 1 decimal precision
+                <Target size={12} />
+                Skills: 5-8 each
               </span>
               <span className="stat">
                 <Briefcase size={12} />
@@ -2659,10 +2772,6 @@ function App() {
               <span className="stat">
                 <Calendar size={12} />
                 Years: Analysis included
-              </span>
-              <span className="stat">
-                <Users size={12} />
-                Multiple Users: Supported
               </span>
             </div>
           </div>
