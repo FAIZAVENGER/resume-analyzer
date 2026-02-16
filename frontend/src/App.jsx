@@ -445,7 +445,7 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 6));
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10)); // Updated from 6 to 10
       setError('');
     }
   };
@@ -1094,7 +1094,7 @@ function App() {
                 gap: '0.5rem'
               }}
             >
-              <Users size={16} /> Multiple Resumes (Up to 6)
+              <Users size={16} /> Multiple Resumes (Up to 10) {/* Updated from 6 to 10 */}
             </button>
           </div>
         </div>
@@ -1111,7 +1111,7 @@ function App() {
                 <h2>{batchMode ? 'Upload Resumes' : 'Upload Resume'}</h2>
                 <p className="card-subtitle">
                   {batchMode 
-                    ? 'Upload multiple resumes (Max 6, 15MB each)'
+                    ? 'Upload multiple resumes (Max 10, 15MB each)' // Updated from 6 to 10
                     : 'Supported: PDF, DOC, DOCX, TXT (Max 15MB)'}
                 </p>
               </div>
@@ -1226,7 +1226,7 @@ function App() {
                         <span className="upload-text">
                           Drag & drop multiple files or click to browse
                         </span>
-                        <span className="upload-hint">Max 6 files, 15MB each</span>
+                        <span className="upload-hint">Max 10 files, 15MB each</span> {/* Updated from 6 to 10 */}
                       </>
                     )}
                   </div>
@@ -1363,7 +1363,7 @@ function App() {
                     <span>•</span>
                     <span>Rate Protection: Active</span>
                     <span>•</span>
-                    <span>Max: 6 resumes</span>
+                    <span>Max: 10 resumes</span> {/* Updated from 6 to 10 */}
                     <span>•</span>
                     <span>Scoring: Granular unique</span>
                   </>
@@ -2477,7 +2477,7 @@ function App() {
                 <div className="summary-item">
                   <div className="summary-label">Max Batch Size</div>
                   <div className="summary-value warning">
-                    📁 6 resumes (Reduced from 10)
+                    📁 10 resumes (Reduced from 20) {/* Updated from 6 to 10 */}
                   </div>
                 </div>
                 <div className="summary-item">
@@ -2645,7 +2645,7 @@ function App() {
               {batchMode && (
                 <span className="stat">
                   <Activity size={12} />
-                  Batch: {resumeFiles.length} resumes (Max 6)
+                  Batch: {resumeFiles.length} resumes (Max 10) {/* Updated from 6 to 10 */}
                 </span>
               )}
               <span className="stat">
