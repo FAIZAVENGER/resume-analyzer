@@ -75,7 +75,7 @@ MIN_SKILLS_TO_SHOW = 5
 MAX_SKILLS_TO_SHOW = 8
 
 # Rate limiting protection
-MAX_RETRIES = 3  # Increased from 2 to 3
+MAX_RETRIES = 2
 RETRY_DELAY_BASE = 2
 
 # Track key usage - Updated for 5 keys
@@ -137,13 +137,17 @@ def update_activity():
 
 def get_available_key(resume_index=None):
     """Get the next available Groq API key using improved round-robin with rate limit checking"""
-    if not any(GROQ_API_KEYS):
+    # Check if any keys are configured
+    configured_keys = [i for i, key in enumerate(GROQ_API_KEYS) if key]
+    
+    if not configured_keys:
+        print("❌ No Groq API keys configured")
         return None, None
     
     current_time = datetime.now()
     
     # Reset minute counters if needed
-    for i in range(5):
+    for i in configured_keys:
         if key_usage[i]['minute_window_start'] is None:
             key_usage[i]['minute_window_start'] = current_time
             key_usage[i]['requests_this_minute'] = 0
@@ -161,8 +165,8 @@ def get_available_key(resume_index=None):
     
     # Find the best key (least used this minute, not cooling, has lowest error count)
     available_keys = []
-    for i, key in enumerate(GROQ_API_KEYS):
-        if (key and 
+    for i in configured_keys:
+        if (GROQ_API_KEYS[i] and 
             not key_usage[i]['cooling'] and
             key_usage[i]['requests_this_minute'] < MAX_REQUESTS_PER_MINUTE_PER_KEY):
             # Calculate priority score (lower is better)
@@ -170,14 +174,15 @@ def get_available_key(resume_index=None):
                 key_usage[i]['requests_this_minute'] * 10 +  # Usage weight
                 key_usage[i]['errors'] * 5                   # Error weight
             )
-            available_keys.append((priority_score, i, key))
+            available_keys.append((priority_score, i, GROQ_API_KEYS[i]))
     
     if not available_keys:
         # All keys are cooling or rate limited, try any non-cooling key
-        for i, key in enumerate(GROQ_API_KEYS):
-            if key and not key_usage[i]['cooling']:
+        for i in configured_keys:
+            if GROQ_API_KEYS[i] and not key_usage[i]['cooling']:
                 print(f"⚠️ Using key {i+1} even though it's near limit: {key_usage[i]['requests_this_minute']}/{MAX_REQUESTS_PER_MINUTE_PER_KEY}")
-                return key, i + 1
+                return GROQ_API_KEYS[i], i + 1
+        print("❌ No available keys - all are cooling or rate limited")
         return None, None
     
     # Sort by priority score and use the best one
@@ -600,7 +605,7 @@ def cleanup_orphaned_files():
     except Exception as e:
         print(f"⚠️ Error cleaning up orphaned files: {str(e)}")
 
-def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=60, retry_count=0, key_index=None):
+def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45, retry_count=0, key_index=None):
     """Call Groq API with optimized settings and rate limit protection"""
     if not api_key:
         print(f"❌ No Groq API key provided")
@@ -802,22 +807,18 @@ def keep_service_warm():
 
 def keep_backend_awake():
     """Keep backend always active"""
-    global service_running
-    
     while service_running:
         try:
             time.sleep(60)  # Ping every 60 seconds
             
             try:
                 # Self-ping to keep the service awake
-                port = int(os.environ.get('PORT', 5002))
-                requests.get(f"http://localhost:{port}/ping", timeout=10)
+                requests.get(f"http://localhost:{PORT}/ping", timeout=10)
                 print(f"✅ Self-ping successful to keep backend awake")
             except:
                 # If self-ping fails, try health check
                 try:
-                    port = int(os.environ.get('PORT', 5002))
-                    response = requests.get(f"http://localhost:{port}/health", timeout=10)
+                    response = requests.get(f"http://localhost:{PORT}/health", timeout=10)
                     print(f"✅ Health check successful")
                 except Exception as e:
                     print(f"⚠️ Keep-alive check failed: {e}")
@@ -1226,7 +1227,6 @@ def process_single_resume(args):
     """Process a single resume with intelligent error handling and rate limit protection"""
     resume_file, job_description, index, total, batch_id = args
     
-    file_path = None
     try:
         print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
         
@@ -1246,7 +1246,7 @@ def process_single_resume(args):
         
         api_key, key_index = get_available_key(index)
         if not api_key:
-            print(f"⚠️ No available API key for resume {index + 1}")
+            print(f"❌ No available API key for resume {index + 1}")
             return {
                 'filename': resume_file.filename,
                 'error': 'No available API key',
@@ -1350,12 +1350,8 @@ def process_single_resume(args):
         
     except Exception as e:
         print(f"❌ Error processing {resume_file.filename}: {str(e)}")
-        traceback.print_exc()
-        if file_path and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except:
-                pass
+        if 'file_path' in locals() and os.path.exists(file_path):
+            os.remove(file_path)
         return {
             'filename': resume_file.filename,
             'error': f"Processing error: {str(e)[:100]}",
@@ -1676,7 +1672,7 @@ def analyze_resume_batch():
             
             # Check if any key needs cooling
             for i in range(5):
-                if key_usage[i]['requests_this_minute'] >= MAX_REQUESTS_PER_MINUTE_PER_KEY - 2:
+                if GROQ_API_KEYS[i] and key_usage[i]['requests_this_minute'] >= MAX_REQUESTS_PER_MINUTE_PER_KEY - 2:
                     print(f"⚠️ Key {i+1} near limit, marking for cooling")
                     mark_key_cooling(i, 30)
         
@@ -1701,23 +1697,14 @@ def analyze_resume_batch():
                 batch_excel_path = create_minimal_batch_report(all_analyses, job_description, excel_filename)
         
         key_stats = []
-        configured_keys = 0
         for i in range(5):
             if GROQ_API_KEYS[i]:
-                configured_keys += 1
                 key_stats.append({
                     'key': f'Key {i+1}',
                     'used': key_usage[i]['count'],
                     'requests_this_minute': key_usage[i]['requests_this_minute'],
                     'errors': key_usage[i]['errors'],
-                    'status': 'cooling' if key_usage[i]['cooling'] else 'available',
-                    'configured': True
-                })
-            else:
-                key_stats.append({
-                    'key': f'Key {i+1}',
-                    'configured': False,
-                    'status': 'not_configured'
+                    'status': 'cooling' if key_usage[i]['cooling'] else 'available'
                 })
         
         total_time = time.time() - start_time
@@ -1748,8 +1735,7 @@ def analyze_resume_batch():
             'processing_time': f"{total_time:.2f}s",
             'processing_method': 'rate_limited_sequential',
             'key_statistics': key_stats,
-            'available_keys': configured_keys,
-            'total_keys': 5,
+            'available_keys': available_keys,
             'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
             'success_rate': f"{(len(all_analyses) / len(resume_files)) * 100:.1f}%" if resume_files else "0%",
             'performance': f"{len(all_analyses)/total_time:.2f} resumes/second" if total_time > 0 else "N/A",
@@ -1769,10 +1755,7 @@ def analyze_resume_batch():
         print(f"✅ Batch analysis completed in {total_time:.2f}s")
         print(f"📊 Key usage summary:")
         for stat in key_stats:
-            if stat.get('configured', False):
-                print(f"  {stat['key']}: {stat['used']} total, {stat['requests_this_minute']}/min, {stat['errors']} errors, {stat['status']}")
-            else:
-                print(f"  {stat['key']}: Not configured")
+            print(f"  {stat['key']}: {stat['used']} total, {stat['requests_this_minute']}/min, {stat['errors']} errors, {stat['status']}")
         print(f"🏢 PROFESSIONAL ATS SCORING - Avg: {avg_score:.2f}, Range: {score_range}")
         print(f"   Deterministic Ranking: Enabled - No ranking flips")
         print("="*50 + "\n")
@@ -2912,33 +2895,30 @@ def health_check():
     
     current_time = datetime.now()
     key_status = []
-    configured_keys = 0
+    configured_keys_count = 0
     for i, api_key in enumerate(GROQ_API_KEYS):
-        if api_key:
-            configured_keys += 1
-            if key_usage[i]['minute_window_start']:
-                seconds_in_window = (current_time - key_usage[i]['minute_window_start']).total_seconds()
-                if seconds_in_window > 60:
-                    requests_this_minute = 0
-                else:
-                    requests_this_minute = key_usage[i]['requests_this_minute']
-            else:
+        if key_usage[i]['minute_window_start']:
+            seconds_in_window = (current_time - key_usage[i]['minute_window_start']).total_seconds()
+            if seconds_in_window > 60:
                 requests_this_minute = 0
-            
-            key_status.append({
-                'key': f'Key {i+1}',
-                'configured': True,
-                'total_usage': key_usage[i]['count'],
-                'requests_this_minute': requests_this_minute,
-                'errors': key_usage[i]['errors'],
-                'cooling': key_usage[i]['cooling'],
-                'last_used': key_usage[i]['last_used'].isoformat() if key_usage[i]['last_used'] else None
-            })
+            else:
+                requests_this_minute = key_usage[i]['requests_this_minute']
         else:
-            key_status.append({
-                'key': f'Key {i+1}',
-                'configured': False
-            })
+            requests_this_minute = 0
+        
+        is_configured = bool(api_key)
+        if is_configured:
+            configured_keys_count += 1
+            
+        key_status.append({
+            'key': f'Key {i+1}',
+            'configured': is_configured,
+            'total_usage': key_usage[i]['count'],
+            'requests_this_minute': requests_this_minute,
+            'errors': key_usage[i]['errors'],
+            'cooling': key_usage[i]['cooling'],
+            'last_used': key_usage[i]['last_used'].isoformat() if key_usage[i]['last_used'] else None
+        })
     
     available_keys = sum(1 for key in GROQ_API_KEYS if key)
     
@@ -2956,7 +2936,7 @@ def health_check():
         'inactive_minutes': inactive_minutes,
         'version': '4.0.0',
         'key_status': key_status,
-        'available_keys': configured_keys,
+        'available_keys': configured_keys_count,  # Fixed: Now returns actual configured keys count
         'total_keys': 5,
         'configuration': {
             'max_batch_size': MAX_BATCH_SIZE,
