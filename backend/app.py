@@ -27,8 +27,6 @@ import subprocess
 import tempfile
 import shutil
 from pathlib import Path
-import psutil
-import signal
 
 # Load environment variables
 load_dotenv()
@@ -70,8 +68,8 @@ cache_lock = threading.Lock()
 analysis_result_cache = {}  # New cache to store complete analysis results
 analysis_cache_lock = threading.Lock()
 
-# Batch processing configuration
-MAX_CONCURRENT_REQUESTS = 3  # REDUCED from 5 to 3 to save memory
+# Batch processing configuration - REDUCED for memory safety
+MAX_CONCURRENT_REQUESTS = 2  # Reduced from 3 to 2
 MAX_BATCH_SIZE = 10  # Keep at 10 as requested
 MIN_SKILLS_TO_SHOW = 5
 MAX_SKILLS_TO_SHOW = 8
@@ -96,13 +94,10 @@ MAX_TOKENS_PER_MINUTE_PER_KEY = 250000
 # Memory optimization
 service_running = True
 
-# Memory limit - to prevent OOM kills
-MAX_MEMORY_PERCENT = 80  # Kill process if memory usage exceeds 80%
-
-# Resume storage tracking - with size limits
+# Resume storage tracking - REDUCED limits
 resume_storage = {}
-MAX_STORED_RESUMES = 20  # Maximum number of resumes to keep in memory
-MAX_STORAGE_SIZE_MB = 100  # Maximum total storage size in MB
+MAX_STORED_RESUMES = 10  # Reduced from 20 to 10
+MAX_STORAGE_SIZE_MB = 50  # Reduced from 100 to 50MB
 
 # ENHANCED: Deterministic scoring system - no randomness
 analysis_signatures = {}
@@ -135,32 +130,6 @@ DOMAIN_KEYWORDS = {
         'threshold': 0.15
     }
 }
-
-def check_memory_usage():
-    """Check current memory usage and force GC if needed"""
-    try:
-        process = psutil.Process(os.getpid())
-        memory_percent = process.memory_percent()
-        
-        if memory_percent > MAX_MEMORY_PERCENT:
-            print(f"⚠️ CRITICAL: Memory usage at {memory_percent:.1f}%, forcing garbage collection")
-            gc.collect()
-            time.sleep(1)
-            
-            # Check again after GC
-            memory_percent = process.memory_percent()
-            if memory_percent > MAX_MEMORY_PERCENT:
-                print(f"❌ Memory still critical at {memory_percent:.1f}%, cleaning caches")
-                # Clear caches to free memory
-                with cache_lock:
-                    score_cache.clear()
-                with analysis_cache_lock:
-                    analysis_result_cache.clear()
-                gc.collect()
-        
-        return memory_percent
-    except:
-        return 0
 
 def update_activity():
     """Update last activity timestamp"""
@@ -249,9 +218,9 @@ def set_cached_analysis(resume_hash, analysis):
     """Cache complete analysis for deterministic results"""
     with analysis_cache_lock:
         # Limit cache size to prevent memory issues
-        if len(analysis_result_cache) > 100:  # Max 100 cached analyses
-            # Remove oldest 20 entries
-            oldest_keys = list(analysis_result_cache.keys())[:20]
+        if len(analysis_result_cache) > 50:  # Reduced from 100 to 50
+            # Remove oldest 10 entries
+            oldest_keys = list(analysis_result_cache.keys())[:10]
             for key in oldest_keys:
                 del analysis_result_cache[key]
         analysis_result_cache[resume_hash] = analysis
@@ -265,8 +234,8 @@ def set_cached_score(resume_hash, score):
     """Cache score for consistency"""
     with cache_lock:
         # Limit cache size
-        if len(score_cache) > 200:
-            oldest_keys = list(score_cache.keys())[:50]
+        if len(score_cache) > 100:  # Reduced from 200 to 100
+            oldest_keys = list(score_cache.keys())[:25]
             for key in oldest_keys:
                 del score_cache[key]
         score_cache[resume_hash] = score
@@ -416,7 +385,7 @@ def cleanup_old_storage():
         files_to_remove = []
         
         # Calculate total size and find old files
-        for analysis_id, info in resume_storage.items():
+        for analysis_id, info in list(resume_storage.items()):
             stored_time = datetime.fromisoformat(info['stored_at'])
             if (now - stored_time).total_seconds() > 1800:  # 30 minutes
                 files_to_remove.append(analysis_id)
@@ -538,7 +507,7 @@ def cleanup_resume_previews():
         total_size = 0
         files_to_remove = []
         
-        for analysis_id, info in resume_storage.items():
+        for analysis_id, info in list(resume_storage.items()):
             stored_time = datetime.fromisoformat(info['stored_at'])
             
             # Remove if older than 1 hour
@@ -816,26 +785,19 @@ def keep_service_warm():
 def keep_backend_awake():
     """Keep backend always active"""
     global service_running
-    consecutive_errors = 0
     
     while service_running:
         try:
             time.sleep(60)
             
             try:
-                response = requests.get(f"http://localhost:{PORT}/ping", timeout=10)
+                response = requests.get(f"http://localhost:{PORT}/ping", timeout=5)
                 if response.status_code == 200:
                     print(f"✅ Self-ping successful")
-                    consecutive_errors = 0
                 else:
-                    consecutive_errors += 1
+                    print(f"⚠️ Self-ping returned {response.status_code}")
             except:
-                consecutive_errors += 1
-                
-            # Force GC periodically
-            if consecutive_errors % 5 == 0:
-                gc.collect()
-                check_memory_usage()
+                pass  # Silently ignore - we don't want to fill logs
                     
         except Exception as e:
             print(f"⚠️ Keep-backend-awake thread error: {str(e)}")
@@ -847,15 +809,15 @@ def extract_text_from_pdf(file_path):
     try:
         text = ""
         max_attempts = 2
-        max_chars = 5000  # Limit text size to prevent memory issues
+        max_chars = 3000  # Reduced from 5000 to 3000
         
         for attempt in range(max_attempts):
             try:
                 reader = PdfReader(file_path)
                 text = ""
                 
-                # Limit pages to 5 to save memory
-                for page_num, page in enumerate(reader.pages[:5]):
+                # Limit pages to 3 to save memory (reduced from 5)
+                for page_num, page in enumerate(reader.pages[:3]):
                     try:
                         page_text = page.extract_text()
                         if page_text:
@@ -875,11 +837,11 @@ def extract_text_from_pdf(file_path):
                 if attempt == max_attempts - 1:
                     try:
                         with open(file_path, 'rb') as f:
-                            content = f.read(1024 * 1024)  # Read only first 1MB
+                            content = f.read(512 * 1024)  # Read only first 512KB
                             text = content.decode('utf-8', errors='ignore')[:max_chars]
                             if text.strip():
                                 words = text.split()
-                                text = ' '.join(words[:500])
+                                text = ' '.join(words[:300])
                     except:
                         text = "Error: Could not extract text from PDF file"
         
@@ -896,9 +858,9 @@ def extract_text_from_docx(file_path):
     try:
         doc = Document(file_path)
         text = ""
-        max_chars = 5000
+        max_chars = 3000  # Reduced from 5000 to 3000
         
-        for paragraph in doc.paragraphs[:100]:  # Limit paragraphs
+        for paragraph in doc.paragraphs[:50]:  # Reduced from 100 to 50 paragraphs
             if paragraph.text.strip():
                 text += paragraph.text + "\n"
                 if len(text) > max_chars:
@@ -917,7 +879,7 @@ def extract_text_from_txt(file_path):
     """Extract text from TXT file with memory limits"""
     try:
         encodings = ['utf-8', 'latin-1', 'windows-1252', 'cp1252']
-        max_chars = 5000
+        max_chars = 3000  # Reduced from 5000 to 3000
         
         for encoding in encodings:
             try:
@@ -947,8 +909,8 @@ def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis
         print(f"❌ No Groq API key provided for analysis.")
         return generate_fallback_analysis(filename, "No API key available")
     
-    resume_text = resume_text[:3000]
-    job_description = job_description[:1500]
+    resume_text = resume_text[:2500]  # Reduced from 3000 to 2500
+    job_description = job_description[:1200]  # Reduced from 1500 to 1200
     
     resume_hash = calculate_resume_hash(resume_text, job_description)
     
@@ -984,10 +946,10 @@ JOB DESCRIPTION:
 PROVIDE ANALYSIS IN THIS EXACT JSON FORMAT:
 {{
     "candidate_name": "Extracted name or filename",
-    "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
-    "skills_missing": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
-    "experience_summary": "Provide a concise 4-5 sentence summary of candidate's experience. Focus on key roles, achievements, and relevance. Make sure each sentence is complete and not truncated. Write full sentences.",
-    "education_summary": "Provide a concise 4-5 sentence summary of education. Include degrees, institutions, and relevance. Make sure each sentence is complete and not truncated. Write full sentences.",
+    "skills_matched": ["skill1", "skill2", "skill3", "skill4", "skill5"],
+    "skills_missing": ["skill1", "skill2", "skill3", "skill4", "skill5"],
+    "experience_summary": "Provide a concise 3-4 sentence summary of candidate's experience.",
+    "education_summary": "Provide a concise 2-3 sentence summary of education.",
     "years_of_experience": "X years",
     "overall_score": {strict_score},
     "recommendation": "{strict_recommendation}",
@@ -999,9 +961,7 @@ STRICT RULES:
 1. overall_score MUST be exactly {strict_score} - NO EXCEPTIONS
 2. recommendation MUST be exactly "{strict_recommendation}" - NO EXCEPTIONS
 3. Provide EXACTLY 3 key_strengths and 3 areas_for_improvement
-4. Write full, complete sentences. Do not cut off sentences mid-way.
-5. Ensure proper sentence endings with periods.
-6. Be honest and critical - this is professional ATS assessment."""
+4. Write full, complete sentences."""
 
     try:
         print(f"⚡ Sending to Groq API (Key {key_index})...")
@@ -1022,7 +982,7 @@ STRICT RULES:
         response = call_groq_api(
             prompt=prompt,
             api_key=api_key,
-            max_tokens=1600,
+            max_tokens=1200,  # Reduced from 1600 to 1200
             temperature=0.1,
             timeout=60,
             key_index=key_index
@@ -1102,15 +1062,15 @@ def validate_analysis(analysis, filename):
     
     required_fields = {
         'candidate_name': 'Professional Candidate',
-        'skills_matched': ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Team Collaboration', 'Project Management', 'Agile Methodology'],
-        'skills_missing': ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX Design', 'Cybersecurity', 'Mobile Development', 'Database Administration'],
-        'experience_summary': 'The candidate demonstrates relevant professional experience with progressive responsibility. Their background shows expertise in key areas relevant to modern industry demands. They have experience collaborating with teams and delivering measurable results. Additional experience in specific domains enhances their suitability.',
-        'education_summary': 'The candidate holds relevant educational qualifications from reputable institutions. Their academic background provides strong foundational knowledge in core subjects. Additional certifications enhance their professional profile. The education aligns well with industry requirements.',
+        'skills_matched': ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving'],
+        'skills_missing': ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX'],
+        'experience_summary': 'The candidate demonstrates relevant professional experience with progressive responsibility. Their background shows expertise in key areas relevant to modern industry demands.',
+        'education_summary': 'The candidate holds relevant educational qualifications from reputable institutions. Their academic background provides strong foundational knowledge.',
         'years_of_experience': '3-5 years',
         'overall_score': 50.0,
         'recommendation': 'Consider with Reservations',
-        'key_strengths': ['Strong technical foundation', 'Excellent communication skills', 'Proven track record of delivery'],
-        'areas_for_improvement': ['Could benefit from advanced certifications', 'Limited experience in cloud platforms', 'Should gain experience with newer technologies']
+        'key_strengths': ['Strong technical foundation', 'Excellent communication skills', 'Proven track record'],
+        'areas_for_improvement': ['Advanced certifications needed', 'Cloud platform experience', 'Newer technologies']
     }
     
     for field, default_value in required_fields.items():
@@ -1123,17 +1083,17 @@ def validate_analysis(analysis, filename):
         if len(clean_name.split()) <= 4:
             analysis['candidate_name'] = clean_name
     
-    # Ensure 5-8 skills in each category
+    # Ensure 5 skills in each category
     skills_matched = analysis.get('skills_matched', [])
     skills_missing = analysis.get('skills_missing', [])
     
     if len(skills_matched) < MIN_SKILLS_TO_SHOW:
-        default_skills = ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Teamwork', 'Project Management', 'Agile']
+        default_skills = ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving']
         needed = MIN_SKILLS_TO_SHOW - len(skills_matched)
         skills_matched.extend(default_skills[:needed])
     
     if len(skills_missing) < MIN_SKILLS_TO_SHOW:
-        default_skills = ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX', 'Cybersecurity', 'Mobile Dev', 'Database']
+        default_skills = ['Machine Learning', 'Cloud Computing', 'Data Analysis', 'DevOps', 'UI/UX']
         needed = MIN_SKILLS_TO_SHOW - len(skills_missing)
         skills_missing.extend(default_skills[:needed])
     
@@ -1143,30 +1103,7 @@ def validate_analysis(analysis, filename):
     analysis['key_strengths'] = analysis.get('key_strengths', [])[:3]
     analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:3]
     
-    for field in ['experience_summary', 'education_summary']:
-        if field in analysis:
-            text = analysis[field]
-            if '...' in text:
-                sentences = text.split('. ')
-                complete_sentences = []
-                for sentence in sentences:
-                    if '...' in sentence:
-                        sentence = sentence.split('...')[0]
-                        if sentence.strip():
-                            complete_sentences.append(sentence.strip() + '.')
-                        break
-                    elif sentence.strip():
-                        complete_sentences.append(sentence.strip() + '.')
-                analysis[field] = ' '.join(complete_sentences)
-            
-            if not analysis[field].strip().endswith(('.', '!', '?')):
-                analysis[field] = analysis[field].strip() + '.'
-            
-            if len(analysis[field]) > 800:
-                sentences = analysis[field].split('. ')
-                if len(sentences) > 5:
-                    analysis[field] = '. '.join(sentences[:5]) + '.'
-    
+    # Remove unwanted fields
     unwanted_fields = ['job_title_suggestion', 'industry_fit', 'salary_expectation']
     for field in unwanted_fields:
         if field in analysis:
@@ -1204,10 +1141,10 @@ def generate_fallback_analysis(filename, reason, partial_success=False, strict_s
     if partial_success:
         return {
             "candidate_name": candidate_name,
-            "skills_matched": ['Python Programming', 'JavaScript Development', 'Database Management', 'Communication Skills', 'Problem Solving', 'Team Collaboration'],
-            "skills_missing": ['Machine Learning Algorithms', 'Cloud Platform Expertise', 'Advanced Data Analysis', 'DevOps Practices', 'UI/UX Design Principles'],
-            "experience_summary": 'The candidate has demonstrated professional experience in relevant technical roles. Their background includes working with modern technologies and methodologies. They have contributed to multiple projects with measurable outcomes. Additional experience enhances their suitability for the role.',
-            "education_summary": 'The candidate possesses educational qualifications that provide a strong foundation for professional work. Their academic background includes relevant coursework and projects. Additional training complements their formal education. The educational profile aligns with industry requirements.',
+            "skills_matched": ['Python Programming', 'JavaScript Development', 'Database Management', 'Communication Skills', 'Problem Solving'],
+            "skills_missing": ['Machine Learning', 'Cloud Platform', 'Data Analysis', 'DevOps', 'UI/UX'],
+            "experience_summary": 'The candidate has demonstrated professional experience in relevant technical roles. Their background includes working with modern technologies and methodologies.',
+            "education_summary": 'The candidate possesses educational qualifications that provide a strong foundation for professional work. Their academic background includes relevant coursework.',
             "years_of_experience": "3-5 years",
             "overall_score": unique_score,
             "recommendation": recommendation,
@@ -1222,10 +1159,10 @@ def generate_fallback_analysis(filename, reason, partial_success=False, strict_s
     else:
         return {
             "candidate_name": candidate_name,
-            "skills_matched": ['Basic Programming', 'Communication Skills', 'Problem Solving', 'Teamwork', 'Technical Knowledge', 'Learning Ability'],
+            "skills_matched": ['Basic Programming', 'Communication Skills', 'Problem Solving', 'Teamwork', 'Technical Knowledge'],
             "skills_missing": ['Advanced Technical Skills', 'Industry Experience', 'Specialized Knowledge', 'Certifications', 'Project Management'],
-            "experience_summary": 'Professional experience analysis will be available once the Groq AI service is fully initialized. The candidate appears to have relevant background based on initial file processing. Additional details will be available with full analysis.',
-            "education_summary": 'Educational background analysis will be available shortly upon service initialization. Academic qualifications assessment is pending full AI processing. Further details will be provided with complete analysis.',
+            "experience_summary": 'Professional experience analysis will be available once the Groq AI service is fully initialized.',
+            "education_summary": 'Educational background analysis will be available shortly upon service initialization.',
             "years_of_experience": "Not specified",
             "overall_score": unique_score,
             "recommendation": recommendation,
@@ -1245,19 +1182,12 @@ def process_single_resume(args):
     temp_file_path = None
     
     try:
-        # Check memory before processing
-        memory_percent = check_memory_usage()
-        if memory_percent > 70:
-            print(f"⚠️ High memory usage ({memory_percent:.1f}%), adding extra delay")
-            time.sleep(5)
-            gc.collect()
-        
         print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
         
         # Add staggered delays
         if index > 0:
-            base_delay = 2.0  # Increased from 1.0
-            delay = base_delay + random.uniform(0.5, 1.5)
+            base_delay = 3.0  # Increased from 2.0 to 3.0
+            delay = base_delay + random.uniform(1.0, 2.0)
             print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
             time.sleep(delay)
         
@@ -1442,11 +1372,11 @@ def home():
             <div class="memory-info">
                 <strong>💾 MEMORY OPTIMIZED:</strong>
                 <ul>
-                    <li>Text extraction limited to 5 pages / 5000 chars per resume</li>
+                    <li>Text extraction limited to 3 pages / 3000 chars per resume</li>
                     <li>Automatic garbage collection after each resume</li>
-                    <li>Max storage: 100MB / 20 resumes</li>
+                    <li>Max storage: 50MB / 10 resumes</li>
                     <li>Auto-cleanup of old files every 30 minutes</li>
-                    <li>Process monitoring to prevent OOM kills</li>
+                    <li>Processing: 10 resumes in ~90 seconds</li>
                 </ul>
             </div>
             
@@ -1457,9 +1387,8 @@ def home():
                     <li><strong style="color: #00B050;">✅ DETERMINISTIC RESULTS</strong> - Same resume always gets same score</li>
                     <li><strong style="color: #4472C4;">✅ NO RANK FLIPPING</strong> - Candidate ranking never changes on re-analysis</li>
                     <li><strong style="color: #ff6b6b;">✅ REAL ATS BEHAVIOR</strong> - Clear cutoffs, no ambiguity</li>
-                    <li><strong style="color: #ff9800;">✅ Domain keyword libraries</strong> - VLSI, ML, Software, Data Science, DevOps</li>
+                    <li><strong style="color: #ff9800;">✅ Domain keyword libraries</strong> - VLSI, ML, Software Eng, Data Science, DevOps</li>
                     <li><strong style="color: #2196f3;">✅ Weighted scoring</strong> - Domain match is primary factor</li>
-                    <li><strong style="color: #9c27b0;">✅ 5-15% keyword match = 25-35 score</strong> (Wrong domain)</li>
                 </ul>
             </div>
             
@@ -1467,8 +1396,8 @@ def home():
                 <strong>⚠️ RATE LIMIT PROTECTION ACTIVE:</strong>
                 <ul>
                     <li>Max ''' + str(MAX_REQUESTS_PER_MINUTE_PER_KEY) + ''' requests/minute per key</li>
-                    <li>Staggered delays between requests (2-3 seconds)</li>
-                    <li>Automatic key rotation</li>
+                    <li>Staggered delays (3-5 seconds) between requests</li>
+                    <li>Automatic key rotation with 5 keys</li>
                     <li>60s cooling on rate limits</li>
                     <li>Current usage: ''' + ', '.join(key_usage_info) + '''</li>
                 </ul>
@@ -1480,7 +1409,7 @@ def home():
             </div>
             
             <p><strong>Model:</strong> ''' + GROQ_MODEL + '''</p>
-            <p><strong>API Provider:</strong> Groq (Parallel Processing)</p>
+            <p><strong>API Provider:</strong> Groq</p>
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
             <p><strong>Processing:</strong> Sequential with memory optimization</p>
             <p><strong>Scoring:</strong> <span style="color: #ff6b6b; font-weight: bold;">PROFESSIONAL ATS - STRICT, DETERMINISTIC, DOMAIN-AWARE</span></p>
@@ -1490,7 +1419,7 @@ def home():
             
             <h2>📡 Endpoints</h2>
             <div class="endpoint">
-                <strong>POST /analyze</strong> - Analyze single resume (Professional ATS scoring)
+                <strong>POST /analyze</strong> - Analyze single resume
             </div>
             <div class="endpoint">
                 <strong>POST /analyze-batch</strong> - Analyze multiple resumes (up to ''' + str(MAX_BATCH_SIZE) + ''')
@@ -1505,7 +1434,7 @@ def home():
                 <strong>GET /quick-check</strong> - Check Groq API availability
             </div>
             <div class="endpoint">
-                <strong>GET /resume-preview/&lt;analysis_id&gt;</strong> - Get resume preview (PDF)
+                <strong>GET /resume-preview/&lt;analysis_id&gt;</strong> - Get resume preview
             </div>
             <div class="endpoint">
                 <strong>GET /resume-original/&lt;analysis_id&gt;</strong> - Download original resume file
@@ -1633,11 +1562,8 @@ def analyze_resume_batch():
         print("📦 New batch analysis request received")
         start_time = time.time()
         
-        # Check memory before starting
-        memory_percent = check_memory_usage()
-        if memory_percent > 70:
-            print(f"⚠️ High memory usage ({memory_percent:.1f}%), forcing GC before batch")
-            gc.collect()
+        # Add initial delay
+        time.sleep(2)
         
         if 'resumes' not in request.files:
             print("❌ No 'resumes' key in request.files")
@@ -1686,13 +1612,6 @@ def analyze_resume_batch():
         
         # Process sequentially with memory optimization
         for index, resume_file in enumerate(resume_files):
-            # Check memory before each resume
-            memory_percent = check_memory_usage()
-            if memory_percent > 75:
-                print(f"⚠️ Memory critical ({memory_percent:.1f}%), pausing for GC")
-                gc.collect()
-                time.sleep(3)
-            
             if resume_file.filename == '':
                 errors.append({
                     'filename': 'Empty file',
@@ -1794,7 +1713,7 @@ def analyze_resume_batch():
                 'no_ranking_flip': True
             },
             'scoring_system': '🏢 PROFESSIONAL ATS - STRICT DOMAIN MATCHING',
-            'warning': 'This is a strict, deterministic ATS scoring system. Domain mismatch results in low scores (25-40).',
+            'warning': 'This is a strict, deterministic ATS scoring system.',
             'memory_optimization': 'Active - Sequential processing with GC'
         }
         
@@ -1906,7 +1825,7 @@ def convert_experience_to_bullet_points(experience_summary):
         if not sentence.endswith('.') and not sentence.endswith('!') and not sentence.endswith('?'):
             sentences[i] = sentence + '.'
     
-    sentences = sentences[:5]
+    sentences = sentences[:3]  # Reduced from 5 to 3
     
     bullet_points = '\n'.join([f'• {sentence}' for sentence in sentences])
     
@@ -2013,14 +1932,14 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         skills_row = start_row + len(data_rows) + 2
         ws.merge_cells(f'A{skills_row}:H{skills_row}')
         skills_header = ws[f'A{skills_row}']
-        skills_header.value = "SKILLS MATCHED (5-8 skills)"
+        skills_header.value = "SKILLS MATCHED"
         skills_header.font = header_font
         skills_header.fill = section_fill
         skills_header.alignment = Alignment(horizontal='center')
         skills_header.border = thin_border
         
         skills_matched = analysis.get('skills_matched', [])
-        for idx, skill in enumerate(skills_matched[:8]):
+        for idx, skill in enumerate(skills_matched[:5]):
             row = skills_row + idx + 1
             ws[f'A{row}'] = f"{idx + 1}."
             ws[f'A{row}'].font = label_font
@@ -2031,17 +1950,17 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
             ws[f'B{row}'].border = thin_border
             ws.merge_cells(f'B{row}:H{row}')
         
-        missing_start = skills_row + len(skills_matched) + 2
+        missing_start = skills_row + 6  # Fixed position
         ws.merge_cells(f'A{missing_start}:H{missing_start}')
         missing_header = ws[f'A{missing_start}']
-        missing_header.value = "SKILLS MISSING (5-8 skills)"
+        missing_header.value = "SKILLS MISSING"
         missing_header.font = header_font
         missing_header.fill = section_fill
         missing_header.alignment = Alignment(horizontal='center')
         missing_header.border = thin_border
         
         skills_missing = analysis.get('skills_missing', [])
-        for idx, skill in enumerate(skills_missing[:8]):
+        for idx, skill in enumerate(skills_missing[:5]):
             row = missing_start + idx + 1
             ws[f'A{row}'] = f"{idx + 1}."
             ws[f'A{row}'].font = label_font
@@ -2052,10 +1971,10 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
             ws[f'B{row}'].border = thin_border
             ws.merge_cells(f'B{row}:H{row}')
         
-        exp_start = missing_start + len(skills_missing) + 2
+        exp_start = missing_start + 7
         ws.merge_cells(f'A{exp_start}:H{exp_start}')
         exp_header = ws[f'A{exp_start}']
-        exp_header.value = "EXPERIENCE SUMMARY (Bullet Points)"
+        exp_header.value = "EXPERIENCE SUMMARY"
         exp_header.font = header_font
         exp_header.fill = section_fill
         exp_header.alignment = Alignment(horizontal='center')
@@ -2063,18 +1982,18 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         
         experience_bullets = convert_experience_to_bullet_points(analysis.get('experience_summary', ''))
         
-        ws.merge_cells(f'A{exp_start + 1}:H{exp_start + 6}')
+        ws.merge_cells(f'A{exp_start + 1}:H{exp_start + 4}')
         exp_cell = ws[f'A{exp_start + 1}']
         exp_cell.value = experience_bullets
         exp_cell.font = value_font
         exp_cell.alignment = Alignment(wrap_text=True, vertical='top')
         exp_cell.border = thin_border
-        ws.row_dimensions[exp_start + 1].height = 100
+        ws.row_dimensions[exp_start + 1].height = 80
         
-        strengths_start = exp_start + 8
+        strengths_start = exp_start + 6
         ws.merge_cells(f'A{strengths_start}:H{strengths_start}')
         strengths_header = ws[f'A{strengths_start}']
-        strengths_header.value = "KEY STRENGTHS (3)"
+        strengths_header.value = "KEY STRENGTHS"
         strengths_header.font = header_font
         strengths_header.fill = section_fill
         strengths_header.alignment = Alignment(horizontal='center')
@@ -2092,10 +2011,10 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
             ws[f'B{row}'].border = thin_border
             ws.merge_cells(f'B{row}:H{row}')
         
-        improve_start = strengths_start + len(key_strengths) + 2
+        improve_start = strengths_start + 5
         ws.merge_cells(f'A{improve_start}:H{improve_start}')
         improve_header = ws[f'A{improve_start}']
-        improve_header.value = "AREAS FOR IMPROVEMENT (3)"
+        improve_header.value = "AREAS FOR IMPROVEMENT"
         improve_header.font = header_font
         improve_header.fill = section_fill
         improve_header.alignment = Alignment(horizontal='center')
@@ -2147,12 +2066,10 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
         
         title_font = Font(bold=True, size=16, color="FFFFFF")
         header_font = Font(bold=True, color="FFFFFF", size=11)
-        subheader_font = Font(bold=True, color="000000", size=10)
-        normal_font = Font(size=10)
         bold_font = Font(bold=True, size=10)
+        normal_font = Font(size=10)
         
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
         even_row_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
         odd_row_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
         
@@ -2184,36 +2101,28 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ("Total Candidates:", len(analyses)),
             ("AI Model:", f"Groq {GROQ_MODEL}"),
             ("Scoring System:", "Professional ATS - Strict Domain Matching"),
-            ("Job Description:", job_description[:100] + "..." if len(job_description) > 100 else job_description),
         ]
         
         for i, (label, value) in enumerate(info_data):
-            ws_comparison.cell(row=info_row, column=1 + i*3, value=label).font = bold_font
-            ws_comparison.cell(row=info_row, column=2 + i*3, value=value).font = normal_font
-            if label == "Scoring System:":
-                ws_comparison.cell(row=info_row, column=2 + i*3).font = Font(bold=True, color="FF0000", size=10)
+            ws_comparison.cell(row=info_row, column=1 + i*2, value=label).font = bold_font
+            ws_comparison.cell(row=info_row, column=2 + i*2, value=value).font = normal_font
         
         start_row = 5
         headers = [
             ("Rank", 8),
-            ("Candidate Name", 25),
-            ("File Name", 25),
-            ("Domain Detected", 15),
-            ("Years of Experience", 15),
-            ("ATS Score", 12),
-            ("Recommendation", 20),
-            ("Experience Summary", 40),
-            ("Skills Matched", 30),
-            ("Skills Missing", 30),
-            ("Key Strengths", 25),
-            ("Areas for Improvement", 25)
+            ("Candidate Name", 20),
+            ("File Name", 20),
+            ("Domain", 12),
+            ("Years", 10),
+            ("Score", 8),
+            ("Recommendation", 15),
         ]
         
         for col, (header, width) in enumerate(headers, start=1):
             cell = ws_comparison.cell(row=start_row, column=col, value=header)
             cell.font = header_font
             cell.fill = header_fill
-            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.alignment = Alignment(horizontal='center')
             cell.border = thin_border
             ws_comparison.column_dimensions[get_column_letter(col)].width = width
         
@@ -2221,344 +2130,22 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             row = start_row + idx + 1
             row_fill = even_row_fill if idx % 2 == 0 else odd_row_fill
             
-            cell = ws_comparison.cell(row=row, column=1, value=analysis.get('rank', '-'))
-            cell.font = bold_font
-            cell.alignment = Alignment(horizontal='center')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            cell = ws_comparison.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
-            cell.font = normal_font
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            cell = ws_comparison.cell(row=row, column=3, value=analysis.get('filename', 'Unknown'))
-            cell.font = normal_font
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            cell = ws_comparison.cell(row=row, column=4, value=analysis.get('domain_detected', 'general'))
-            cell.font = normal_font
-            cell.alignment = Alignment(horizontal='center')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            cell = ws_comparison.cell(row=row, column=5, value=analysis.get('years_of_experience', 'Not specified'))
-            cell.font = normal_font
-            cell.alignment = Alignment(horizontal='center')
-            cell.fill = row_fill
-            cell.border = thin_border
+            ws_comparison.cell(row=row, column=1, value=analysis.get('rank', '-')).font = bold_font
+            ws_comparison.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown')).font = normal_font
+            ws_comparison.cell(row=row, column=3, value=os.path.basename(analysis.get('filename', 'Unknown'))[:20]).font = normal_font
+            ws_comparison.cell(row=row, column=4, value=analysis.get('domain_detected', 'general')).font = normal_font
+            ws_comparison.cell(row=row, column=5, value=analysis.get('years_of_experience', 'N/A')).font = normal_font
             
             score = analysis.get('overall_score', 0)
-            cell = ws_comparison.cell(row=row, column=6, value=f"{score:.1f}")
-            cell.alignment = Alignment(horizontal='center')
-            cell.fill = row_fill
-            cell.border = thin_border
-            if score >= 80:
-                cell.font = Font(bold=True, color="00B050", size=10)
-            elif score >= 60:
-                cell.font = Font(bold=True, color="FFC000", size=10)
-            elif score >= 40:
-                cell.font = Font(bold=True, color="FF6B6B", size=10)
-            else:
-                cell.font = Font(bold=True, color="FF0000", size=10)
-            
-            cell = ws_comparison.cell(row=row, column=7, value=analysis.get('recommendation', 'N/A'))
-            cell.font = normal_font
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            exp_summary = analysis.get('experience_summary', 'No summary available.')
-            experience_bullets = convert_experience_to_bullet_points(exp_summary)
-            cell = ws_comparison.cell(row=row, column=8, value=experience_bullets)
-            cell.font = Font(size=9)
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            skills_matched = analysis.get('skills_matched', [])
-            cell = ws_comparison.cell(row=row, column=9, value="\n".join([f"• {skill}" for skill in skills_matched[:8]]))
-            cell.font = Font(size=9)
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            skills_missing = analysis.get('skills_missing', [])
-            cell = ws_comparison.cell(row=row, column=10, value="\n".join([f"• {skill}" for skill in skills_missing[:8]]))
-            cell.font = Font(size=9, color="FF0000")
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            strengths = analysis.get('key_strengths', [])
-            cell = ws_comparison.cell(row=row, column=11, value="\n".join([f"• {strength}" for strength in strengths[:3]]))
-            cell.font = Font(size=9, color="00B050")
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
-            cell.fill = row_fill
-            cell.border = thin_border
-            
-            improvements = analysis.get('areas_for_improvement', [])
-            cell = ws_comparison.cell(row=row, column=12, value="\n".join([f"• {area}" for area in improvements[:3]]))
-            cell.font = Font(size=9, color="FF6600")
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
-            cell.fill = row_fill
-            cell.border = thin_border
-        
-        summary_row = start_row + len(analyses) + 2
-        scores = [a.get('overall_score', 0) for a in analyses]
-        avg_score = round(sum(scores) / len(scores), 2) if scores else 0
-        top_score = max(scores, default=0)
-        bottom_score = min(scores, default=0)
-        
-        years_list = []
-        for a in analyses:
-            years_text = a.get('years_of_experience', 'Not specified')
-            years_match = re.search(r'(\d+[\+\-]?)', str(years_text))
-            if years_match:
-                years_list.append(years_match.group(1))
-        
-        avg_years = "N/A"
-        if years_list:
-            try:
-                numeric_years = []
-                for y in years_list:
-                    if '+' in y:
-                        numeric_years.append(int(y.replace('+', '')) + 2)
-                    elif '-' in y:
-                        parts = y.split('-')
-                        if len(parts) == 2:
-                            numeric_years.append((int(parts[0]) + int(parts[1])) / 2)
-                    else:
-                        numeric_years.append(int(y))
-                if numeric_years:
-                    avg_years = f"{sum(numeric_years)/len(numeric_years):.1f} years"
-            except:
-                avg_years = "Various"
-        
-        unique_scores = len(set(scores))
-        
-        summary_data = [
-            ("Average Score:", f"{avg_score:.2f}/100"),
-            ("Highest Score:", f"{top_score:.1f}/100"),
-            ("Lowest Score:", f"{bottom_score:.1f}/100"),
-            ("Average Experience:", avg_years),
-            ("Unique Scores:", f"{unique_scores}/{len(analyses)}"),
-            ("Analysis Date:", datetime.now().strftime("%Y-%m-%d")),
-            ("Scoring System:", "Professional ATS - Strict Domain Matching")
-        ]
-        
-        for i, (label, value) in enumerate(summary_data):
-            ws_comparison.cell(row=summary_row, column=1 + i*2, value=label).font = bold_font
-            ws_comparison.cell(row=summary_row, column=2 + i*2, value=value).font = bold_font
-            ws_comparison.cell(row=summary_row, column=2 + i*2).alignment = Alignment(horizontal='center')
-            if label == "Scoring System:":
-                ws_comparison.cell(row=summary_row, column=2 + i*2).font = Font(bold=True, color="FF0000", size=10)
-        
-        for analysis in analyses:
-            candidate_name = analysis.get('candidate_name', f"Candidate_{analysis.get('rank', 'Unknown')}")
-            sheet_name = re.sub(r'[\\/*?:[\]]', '_', candidate_name[:31])
-            
-            ws_candidate = wb.create_sheet(title=sheet_name)
-            
-            candidate_title_font = Font(bold=True, size=14, color="FFFFFF")
-            candidate_header_font = Font(bold=True, size=11, color="000000")
-            candidate_label_font = Font(bold=True, size=10, color="000000")
-            candidate_value_font = Font(size=10, color="000000")
-            
-            candidate_title_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-            candidate_section_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-            
-            ws_candidate.merge_cells('A1:H1')
-            title_cell = ws_candidate['A1']
-            title_cell.value = f"PROFESSIONAL ATS ANALYSIS - {candidate_name.upper()}"
-            title_cell.font = candidate_title_font
-            title_cell.fill = candidate_title_fill
-            title_cell.alignment = Alignment(horizontal='center', vertical='center')
-            title_cell.border = thick_border
-            
-            ws_candidate['A3'] = "Report Date:"
-            ws_candidate['B3'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            ws_candidate['A3'].font = candidate_label_font
-            ws_candidate['B3'].font = candidate_value_font
-            
-            ws_candidate['A4'] = "AI Model:"
-            ws_candidate['B4'] = f"Groq {GROQ_MODEL}"
-            ws_candidate['A4'].font = candidate_label_font
-            ws_candidate['B4'].font = candidate_value_font
-            
-            ws_candidate['A5'] = "Scoring System:"
-            ws_candidate['B5'] = "Professional ATS - Strict Domain Matching"
-            ws_candidate['A5'].font = candidate_label_font
-            ws_candidate['B5'].font = Font(bold=True, color="FF0000", size=10)
-            ws_candidate.merge_cells('B5:H5')
-            
-            ws_candidate['A6'] = "Rank:"
-            ws_candidate['B6'] = f"#{analysis.get('rank', 'N/A')}"
-            ws_candidate['A6'].font = candidate_label_font
-            ws_candidate['B6'].font = candidate_value_font
-            
-            ws_candidate.merge_cells('A8:H8')
-            file_header = ws_candidate['A8']
-            file_header.value = "FILE NAME"
-            file_header.font = candidate_header_font
-            file_header.fill = candidate_section_fill
-            file_header.alignment = Alignment(horizontal='center')
-            file_header.border = thin_border
-            
-            ws_candidate.merge_cells('A9:H9')
-            file_cell = ws_candidate['A9']
-            file_cell.value = analysis.get('filename', 'N/A')
-            file_cell.font = candidate_value_font
-            file_cell.border = thin_border
-            
-            ws_candidate.merge_cells('A11:H11')
-            domain_header = ws_candidate['A11']
-            domain_header.value = "DOMAIN DETECTED"
-            domain_header.font = candidate_header_font
-            domain_header.fill = candidate_section_fill
-            domain_header.alignment = Alignment(horizontal='center')
-            domain_header.border = thin_border
-            
-            ws_candidate.merge_cells('A12:H12')
-            domain_cell = ws_candidate['A12']
-            domain_cell.value = analysis.get('domain_detected', 'general')
-            domain_cell.font = Font(bold=True, size=12, color="4472C4")
-            domain_cell.alignment = Alignment(horizontal='center')
-            domain_cell.border = thin_border
-            
-            ws_candidate.merge_cells('A14:H14')
-            exp_header = ws_candidate['A14']
-            exp_header.value = "YEARS OF EXPERIENCE"
-            exp_header.font = candidate_header_font
-            exp_header.fill = candidate_section_fill
-            exp_header.alignment = Alignment(horizontal='center')
-            exp_header.border = thin_border
-            
-            ws_candidate.merge_cells('A15:H15')
-            exp_cell = ws_candidate['A15']
-            exp_cell.value = analysis.get('years_of_experience', 'Not specified')
-            exp_cell.font = Font(bold=True, size=12, color="4472C4")
-            exp_cell.alignment = Alignment(horizontal='center')
-            exp_cell.border = thin_border
-            
-            ws_candidate.merge_cells('A17:H17')
-            score_header = ws_candidate['A17']
-            score_header.value = "ATS SCORE"
-            score_header.font = candidate_header_font
-            score_header.fill = candidate_section_fill
-            score_header.alignment = Alignment(horizontal='center')
-            score_header.border = thin_border
-            
-            ws_candidate.merge_cells('A18:H18')
-            score_cell = ws_candidate['A18']
-            score_cell.value = f"{analysis.get('overall_score', 0):.1f}/100"
-            score_cell.font = Font(bold=True, size=12, color=get_score_color(analysis.get('overall_score', 0)))
+            score_cell = ws_comparison.cell(row=row, column=6, value=f"{score:.1f}")
+            score_cell.font = Font(bold=True, color=get_score_color(score))
             score_cell.alignment = Alignment(horizontal='center')
-            score_cell.border = thin_border
             
-            ws_candidate.merge_cells('A20:H20')
-            rec_header = ws_candidate['A20']
-            rec_header.value = "RECOMMENDATION"
-            rec_header.font = candidate_header_font
-            rec_header.fill = candidate_section_fill
-            rec_header.alignment = Alignment(horizontal='center')
-            rec_header.border = thin_border
+            ws_comparison.cell(row=row, column=7, value=analysis.get('recommendation', 'N/A')).font = normal_font
             
-            ws_candidate.merge_cells('A21:H21')
-            rec_cell = ws_candidate['A21']
-            rec_cell.value = analysis.get('recommendation', 'N/A')
-            rec_cell.font = Font(bold=True, size=11, color=get_score_color(analysis.get('overall_score', 0)))
-            rec_cell.alignment = Alignment(horizontal='center')
-            rec_cell.border = thin_border
-            
-            skills_row = 23
-            ws_candidate.merge_cells(f'A{skills_row}:H{skills_row}')
-            skills_header = ws_candidate[f'A{skills_row}']
-            skills_header.value = "SKILLS MATCHED (5-8 skills)"
-            skills_header.font = candidate_header_font
-            skills_header.fill = candidate_section_fill
-            skills_header.alignment = Alignment(horizontal='center')
-            skills_header.border = thin_border
-            
-            skills_matched = analysis.get('skills_matched', [])
-            for idx, skill in enumerate(skills_matched[:8]):
-                row = skills_row + idx + 1
-                ws_candidate.merge_cells(f'A{row}:H{row}')
-                cell = ws_candidate.cell(row=row, column=1, value=f"{idx + 1}. {skill}")
-                cell.font = Font(size=10, color="00B050")
-                cell.border = thin_border
-            
-            missing_start = skills_row + len(skills_matched) + 2
-            ws_candidate.merge_cells(f'A{missing_start}:H{missing_start}')
-            missing_header = ws_candidate[f'A{missing_start}']
-            missing_header.value = "SKILLS MISSING (5-8 skills)"
-            missing_header.font = candidate_header_font
-            missing_header.fill = candidate_section_fill
-            missing_header.alignment = Alignment(horizontal='center')
-            missing_header.border = thin_border
-            
-            skills_missing = analysis.get('skills_missing', [])
-            for idx, skill in enumerate(skills_missing[:8]):
-                row = missing_start + idx + 1
-                ws_candidate.merge_cells(f'A{row}:H{row}')
-                cell = ws_candidate.cell(row=row, column=1, value=f"{idx + 1}. {skill}")
-                cell.font = Font(size=10, color="FF0000")
-                cell.border = thin_border
-            
-            exp_start = missing_start + len(skills_missing) + 2
-            ws_candidate.merge_cells(f'A{exp_start}:H{exp_start}')
-            exp_header = ws_candidate[f'A{exp_start}']
-            exp_header.value = "EXPERIENCE SUMMARY (Bullet Points)"
-            exp_header.font = candidate_header_font
-            exp_header.fill = candidate_section_fill
-            exp_header.alignment = Alignment(horizontal='center')
-            exp_header.border = thin_border
-            
-            experience_bullets = convert_experience_to_bullet_points(analysis.get('experience_summary', ''))
-            
-            ws_candidate.merge_cells(f'A{exp_start + 1}:H{exp_start + 6}')
-            exp_cell = ws_candidate[f'A{exp_start + 1}']
-            exp_cell.value = experience_bullets
-            exp_cell.font = candidate_value_font
-            exp_cell.alignment = Alignment(wrap_text=True, vertical='top')
-            exp_cell.border = thin_border
-            ws_candidate.row_dimensions[exp_start + 1].height = 100
-            
-            strengths_start = exp_start + 8
-            ws_candidate.merge_cells(f'A{strengths_start}:H{strengths_start}')
-            strengths_header = ws_candidate[f'A{strengths_start}']
-            strengths_header.value = "KEY STRENGTHS (3)"
-            strengths_header.font = candidate_header_font
-            strengths_header.fill = candidate_section_fill
-            strengths_header.alignment = Alignment(horizontal='center')
-            strengths_header.border = thin_border
-            
-            key_strengths = analysis.get('key_strengths', [])
-            for idx, strength in enumerate(key_strengths[:3]):
-                row = strengths_start + idx + 1
-                ws_candidate.merge_cells(f'A{row}:H{row}')
-                cell = ws_candidate.cell(row=row, column=1, value=f"{idx + 1}. {strength}")
-                cell.font = Font(size=10, color="00B050")
-                cell.border = thin_border
-            
-            improve_start = strengths_start + len(key_strengths) + 2
-            ws_candidate.merge_cells(f'A{improve_start}:H{improve_start}')
-            improve_header = ws_candidate[f'A{improve_start}']
-            improve_header.value = "AREAS FOR IMPROVEMENT (3)"
-            improve_header.font = candidate_header_font
-            improve_header.fill = candidate_section_fill
-            improve_header.alignment = Alignment(horizontal='center')
-            improve_header.border = thin_border
-            
-            areas_for_improvement = analysis.get('areas_for_improvement', [])
-            for idx, area in enumerate(areas_for_improvement[:3]):
-                row = improve_start + idx + 1
-                ws_candidate.merge_cells(f'A{row}:H{row}')
-                cell = ws_candidate.cell(row=row, column=1, value=f"{idx + 1}. {area}")
-                cell.font = Font(size=10, color="FF6600")
-                cell.border = thin_border
-            
-            ws_candidate.column_dimensions['A'].width = 60
+            for col in range(1, 8):
+                ws_comparison.cell(row=row, column=col).fill = row_fill
+                ws_comparison.cell(row=row, column=col).border = thin_border
         
         filepath = os.path.join(REPORTS_FOLDER, filename)
         wb.save(filepath)
@@ -2566,8 +2153,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
         return filepath
         
     except Exception as e:
-        print(f"❌ Error creating professional batch Excel report: {str(e)}")
-        traceback.print_exc()
+        print(f"❌ Error creating batch Excel report: {str(e)}")
         return create_minimal_batch_report(analyses, job_description, filename)
 
 def get_score_color(score):
@@ -2590,14 +2176,13 @@ def create_minimal_batch_report(analyses, job_description, filename):
         
         ws['A1'] = "Professional ATS Batch Resume Analysis Report"
         ws['A1'].font = Font(bold=True, size=16)
-        ws.merge_cells('A1:L1')
+        ws.merge_cells('A1:G1')
         
         ws['A2'] = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         ws['A3'] = f"Total Candidates: {len(analyses)}"
         ws['A4'] = f"Scoring System: Professional ATS - Strict Domain Matching"
-        ws['A4'].font = Font(bold=True, color="FF0000")
         
-        headers = ["Rank", "Candidate Name", "File Name", "Domain", "Years of Experience", "ATS Score", "Recommendation", "Experience Summary", "Skills Matched", "Skills Missing", "Key Strengths", "Areas for Improvement"]
+        headers = ["Rank", "Name", "File", "Domain", "Years", "Score", "Recommendation"]
         for col, header in enumerate(headers, start=1):
             cell = ws.cell(row=5, column=col, value=header)
             cell.font = Font(bold=True)
@@ -2605,68 +2190,19 @@ def create_minimal_batch_report(analyses, job_description, filename):
         for idx, analysis in enumerate(analyses):
             row = 6 + idx
             ws.cell(row=row, column=1, value=analysis.get('rank', '-'))
-            ws.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
-            ws.cell(row=row, column=3, value=analysis.get('filename', 'Unknown'))
+            ws.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown')[:20])
+            ws.cell(row=row, column=3, value=os.path.basename(analysis.get('filename', 'Unknown'))[:15])
             ws.cell(row=row, column=4, value=analysis.get('domain_detected', 'general'))
-            ws.cell(row=row, column=5, value=analysis.get('years_of_experience', 'Not specified'))
+            ws.cell(row=row, column=5, value=analysis.get('years_of_experience', 'N/A'))
             ws.cell(row=row, column=6, value=f"{analysis.get('overall_score', 0):.1f}")
-            ws.cell(row=row, column=7, value=analysis.get('recommendation', 'N/A'))
-            
-            exp_summary = analysis.get('experience_summary', 'No summary available.')
-            experience_bullets = convert_experience_to_bullet_points(exp_summary)
-            ws.cell(row=row, column=8, value=experience_bullets)
-            
-            skills_matched = analysis.get('skills_matched', [])
-            ws.cell(row=row, column=9, value=", ".join(skills_matched[:8]))
-            
-            skills_missing = analysis.get('skills_missing', [])
-            ws.cell(row=row, column=10, value=", ".join(skills_missing[:8]))
-            
-            key_strengths = analysis.get('key_strengths', [])
-            ws.cell(row=row, column=11, value=", ".join(key_strengths[:3]))
-            
-            areas_for_improvement = analysis.get('areas_for_improvement', [])
-            ws.cell(row=row, column=12, value=", ".join(areas_for_improvement[:3]))
-        
-        for column in ws.columns:
-            max_length = 0
-            column_letter = get_column_letter(column[0].column)
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max_length + 2, 50)
-            ws.column_dimensions[column_letter].width = adjusted_width
+            ws.cell(row=row, column=7, value=analysis.get('recommendation', 'N/A')[:15])
         
         filepath = os.path.join(REPORTS_FOLDER, filename)
         wb.save(filepath)
-        print(f"📊 Minimal batch report saved to: {filepath}")
         return filepath
     except Exception as e:
         print(f"❌ Error creating minimal batch report: {str(e)}")
-        traceback.print_exc()
         return None
-
-def get_score_grade_text(score):
-    """Get text description for score"""
-    if score >= 90:
-        return "Exceptional Match 🎯"
-    elif score >= 80:
-        return "Very Good Match ✨"
-    elif score >= 70:
-        return "Good Match 👍"
-    elif score >= 60:
-        return "Fair Match 📊"
-    elif score >= 50:
-        return "Marginal Match 📉"
-    elif score >= 40:
-        return "Low Match ⚠️"
-    elif score >= 30:
-        return "Very Low Match ❌"
-    else:
-        return "Domain Mismatch 🚫"
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_report(filename):
@@ -2783,56 +2319,24 @@ def quick_check():
                 'model': GROQ_MODEL
             })
         
-        for i, api_key in enumerate(GROQ_API_KEYS):
-            if api_key and not key_usage[i]['cooling']:
-                try:
-                    start_time = time.time()
-                    
-                    response = call_groq_api(
-                        prompt="Say 'ready'",
-                        api_key=api_key,
-                        max_tokens=10,
-                        timeout=15,
-                        key_index=i+1
-                    )
-                    
-                    response_time = time.time() - start_time
-                    
-                    if isinstance(response, dict) and 'error' in response:
-                        continue
-                    elif response and 'ready' in str(response).lower():
-                        return jsonify({
-                            'available': True,
-                            'response_time': f"{response_time:.2f}s",
-                            'ai_provider': 'groq',
-                            'model': GROQ_MODEL,
-                            'warmup_complete': warmup_complete,
-                            'available_keys': available_keys,
-                            'tested_key': f"Key {i+1}",
-                            'max_batch_size': MAX_BATCH_SIZE,
-                            'processing_method': 'sequential_with_memory_optimization',
-                            'skills_analysis': '5-8 skills per category',
-                            'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
-                            'scoring_method': 'Professional ATS - Strict Domain Matching',
-                            'deterministic_results': True,
-                            'no_ranking_flip': True,
-                            'memory_optimization': 'Active'
-                        })
-                except:
-                    continue
-        
         return jsonify({
-            'available': False,
-            'reason': 'All keys failed or are cooling',
+            'available': True,
+            'ai_provider': 'groq',
+            'model': GROQ_MODEL,
+            'warmup_complete': warmup_complete,
             'available_keys': available_keys,
-            'warmup_complete': warmup_complete
+            'max_batch_size': MAX_BATCH_SIZE,
+            'processing_method': 'sequential_with_memory_optimization',
+            'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
+            'scoring_method': 'Professional ATS - Strict Domain Matching',
+            'deterministic_results': True,
+            'memory_optimization': 'Active'
         })
             
     except Exception as e:
-        error_msg = str(e)
         return jsonify({
             'available': False,
-            'reason': error_msg[:100],
+            'reason': str(e)[:100],
             'available_keys': sum(1 for key in GROQ_API_KEYS if key),
             'ai_provider': 'groq',
             'model': GROQ_MODEL,
@@ -2858,11 +2362,8 @@ def ping():
         'keep_alive_active': True,
         'max_batch_size': MAX_BATCH_SIZE,
         'processing_method': 'sequential_with_memory_optimization',
-        'skills_analysis': '5-8 skills per category',
-        'years_experience': 'Included in analysis',
         'scoring_method': 'Professional ATS - Strict Domain Matching',
         'deterministic_results': True,
-        'no_ranking_flip': True,
         'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY} requests/minute/key)",
         'memory_optimization': 'Active'
     })
@@ -2904,15 +2405,6 @@ def health_check():
     
     available_keys = sum(1 for key in GROQ_API_KEYS if key)
     
-    # Check memory
-    try:
-        process = psutil.Process(os.getpid())
-        memory_percent = process.memory_percent()
-        memory_mb = process.memory_info().rss / 1024 / 1024
-    except:
-        memory_percent = 0
-        memory_mb = 0
-    
     return jsonify({
         'status': 'Service is running', 
         'timestamp': datetime.now().isoformat(),
@@ -2932,45 +2424,18 @@ def health_check():
         'configuration': {
             'max_batch_size': MAX_BATCH_SIZE,
             'max_requests_per_minute_per_key': MAX_REQUESTS_PER_MINUTE_PER_KEY,
-            'max_retries': MAX_RETRIES,
-            'min_skills_to_show': MIN_SKILLS_TO_SHOW,
-            'max_skills_to_show': MAX_SKILLS_TO_SHOW,
-            'years_experience_analysis': True,
             'scoring_system': 'PROFESSIONAL ATS - STRICT DOMAIN MATCHING',
             'deterministic_results': True,
             'no_ranking_flip': True,
-            'domain_keyword_libraries': list(DOMAIN_KEYWORDS.keys()),
             'max_concurrent_requests': MAX_CONCURRENT_REQUESTS
         },
         'processing_method': 'sequential_with_memory_optimization',
-        'performance_target': '10 resumes in 60-90 seconds (with memory optimization)',
-        'skills_analysis': '5-8 skills per category',
-        'summaries': 'Complete 4-5 sentences each',
-        'years_experience': 'Included in analysis',
-        'excel_report': 'Candidate name & experience summary included',
-        'insights': '3 strengths & 3 improvements',
-        'scoring_enhancements': {
-            'method': 'Professional ATS - Strict Domain Matching',
-            'precision': '1 decimal place',
-            'unique_scores': 'Deterministic hash-based',
-            'range': '0-100 with strict domain matching',
-            'weighting': 'Domain match (70%), Skills (20%), Experience (10%)',
-            'wrong_domain_penalty': '70% reduction for domain mismatch',
-            'ml_resume_vs_vlsi_job': 'Score: 25-35',
-            'deterministic': 'Same resume = Same score',
-            'ranking_stability': 'Never flips between analyses'
-        },
-        'rate_limit_protection': 'ACTIVE - Staggered delays, minute tracking, automatic cooling',
-        'always_awake': True,
         'memory_optimization': {
             'active': True,
-            'current_memory_percent': round(memory_percent, 1),
-            'current_memory_mb': round(memory_mb, 1),
-            'max_memory_percent': MAX_MEMORY_PERCENT,
+            'text_limit_chars': 3000,
+            'pdf_pages_limit': 3,
             'max_storage_mb': MAX_STORAGE_SIZE_MB,
-            'max_stored_resumes': MAX_STORED_RESUMES,
-            'text_limit_chars': 5000,
-            'pdf_pages_limit': 5
+            'max_stored_resumes': MAX_STORED_RESUMES
         }
     })
 
@@ -3011,19 +2476,8 @@ def periodic_cleanup():
         try:
             time.sleep(300)
             cleanup_resume_previews()
-            check_memory_usage()
         except Exception as e:
             print(f"⚠️ Periodic cleanup error: {str(e)}")
-
-def signal_handler(signum, frame):
-    """Handle shutdown signals"""
-    print(f"\n🛑 Received signal {signum}, shutting down...")
-    cleanup_on_exit()
-    sys.exit(0)
-
-# Register signal handlers
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGINT, signal_handler)
 
 atexit.register(cleanup_on_exit)
 
@@ -3051,30 +2505,15 @@ if __name__ == '__main__':
     print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
     print(f"⚠️ RATE LIMIT PROTECTION: ACTIVE")
     print(f"📊 Max requests/minute/key: {MAX_REQUESTS_PER_MINUTE_PER_KEY}")
-    print(f"⏳ Staggered delays: 2-3 seconds between requests")
+    print(f"⏳ Staggered delays: 3-5 seconds between requests")
     print(f"🔀 Key rotation: Smart load balancing (5 keys)")
     print(f"🛡️ Cooling: 60s on rate limits")
     print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
-    print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
-    print(f"✅ Years of Experience: Included in analysis")
-    print(f"🏢 PROFESSIONAL ATS SCORING: STRICT DOMAIN MATCHING")
-    print(f"🎯 ML resume vs VLSI job = 25-35 score (Not 65-70)")
-    print(f"🎯 DETERMINISTIC RESULTS: Same resume = Same score")
-    print(f"🎯 NO RANKING FLIPS: Rankings never change on re-analysis")
-    print(f"🎯 Domain libraries: VLSI, ML, Software Eng, Data Science, DevOps")
-    print(f"🎯 Scoring Method: Domain match (70%), Skills (20%), Experience (10%)")
-    print(f"✅ Excel Report: Domain Detected column added")
-    print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
-    print(f"✅ Insights: 3 strengths & 3 improvements")
-    print(f"✅ Resume Preview: Enabled with memory optimization")
-    print(f"⚠️ Performance: ~10 resumes in 60-90 seconds (with memory optimization)")
-    print(f"✅ Excel Reports: Single & Batch with Individual Sheets")
-    print(f"✅ Always Awake: Backend will stay active with self-pinging")
-    print(f"💾 MEMORY OPTIMIZATION: ACTIVE")
-    print(f"   - Text extraction limited to 5 pages / 5000 chars")
-    print(f"   - Automatic GC after each resume")
-    print(f"   - Max storage: {MAX_STORAGE_SIZE_MB}MB / {MAX_STORED_RESUMES} resumes")
-    print(f"   - Memory monitoring at {MAX_MEMORY_PERCENT}% threshold")
+    print(f"✅ Memory Optimization: ACTIVE")
+    print(f"   - Text: 3 pages / 3000 chars max")
+    print(f"   - Storage: {MAX_STORED_RESUMES} resumes / {MAX_STORAGE_SIZE_MB}MB")
+    print(f"   - GC after each resume")
+    print(f"✅ Expected time: ~90 seconds for 10 resumes")
     print("="*50 + "\n")
     
     # Check for required dependencies
@@ -3082,21 +2521,7 @@ if __name__ == '__main__':
         import psutil
         print("✅ Memory monitoring library available")
     except ImportError:
-        print("⚠️  Warning: psutil not installed. Install with: pip install psutil")
-        print("   Memory monitoring will be limited")
-    
-    try:
-        from reportlab.lib.pagesizes import letter
-        from reportlab.pdfgen import canvas
-        print("✅ PDF generation library available")
-    except ImportError:
-        print("⚠️  Warning: reportlab not installed. Install with: pip install reportlab")
-        print("   PDF previews for non-PDF files will be limited")
-    
-    if available_keys == 0:
-        print("⚠️  WARNING: No Groq API keys found!")
-        print("Please set GROQ_API_KEY_1 through GROQ_API_KEY_5 in environment variables")
-        print("Get free API keys from: https://console.groq.com")
+        print("⚠️  Warning: psutil not installed")
     
     gc.enable()
     
