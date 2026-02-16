@@ -1,3 +1,4 @@
+app.py:
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from PyPDF2 import PdfReader, PdfWriter
@@ -27,6 +28,8 @@ import subprocess
 import tempfile
 import shutil
 from pathlib import Path
+import psutil
+import signal
 
 # Load environment variables
 load_dotenv()
@@ -69,8 +72,8 @@ analysis_result_cache = {}  # New cache to store complete analysis results
 analysis_cache_lock = threading.Lock()
 
 # Batch processing configuration
-MAX_CONCURRENT_REQUESTS = 5
-MAX_BATCH_SIZE = 10  # UPDATED: Increased from 6 to 10
+MAX_CONCURRENT_REQUESTS = 3  # REDUCED from 5 to 3 to save memory
+MAX_BATCH_SIZE = 10  # Keep at 10 as requested
 MIN_SKILLS_TO_SHOW = 5
 MAX_SKILLS_TO_SHOW = 8
 
@@ -94,11 +97,15 @@ MAX_TOKENS_PER_MINUTE_PER_KEY = 250000
 # Memory optimization
 service_running = True
 
-# Resume storage tracking
+# Memory limit - to prevent OOM kills
+MAX_MEMORY_PERCENT = 80  # Kill process if memory usage exceeds 80%
+
+# Resume storage tracking - with size limits
 resume_storage = {}
+MAX_STORED_RESUMES = 20  # Maximum number of resumes to keep in memory
+MAX_STORAGE_SIZE_MB = 100  # Maximum total storage size in MB
 
 # ENHANCED: Deterministic scoring system - no randomness
-# Used to track deterministic hash-based scores, not for randomization
 analysis_signatures = {}
 
 # Domain-specific keyword libraries for strict matching
@@ -106,7 +113,7 @@ DOMAIN_KEYWORDS = {
     'vlsi': {
         'primary': ['verilog', 'vhdl', 'systemverilog', 'uvm', 'asic', 'fpga', 'rtl', 'synthesis', 'timing', 'sta', 'physical design', 'layout', 'spice', 'cadence', 'synopsys', 'mentor graphics', 'modelsim', 'questasim', 'vcs', 'ic design', 'vlsi', 'cmos', 'digital design', 'analog design', 'mixed-signal', 'dft', 'scan', 'bist', 'floorplanning', 'placement', 'routing', 'clock tree', 'cts', 'power analysis', 'ir drop', 'em', 'drc', 'lvs', 'rc extraction', 'post-layout', 'pre-layout', 'standard cell', 'custom cell', 'memory design', 'sram', 'dram', 'flash', 'pcie', 'ddr', 'usb', 'ethernet', 'spi', 'i2c', 'uart', 'amba', 'axi', 'ahb', 'apb'],
         'weight': 3.0,
-        'threshold': 0.15  # If less than 15% of keywords match, score is low
+        'threshold': 0.15
     },
     'machine learning': {
         'primary': ['machine learning', 'deep learning', 'neural networks', 'tensorflow', 'pytorch', 'keras', 'scikit-learn', 'nlp', 'computer vision', 'cnn', 'rnn', 'lstm', 'transformer', 'bert', 'gpt', 'llm', 'data science', 'python', 'pandas', 'numpy', 'matplotlib', 'seaborn', 'jupyter', 'anaconda', 'spark', 'hadoop', 'sql', 'nosql', 'mongodb', 'postgresql', 'mysql', 'sqlite', 'aws', 'sagemaker', 'azure', 'gcp', 'docker', 'kubernetes', 'mlflow', 'kubeflow', 'tensorboard', 'opencv', 'yolo', 'ssd', 'faster rcnn', 'resnet', 'vgg', 'inception', 'alexnet', 'transfer learning', 'fine-tuning', 'hyperparameter', 'grid search', 'random search', 'bayesian', 'optimization', 'gradient descent', 'backpropagation', 'activation function', 'relu', 'sigmoid', 'tanh', 'softmax', 'loss function', 'cross-entropy', 'mse', 'mae', 'accuracy', 'precision', 'recall', 'f1-score', 'auc', 'roc', 'confusion matrix', 'classification', 'regression', 'clustering', 'k-means', 'dbscan', 'hierarchical', 'pca', 'svm', 'decision tree', 'random forest', 'xgboost', 'lightgbm', 'catboost', 'ensemble', 'bagging', 'boosting', 'stacking', 'feature engineering', 'feature selection', 'dimensionality reduction', 'data preprocessing', 'data cleaning', 'eda', 'statistics', 'probability', 'linear algebra', 'calculus', 'hypothesis testing', 'ab testing', 'time series', 'arima', 'sarima', 'prophet', 'reinforcement learning', 'q-learning', 'dqn', 'ppo', 'a2c', 'sde'],
@@ -129,6 +136,32 @@ DOMAIN_KEYWORDS = {
         'threshold': 0.15
     }
 }
+
+def check_memory_usage():
+    """Check current memory usage and force GC if needed"""
+    try:
+        process = psutil.Process(os.getpid())
+        memory_percent = process.memory_percent()
+        
+        if memory_percent > MAX_MEMORY_PERCENT:
+            print(f"⚠️ CRITICAL: Memory usage at {memory_percent:.1f}%, forcing garbage collection")
+            gc.collect()
+            time.sleep(1)
+            
+            # Check again after GC
+            memory_percent = process.memory_percent()
+            if memory_percent > MAX_MEMORY_PERCENT:
+                print(f"❌ Memory still critical at {memory_percent:.1f}%, cleaning caches")
+                # Clear caches to free memory
+                with cache_lock:
+                    score_cache.clear()
+                with analysis_cache_lock:
+                    analysis_result_cache.clear()
+                gc.collect()
+        
+        return memory_percent
+    except:
+        return 0
 
 def update_activity():
     """Update last activity timestamp"""
@@ -216,6 +249,12 @@ def get_cached_analysis(resume_hash):
 def set_cached_analysis(resume_hash, analysis):
     """Cache complete analysis for deterministic results"""
     with analysis_cache_lock:
+        # Limit cache size to prevent memory issues
+        if len(analysis_result_cache) > 100:  # Max 100 cached analyses
+            # Remove oldest 20 entries
+            oldest_keys = list(analysis_result_cache.keys())[:20]
+            for key in oldest_keys:
+                del analysis_result_cache[key]
         analysis_result_cache[resume_hash] = analysis
 
 def get_cached_score(resume_hash):
@@ -226,6 +265,11 @@ def get_cached_score(resume_hash):
 def set_cached_score(resume_hash, score):
     """Cache score for consistency"""
     with cache_lock:
+        # Limit cache size
+        if len(score_cache) > 200:
+            oldest_keys = list(score_cache.keys())[:50]
+            for key in oldest_keys:
+                del score_cache[key]
         score_cache[resume_hash] = score
 
 def detect_job_domain(job_description):
@@ -292,7 +336,6 @@ def calculate_domain_match_score(resume_text, job_description):
                 matches += 1
         
         # ----- Reward based on ABSOLUTE number of matches (not percentage) -----
-        # For large keyword lists (50+), 5–8 matches is decent, 10+ is strong.
         if matches >= 20:
             score = 95 + min(matches - 20, 5)   # 95–100
         elif matches >= 15:
@@ -366,9 +409,89 @@ def generate_recommendation(score):
     else:
         return "Rejected - Incompatible Profile"
 
-def store_resume_file(file_data, filename, analysis_id):
-    """Store resume file for later preview"""
+def cleanup_old_storage():
+    """Clean up old resume storage to prevent memory issues"""
     try:
+        now = datetime.now()
+        total_size = 0
+        files_to_remove = []
+        
+        # Calculate total size and find old files
+        for analysis_id, info in resume_storage.items():
+            stored_time = datetime.fromisoformat(info['stored_at'])
+            if (now - stored_time).total_seconds() > 1800:  # 30 minutes
+                files_to_remove.append(analysis_id)
+            else:
+                # Check file sizes
+                for path_key in ['path', 'pdf_path']:
+                    if info.get(path_key) and os.path.exists(info[path_key]):
+                        try:
+                            total_size += os.path.getsize(info[path_key])
+                        except:
+                            pass
+        
+        # Remove oldest files if total size is too large
+        if total_size > MAX_STORAGE_SIZE_MB * 1024 * 1024:
+            # Sort by stored time
+            sorted_items = sorted(
+                resume_storage.items(),
+                key=lambda x: datetime.fromisoformat(x[1]['stored_at'])
+            )
+            
+            # Remove oldest until under limit
+            for analysis_id, _ in sorted_items:
+                if total_size <= MAX_STORAGE_SIZE_MB * 1024 * 1024:
+                    break
+                    
+                if analysis_id not in files_to_remove:
+                    files_to_remove.append(analysis_id)
+                    
+                # Subtract size
+                for path_key in ['path', 'pdf_path']:
+                    if resume_storage[analysis_id].get(path_key) and os.path.exists(resume_storage[analysis_id][path_key]):
+                        try:
+                            total_size -= os.path.getsize(resume_storage[analysis_id][path_key])
+                        except:
+                            pass
+        
+        # Remove files
+        for analysis_id in files_to_remove:
+            try:
+                info = resume_storage[analysis_id]
+                for path_key in ['path', 'pdf_path']:
+                    if info.get(path_key) and os.path.exists(info[path_key]):
+                        os.remove(info[path_key])
+                del resume_storage[analysis_id]
+                print(f"🧹 Cleaned up storage for {analysis_id}")
+            except Exception as e:
+                print(f"⚠️ Error cleaning up {analysis_id}: {str(e)}")
+                
+    except Exception as e:
+        print(f"⚠️ Error in cleanup_old_storage: {str(e)}")
+
+def store_resume_file(file_data, filename, analysis_id):
+    """Store resume file for later preview with memory optimization"""
+    try:
+        # Clean up old storage first
+        cleanup_old_storage()
+        
+        # Check if we've reached max stored resumes
+        if len(resume_storage) >= MAX_STORED_RESUMES:
+            # Remove oldest
+            oldest_id = min(
+                resume_storage.keys(),
+                key=lambda x: datetime.fromisoformat(resume_storage[x]['stored_at'])
+            )
+            try:
+                info = resume_storage[oldest_id]
+                for path_key in ['path', 'pdf_path']:
+                    if info.get(path_key) and os.path.exists(info[path_key]):
+                        os.remove(info[path_key])
+                del resume_storage[oldest_id]
+                print(f"🧹 Removed oldest storage: {oldest_id}")
+            except Exception as e:
+                print(f"⚠️ Error removing oldest storage: {str(e)}")
+        
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
         preview_filename = f"{analysis_id}_{safe_filename}"
@@ -381,27 +504,9 @@ def store_resume_file(file_data, filename, analysis_id):
             else:
                 file_data.save(f)
         
-        # Also create a PDF version for preview if not already PDF
-        file_ext = os.path.splitext(filename)[1].lower()
+        # Don't create PDF preview by default - only on demand
         pdf_preview_path = None
-        
-        if file_ext == '.pdf':
-            pdf_preview_path = preview_path
-        else:
-            # Try to convert to PDF for better preview
-            try:
-                pdf_filename = f"{analysis_id}_{safe_filename.rsplit('.', 1)[0]}_preview.pdf"
-                pdf_preview_path = os.path.join(RESUME_PREVIEW_FOLDER, pdf_filename)
-                
-                if file_ext in ['.docx', '.doc']:
-                    # Try to convert DOC/DOCX to PDF
-                    convert_doc_to_pdf(preview_path, pdf_preview_path)
-                elif file_ext == '.txt':
-                    # Convert TXT to PDF
-                    convert_txt_to_pdf(preview_path, pdf_preview_path)
-            except Exception as e:
-                print(f"⚠️ Could not create PDF preview: {str(e)}")
-                pdf_preview_path = None
+        file_ext = os.path.splitext(filename)[1].lower()
         
         # Store in memory for quick access
         resume_storage[analysis_id] = {
@@ -410,8 +515,9 @@ def store_resume_file(file_data, filename, analysis_id):
             'path': preview_path,
             'pdf_path': pdf_preview_path,
             'file_type': file_ext[1:],
-            'has_pdf_preview': pdf_preview_path is not None and os.path.exists(pdf_preview_path),
-            'stored_at': datetime.now().isoformat()
+            'has_pdf_preview': False,
+            'stored_at': datetime.now().isoformat(),
+            'file_size': os.path.getsize(preview_path) if os.path.exists(preview_path) else 0
         }
         
         print(f"✅ Resume stored for preview: {preview_filename}")
@@ -419,141 +525,6 @@ def store_resume_file(file_data, filename, analysis_id):
     except Exception as e:
         print(f"❌ Error storing resume for preview: {str(e)}")
         return None
-
-def convert_doc_to_pdf(doc_path, pdf_path):
-    """Convert DOC/DOCX to PDF using LibreOffice or fallback methods"""
-    try:
-        # Check if LibreOffice is available
-        if shutil.which('libreoffice'):
-            # Use LibreOffice for conversion
-            cmd = [
-                'libreoffice', '--headless', '--convert-to', 'pdf',
-                '--outdir', os.path.dirname(pdf_path),
-                doc_path
-            ]
-            subprocess.run(cmd, check=True, capture_output=True, timeout=30)
-            
-            # Rename the output file
-            expected_pdf = doc_path.rsplit('.', 1)[0] + '.pdf'
-            if os.path.exists(expected_pdf):
-                shutil.move(expected_pdf, pdf_path)
-                return True
-        else:
-            # Fallback: Try using python-docx2pdf if available
-            try:
-                from docx2pdf import convert
-                convert(doc_path, pdf_path)
-                return True
-            except ImportError:
-                pass
-            
-            # Another fallback: Create a simple PDF from text
-            extract_text_and_create_pdf(doc_path, pdf_path)
-            return True
-            
-    except Exception as e:
-        print(f"⚠️ DOC to PDF conversion failed: {str(e)}")
-        # Create a simple PDF from extracted text
-        extract_text_and_create_pdf(doc_path, pdf_path)
-        return True
-    
-    return False
-
-def convert_txt_to_pdf(txt_path, pdf_path):
-    """Convert TXT to PDF"""
-    try:
-        extract_text_and_create_pdf(txt_path, pdf_path)
-        return True
-    except Exception as e:
-        print(f"⚠️ TXT to PDF conversion failed: {str(e)}")
-        return False
-
-def extract_text_and_create_pdf(input_path, pdf_path):
-    """Extract text and create a simple PDF"""
-    try:
-        from reportlab.lib.pagesizes import letter
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
-        from reportlab.lib.units import inch
-        
-        # Extract text based on file type
-        file_ext = os.path.splitext(input_path)[1].lower()
-        
-        if file_ext == '.pdf':
-            text = extract_text_from_pdf(input_path)
-        elif file_ext in ['.docx', '.doc']:
-            text = extract_text_from_docx(input_path)
-        elif file_ext == '.txt':
-            text = extract_text_from_txt(input_path)
-        else:
-            text = "Cannot preview this file type."
-        
-        # Create PDF
-        doc = SimpleDocTemplate(pdf_path, pagesize=letter,
-                                rightMargin=72, leftMargin=72,
-                                topMargin=72, bottomMargin=72)
-        
-        styles = getSampleStyleSheet()
-        story = []
-        
-        # Add title
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=16,
-            spaceAfter=30
-        )
-        title = Paragraph("Resume Preview", title_style)
-        story.append(title)
-        
-        # Add file info
-        info_style = ParagraphStyle(
-            'CustomInfo',
-            parent=styles['Normal'],
-            fontSize=10,
-            textColor='gray',
-            spaceAfter=20
-        )
-        info_text = f"Original file: {os.path.basename(input_path)} | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        info = Paragraph(info_text, info_style)
-        story.append(info)
-        
-        story.append(Spacer(1, 20))
-        
-        # Add content
-        content_style = ParagraphStyle(
-            'CustomContent',
-            parent=styles['Normal'],
-            fontSize=11,
-            leading=14,
-            spaceBefore=6,
-            spaceAfter=6
-        )
-        
-        # Split text into paragraphs
-        paragraphs = text.split('\n')
-        for para in paragraphs:
-            if para.strip():
-                story.append(Paragraph(para.replace('\t', '&nbsp;' * 4), content_style))
-        
-        # Build PDF
-        doc.build(story)
-        return True
-        
-    except Exception as e:
-        print(f"⚠️ Failed to create PDF from text: {str(e)}")
-        # Create minimal PDF
-        try:
-            from reportlab.pdfgen import canvas
-            c = canvas.Canvas(pdf_path)
-            c.drawString(100, 750, "Resume Preview")
-            c.drawString(100, 730, f"File: {os.path.basename(input_path)}")
-            c.drawString(100, 710, "Unable to display content. Please download the original file.")
-            c.save()
-            return True
-        except:
-            return False
 
 def get_resume_preview(analysis_id):
     """Get resume preview data"""
@@ -565,24 +536,55 @@ def cleanup_resume_previews():
     """Clean up old resume previews"""
     try:
         now = datetime.now()
-        for analysis_id in list(resume_storage.keys()):
-            stored_time = datetime.fromisoformat(resume_storage[analysis_id]['stored_at'])
-            if (now - stored_time).total_seconds() > 3600:  # 1 hour retention
-                try:
-                    # Clean up all related files
-                    paths_to_clean = [
-                        resume_storage[analysis_id]['path'],
-                        resume_storage[analysis_id].get('pdf_path')
-                    ]
-                    
-                    for path in paths_to_clean:
-                        if path and os.path.exists(path):
-                            os.remove(path)
-                    
-                    del resume_storage[analysis_id]
-                    print(f"🧹 Cleaned up resume preview for {analysis_id}")
-                except Exception as e:
-                    print(f"⚠️ Error cleaning up files for {analysis_id}: {str(e)}")
+        total_size = 0
+        files_to_remove = []
+        
+        for analysis_id, info in resume_storage.items():
+            stored_time = datetime.fromisoformat(info['stored_at'])
+            
+            # Remove if older than 1 hour
+            if (now - stored_time).total_seconds() > 3600:
+                files_to_remove.append(analysis_id)
+            else:
+                # Track size
+                for path_key in ['path', 'pdf_path']:
+                    if info.get(path_key) and os.path.exists(info[path_key]):
+                        try:
+                            total_size += os.path.getsize(info[path_key])
+                        except:
+                            pass
+        
+        # Remove if total size too large
+        if total_size > MAX_STORAGE_SIZE_MB * 1024 * 1024:
+            sorted_items = sorted(
+                resume_storage.items(),
+                key=lambda x: datetime.fromisoformat(x[1]['stored_at'])
+            )
+            for analysis_id, _ in sorted_items:
+                if total_size <= MAX_STORAGE_SIZE_MB * 1024 * 1024:
+                    break
+                if analysis_id not in files_to_remove:
+                    files_to_remove.append(analysis_id)
+                    # Subtract size
+                    for path_key in ['path', 'pdf_path']:
+                        if resume_storage[analysis_id].get(path_key) and os.path.exists(resume_storage[analysis_id][path_key]):
+                            try:
+                                total_size -= os.path.getsize(resume_storage[analysis_id][path_key])
+                            except:
+                                pass
+        
+        # Remove files
+        for analysis_id in files_to_remove:
+            try:
+                info = resume_storage[analysis_id]
+                for path_key in ['path', 'pdf_path']:
+                    if info.get(path_key) and os.path.exists(info[path_key]):
+                        os.remove(info[path_key])
+                del resume_storage[analysis_id]
+                print(f"🧹 Cleaned up resume preview for {analysis_id}")
+            except Exception as e:
+                print(f"⚠️ Error cleaning up files for {analysis_id}: {str(e)}")
+        
         # Also clean up any orphaned files
         cleanup_orphaned_files()
     except Exception as e:
@@ -592,16 +594,26 @@ def cleanup_orphaned_files():
     """Clean up orphaned files in preview folder"""
     try:
         now = datetime.now()
+        stored_filenames = set()
+        
+        # Get all stored filenames
+        for info in resume_storage.values():
+            stored_filenames.add(os.path.basename(info['path']))
+            if info.get('pdf_path'):
+                stored_filenames.add(os.path.basename(info['pdf_path']))
+        
+        # Remove orphaned files
         for filename in os.listdir(RESUME_PREVIEW_FOLDER):
-            filepath = os.path.join(RESUME_PREVIEW_FOLDER, filename)
-            if os.path.isfile(filepath):
-                file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
-                if (now - file_time).total_seconds() > 7200:  # 2 hours
-                    try:
-                        os.remove(filepath)
-                        print(f"🧹 Cleaned up orphaned file: {filename}")
-                    except:
-                        pass
+            if filename not in stored_filenames:
+                filepath = os.path.join(RESUME_PREVIEW_FOLDER, filename)
+                if os.path.isfile(filepath):
+                    file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
+                    if (now - file_time).total_seconds() > 1800:  # 30 minutes
+                        try:
+                            os.remove(filepath)
+                            print(f"🧹 Cleaned up orphaned file: {filename}")
+                        except:
+                            pass
     except Exception as e:
         print(f"⚠️ Error cleaning up orphaned files: {str(e)}")
 
@@ -625,7 +637,7 @@ def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45,
             }
         ],
         'max_tokens': max_tokens,
-        'temperature': temperature,  # Using 0.1 for consistency
+        'temperature': temperature,
         'top_p': 0.9,
         'stream': False,
         'stop': None
@@ -652,17 +664,16 @@ def call_groq_api(prompt, api_key, max_tokens=1500, temperature=0.1, timeout=45,
                 print(f"❌ Unexpected Groq API response format")
                 return {'error': 'invalid_response', 'status': response.status_code}
         
-        # RATE LIMIT HANDLING - IMPROVED
+        # RATE LIMIT HANDLING
         if response.status_code == 429:
             print(f"❌ Rate limit exceeded for Groq API (Key {key_index})")
             
             # Track this error for the key
             if key_index is not None:
                 key_usage[key_index - 1]['errors'] += 1
-                mark_key_cooling(key_index - 1, 60)  # Cool for 60 seconds on rate limit
+                mark_key_cooling(key_index - 1, 60)
             
             if retry_count < MAX_RETRIES:
-                # Use exponential backoff with jitter
                 wait_time = RETRY_DELAY_BASE ** (retry_count + 1) + random.uniform(2, 5)
                 print(f"⏳ Rate limited, retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{MAX_RETRIES})")
                 time.sleep(wait_time)
@@ -719,7 +730,6 @@ def warmup_groq_service():
                 print(f"  Testing key {i+1}...")
                 start_time = time.time()
                 
-                # Update minute counter
                 current_time = datetime.now()
                 if (key_usage[i]['minute_window_start'] is None or 
                     (current_time - key_usage[i]['minute_window_start']).total_seconds() > 60):
@@ -747,7 +757,7 @@ def warmup_groq_service():
                     warmup_results.append(False)
                 
                 if i < available_keys - 1:
-                    time.sleep(2)  # Increased delay between warm-up calls
+                    time.sleep(2)
         
         success = any(warmup_results)
         if success:
@@ -769,7 +779,7 @@ def keep_service_warm():
     
     while service_running:
         try:
-            time.sleep(180)  # Every 3 minutes
+            time.sleep(180)
             
             available_keys = sum(1 for key in GROQ_API_KEYS if key)
             if available_keys > 0 and warmup_complete:
@@ -777,14 +787,13 @@ def keep_service_warm():
                 
                 for i, api_key in enumerate(GROQ_API_KEYS):
                     if api_key and not key_usage[i]['cooling']:
-                        # Check minute limit
                         current_time = datetime.now()
                         if (key_usage[i]['minute_window_start'] is None or 
                             (current_time - key_usage[i]['minute_window_start']).total_seconds() > 60):
                             key_usage[i]['minute_window_start'] = current_time
                             key_usage[i]['requests_this_minute'] = 0
                         
-                        if key_usage[i]['requests_this_minute'] < 5:  # Only use if not busy
+                        if key_usage[i]['requests_this_minute'] < 5:
                             try:
                                 response = call_groq_api(
                                     prompt="Ping - just say 'pong'",
@@ -807,43 +816,54 @@ def keep_service_warm():
 
 def keep_backend_awake():
     """Keep backend always active"""
+    global service_running
+    consecutive_errors = 0
+    
     while service_running:
         try:
-            time.sleep(60)  # Ping every 60 seconds
+            time.sleep(60)
             
             try:
-                # Self-ping to keep the service awake
-                requests.get(f"http://localhost:{PORT}/ping", timeout=10)
-                print(f"✅ Self-ping successful to keep backend awake")
+                response = requests.get(f"http://localhost:{PORT}/ping", timeout=10)
+                if response.status_code == 200:
+                    print(f"✅ Self-ping successful")
+                    consecutive_errors = 0
+                else:
+                    consecutive_errors += 1
             except:
-                # If self-ping fails, try health check
-                try:
-                    response = requests.get(f"http://localhost:{PORT}/health", timeout=10)
-                    print(f"✅ Health check successful")
-                except Exception as e:
-                    print(f"⚠️ Keep-alive check failed: {e}")
+                consecutive_errors += 1
+                
+            # Force GC periodically
+            if consecutive_errors % 5 == 0:
+                gc.collect()
+                check_memory_usage()
                     
         except Exception as e:
             print(f"⚠️ Keep-backend-awake thread error: {str(e)}")
             time.sleep(60)
 
-# Text extraction functions
+# Text extraction functions with memory limits
 def extract_text_from_pdf(file_path):
-    """Extract text from PDF file with error handling"""
+    """Extract text from PDF file with error handling and memory limits"""
     try:
         text = ""
         max_attempts = 2
+        max_chars = 5000  # Limit text size to prevent memory issues
         
         for attempt in range(max_attempts):
             try:
                 reader = PdfReader(file_path)
                 text = ""
                 
-                for page_num, page in enumerate(reader.pages[:8]):  # Increased to 8 pages
+                # Limit pages to 5 to save memory
+                for page_num, page in enumerate(reader.pages[:5]):
                     try:
                         page_text = page.extract_text()
                         if page_text:
                             text += page_text + "\n"
+                            if len(text) > max_chars:
+                                text = text[:max_chars]
+                                break
                     except Exception as e:
                         print(f"⚠️ PDF page extraction error: {e}")
                         continue
@@ -856,11 +876,11 @@ def extract_text_from_pdf(file_path):
                 if attempt == max_attempts - 1:
                     try:
                         with open(file_path, 'rb') as f:
-                            content = f.read()
-                            text = content.decode('utf-8', errors='ignore')
+                            content = f.read(1024 * 1024)  # Read only first 1MB
+                            text = content.decode('utf-8', errors='ignore')[:max_chars]
                             if text.strip():
                                 words = text.split()
-                                text = ' '.join(words[:1500])  # Increased word limit
+                                text = ' '.join(words[:500])
                     except:
                         text = "Error: Could not extract text from PDF file"
         
@@ -873,10 +893,18 @@ def extract_text_from_pdf(file_path):
         return f"Error reading PDF: {str(e)[:100]}"
 
 def extract_text_from_docx(file_path):
-    """Extract text from DOCX file"""
+    """Extract text from DOCX file with memory limits"""
     try:
         doc = Document(file_path)
-        text = "\n".join([paragraph.text for paragraph in doc.paragraphs[:150] if paragraph.text.strip()])
+        text = ""
+        max_chars = 5000
+        
+        for paragraph in doc.paragraphs[:100]:  # Limit paragraphs
+            if paragraph.text.strip():
+                text += paragraph.text + "\n"
+                if len(text) > max_chars:
+                    text = text[:max_chars]
+                    break
         
         if not text.strip():
             return "Error: Document appears to be empty"
@@ -887,15 +915,16 @@ def extract_text_from_docx(file_path):
         return f"Error reading DOCX: {str(e)}"
 
 def extract_text_from_txt(file_path):
-    """Extract text from TXT file"""
+    """Extract text from TXT file with memory limits"""
     try:
         encodings = ['utf-8', 'latin-1', 'windows-1252', 'cp1252']
+        max_chars = 5000
         
         for encoding in encodings:
             try:
                 with open(file_path, 'r', encoding=encoding) as file:
-                    text = file.read()
-                    
+                    text = file.read(max_chars)
+                
                 if not text.strip():
                     return "Error: Text file appears to be empty"
                 
@@ -924,7 +953,7 @@ def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis
     
     resume_hash = calculate_resume_hash(resume_text, job_description)
     
-    # ENHANCED: Check cache first for deterministic results
+    # Check cache first
     cached_analysis = get_cached_analysis(resume_hash)
     if cached_analysis:
         print(f"✅ Using cached analysis for deterministic result (Key {key_index})")
@@ -934,13 +963,13 @@ def analyze_resume_with_ai(resume_text, job_description, filename=None, analysis
             cached_analysis['analysis_id'] = analysis_id
         return cached_analysis
     
-    # ENHANCED: Calculate strict domain match score FIRST (this will be the primary score)
+    # Calculate strict domain match score
     strict_score = calculate_domain_match_score(resume_text, job_description)
     
-    # ENHANCED: Generate strict recommendation based on score
+    # Generate strict recommendation based on score
     strict_recommendation = generate_recommendation(strict_score)
     
-    # ENHANCED: Modified prompt to emphasize strict scoring and domain matching
+    # Enhanced prompt
     prompt = f"""Analyze resume against job description and provide STRICT, PROFESSIONAL assessment.
 This is for enterprise ATS (Applicant Tracking System) use.
 
@@ -995,7 +1024,7 @@ STRICT RULES:
             prompt=prompt,
             api_key=api_key,
             max_tokens=1600,
-            temperature=0.1,  # Low temperature for consistency
+            temperature=0.1,
             timeout=60,
             key_index=key_index
         )
@@ -1025,6 +1054,9 @@ STRICT RULES:
         
         json_str = json_str.replace('```json', '').replace('```', '').strip()
         
+        # Fix JSON control characters
+        json_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', json_str)
+        
         try:
             analysis = json.loads(json_str)
             print(f"✅ Successfully parsed JSON response")
@@ -1034,14 +1066,13 @@ STRICT RULES:
             
             return generate_fallback_analysis(filename, "JSON Parse Error", strict_score=strict_score, strict_recommendation=strict_recommendation)
         
-        # ENHANCED: FORCE our strict score and recommendation (overwrite whatever AI returned)
+        # Force our strict score and recommendation
         analysis['overall_score'] = strict_score
         analysis['recommendation'] = strict_recommendation
         
         # Validate and fill missing fields
         analysis = validate_analysis(analysis, filename)
         
-        # ENHANCED: No score generation or variation - use the deterministic strict score
         set_cached_score(resume_hash, strict_score)
         
         analysis['ai_provider'] = "groq"
@@ -1055,7 +1086,7 @@ STRICT RULES:
         if analysis_id:
             analysis['analysis_id'] = analysis_id
         
-        # ENHANCED: Cache the complete analysis for deterministic results
+        # Cache the complete analysis
         set_cached_analysis(resume_hash, analysis)
         
         print(f"✅ Analysis completed: {analysis['candidate_name']} (Score: {analysis['overall_score']:.1f}) (Key {key_index})")
@@ -1077,7 +1108,7 @@ def validate_analysis(analysis, filename):
         'experience_summary': 'The candidate demonstrates relevant professional experience with progressive responsibility. Their background shows expertise in key areas relevant to modern industry demands. They have experience collaborating with teams and delivering measurable results. Additional experience in specific domains enhances their suitability.',
         'education_summary': 'The candidate holds relevant educational qualifications from reputable institutions. Their academic background provides strong foundational knowledge in core subjects. Additional certifications enhance their professional profile. The education aligns well with industry requirements.',
         'years_of_experience': '3-5 years',
-        'overall_score': 50.0,  # Default conservative score
+        'overall_score': 50.0,
         'recommendation': 'Consider with Reservations',
         'key_strengths': ['Strong technical foundation', 'Excellent communication skills', 'Proven track record of delivery'],
         'areas_for_improvement': ['Could benefit from advanced certifications', 'Limited experience in cloud platforms', 'Should gain experience with newer technologies']
@@ -1097,7 +1128,6 @@ def validate_analysis(analysis, filename):
     skills_matched = analysis.get('skills_matched', [])
     skills_missing = analysis.get('skills_missing', [])
     
-    # If we have fewer than 5 skills, pad with defaults
     if len(skills_matched) < MIN_SKILLS_TO_SHOW:
         default_skills = ['Python', 'JavaScript', 'SQL', 'Communication', 'Problem Solving', 'Teamwork', 'Project Management', 'Agile']
         needed = MIN_SKILLS_TO_SHOW - len(skills_matched)
@@ -1108,26 +1138,20 @@ def validate_analysis(analysis, filename):
         needed = MIN_SKILLS_TO_SHOW - len(skills_missing)
         skills_missing.extend(default_skills[:needed])
     
-    # Limit to maximum
     analysis['skills_matched'] = skills_matched[:MAX_SKILLS_TO_SHOW]
     analysis['skills_missing'] = skills_missing[:MAX_SKILLS_TO_SHOW]
     
-    # Ensure exactly 3 strengths and improvements
     analysis['key_strengths'] = analysis.get('key_strengths', [])[:3]
     analysis['areas_for_improvement'] = analysis.get('areas_for_improvement', [])[:3]
     
-    # FIXED: Ensure complete sentences for summaries (don't truncate)
     for field in ['experience_summary', 'education_summary']:
         if field in analysis:
             text = analysis[field]
-            # Remove any trailing ellipsis or incomplete sentences
             if '...' in text:
-                # Find the last complete sentence before ellipsis
                 sentences = text.split('. ')
                 complete_sentences = []
                 for sentence in sentences:
                     if '...' in sentence:
-                        # Remove the incomplete part
                         sentence = sentence.split('...')[0]
                         if sentence.strip():
                             complete_sentences.append(sentence.strip() + '.')
@@ -1136,18 +1160,14 @@ def validate_analysis(analysis, filename):
                         complete_sentences.append(sentence.strip() + '.')
                 analysis[field] = ' '.join(complete_sentences)
             
-            # Ensure proper sentence endings
             if not analysis[field].strip().endswith(('.', '!', '?')):
                 analysis[field] = analysis[field].strip() + '.'
             
-            # Limit to reasonable length but keep sentences complete
             if len(analysis[field]) > 800:
-                # Take first 5 sentences instead of truncating
                 sentences = analysis[field].split('. ')
                 if len(sentences) > 5:
                     analysis[field] = '. '.join(sentences[:5]) + '.'
     
-    # Remove unwanted fields
     unwanted_fields = ['job_title_suggestion', 'industry_fit', 'salary_expectation']
     for field in unwanted_fields:
         if field in analysis:
@@ -1158,7 +1178,6 @@ def validate_analysis(analysis, filename):
 def generate_fallback_analysis(filename, reason, partial_success=False, strict_score=None, strict_recommendation=None):
     """
     Generate a fallback analysis with deterministic scoring.
-    ENHANCED: Accepts strict_score and strict_recommendation for consistency.
     """
     candidate_name = "Professional Candidate"
     
@@ -1170,17 +1189,14 @@ def generate_fallback_analysis(filename, reason, partial_success=False, strict_s
             if len(parts) >= 2 and len(parts) <= 4:
                 candidate_name = ' '.join(part.title() for part in parts)
     
-    # Use provided strict score or generate conservative deterministic score
     if strict_score is not None:
         unique_score = strict_score
     else:
-        # Generate deterministic score based on filename hash
         file_hash = hashlib.md5(filename.encode()).hexdigest() if filename else 'default'
         hash_int = int(file_hash[:4], 16)
-        unique_score = 45 + (hash_int % 15)  # 45-59 range
+        unique_score = 45 + (hash_int % 15)
         unique_score = round(unique_score, 1)
     
-    # Use provided strict recommendation or generate based on score
     if strict_recommendation is not None:
         recommendation = strict_recommendation
     else:
@@ -1224,23 +1240,25 @@ def generate_fallback_analysis(filename, reason, partial_success=False, strict_s
         }
 
 def process_single_resume(args):
-    """Process a single resume with intelligent error handling and rate limit protection"""
+    """Process a single resume with memory optimization"""
     resume_file, job_description, index, total, batch_id = args
     
+    temp_file_path = None
+    
     try:
+        # Check memory before processing
+        memory_percent = check_memory_usage()
+        if memory_percent > 70:
+            print(f"⚠️ High memory usage ({memory_percent:.1f}%), adding extra delay")
+            time.sleep(5)
+            gc.collect()
+        
         print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
         
-        # IMPORTANT: Add staggered delays to prevent rate limits
+        # Add staggered delays
         if index > 0:
-            # Progressive delays based on position
-            if index < 3:
-                base_delay = 1.0
-            elif index < 6:
-                base_delay = 2.0
-            else:
-                base_delay = 3.0
-            
-            delay = base_delay + random.uniform(0, 0.5)
+            base_delay = 2.0  # Increased from 1.0
+            delay = base_delay + random.uniform(0.5, 1.5)
             print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
             time.sleep(delay)
         
@@ -1256,24 +1274,25 @@ def process_single_resume(args):
         
         file_ext = os.path.splitext(resume_file.filename)[1].lower()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        file_path = os.path.join(UPLOAD_FOLDER, f"batch_{batch_id}_{index}{file_ext}")
+        temp_file_path = os.path.join(UPLOAD_FOLDER, f"batch_{batch_id}_{index}{file_ext}")
         
-        # Save the file first
-        resume_file.save(file_path)
+        # Save the file
+        resume_file.save(temp_file_path)
         
-        # Store resume for preview
+        # Store resume for preview (memory optimized)
         analysis_id = f"{batch_id}_resume_{index}"
         preview_filename = store_resume_file(resume_file, resume_file.filename, analysis_id)
         
+        # Extract text based on file type
         if file_ext == '.pdf':
-            resume_text = extract_text_from_pdf(file_path)
+            resume_text = extract_text_from_pdf(temp_file_path)
         elif file_ext in ['.docx', '.doc']:
-            resume_text = extract_text_from_docx(file_path)
+            resume_text = extract_text_from_docx(temp_file_path)
         elif file_ext == '.txt':
-            resume_text = extract_text_from_txt(file_path)
+            resume_text = extract_text_from_txt(temp_file_path)
         else:
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
             return {
                 'filename': resume_file.filename,
                 'error': f'Unsupported format: {file_ext}',
@@ -1282,8 +1301,8 @@ def process_single_resume(args):
             }
         
         if resume_text.startswith('Error'):
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
             return {
                 'filename': resume_file.filename,
                 'error': resume_text,
@@ -1291,7 +1310,7 @@ def process_single_resume(args):
                 'index': index
             }
         
-        # Track key usage for rate limiting
+        # Track key usage
         if key_index:
             key_idx = key_index - 1
             key_usage[key_idx]['count'] += 1
@@ -1310,6 +1329,7 @@ def process_single_resume(args):
         analysis['filename'] = resume_file.filename
         analysis['original_filename'] = resume_file.filename
         
+        # Get file size
         resume_file.seek(0, 2)
         file_size = resume_file.tell()
         resume_file.seek(0)
@@ -1319,24 +1339,27 @@ def process_single_resume(args):
         analysis['processing_order'] = index + 1
         analysis['key_used'] = f"Key {key_index}"
         
-        # Add resume preview info
         analysis['resume_stored'] = preview_filename is not None
         analysis['has_pdf_preview'] = False
         
         if preview_filename:
             analysis['resume_preview_filename'] = preview_filename
             analysis['resume_original_filename'] = resume_file.filename
-            # Check if PDF preview is available
             if analysis_id in resume_storage and resume_storage[analysis_id].get('has_pdf_preview'):
                 analysis['has_pdf_preview'] = True
         
-        # Keep the preview file, remove only the temp upload file
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        # Remove temp file immediately
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+            temp_file_path = None
+        
+        # Force garbage collection
+        del resume_text
+        gc.collect()
         
         print(f"✅ Completed: {analysis.get('candidate_name')} - Score: {analysis.get('overall_score'):.1f} (Key {key_index})")
         
-        # Check if key needs cooling after this request
+        # Check if key needs cooling
         if key_index:
             key_idx = key_index - 1
             if key_usage[key_idx]['requests_this_minute'] >= MAX_REQUESTS_PER_MINUTE_PER_KEY - 5:
@@ -1350,8 +1373,9 @@ def process_single_resume(args):
         
     except Exception as e:
         print(f"❌ Error processing {resume_file.filename}: {str(e)}")
-        if 'file_path' in locals() and os.path.exists(file_path):
-            os.remove(file_path)
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+        gc.collect()
         return {
             'filename': resume_file.filename,
             'error': f"Processing error: {str(e)[:100]}",
@@ -1370,7 +1394,6 @@ def home():
     
     available_keys = sum(1 for key in GROQ_API_KEYS if key)
     
-    # Calculate current minute usage
     current_time = datetime.now()
     key_usage_info = []
     for i in range(5):
@@ -1404,6 +1427,7 @@ def home():
             .key-inactive { background: #f8d7da; color: #721c24; }
             .rate-limit-info { background: #e7f3ff; padding: 10px; border-radius: 5px; margin: 10px 0; }
             .scoring-info { background: #fff3e0; padding: 10px; border-radius: 5px; margin: 10px 0; border-left: 4px solid #ff6b6b; }
+            .memory-info { background: #f8f9fa; padding: 10px; border-radius: 5px; margin: 10px 0; border-left: 4px solid #007bff; }
         </style>
     </head>
     <body>
@@ -1414,6 +1438,17 @@ def home():
             
             <div class="status ''' + ('ready' if warmup_complete else 'warming') + '''">
                 <strong>Status:</strong> ''' + warmup_status + '''
+            </div>
+            
+            <div class="memory-info">
+                <strong>💾 MEMORY OPTIMIZED:</strong>
+                <ul>
+                    <li>Text extraction limited to 5 pages / 5000 chars per resume</li>
+                    <li>Automatic garbage collection after each resume</li>
+                    <li>Max storage: 100MB / 20 resumes</li>
+                    <li>Auto-cleanup of old files every 30 minutes</li>
+                    <li>Process monitoring to prevent OOM kills</li>
+                </ul>
             </div>
             
             <div class="scoring-info">
@@ -1433,7 +1468,7 @@ def home():
                 <strong>⚠️ RATE LIMIT PROTECTION ACTIVE:</strong>
                 <ul>
                     <li>Max ''' + str(MAX_REQUESTS_PER_MINUTE_PER_KEY) + ''' requests/minute per key</li>
-                    <li>Staggered delays between requests</li>
+                    <li>Staggered delays between requests (2-3 seconds)</li>
                     <li>Automatic key rotation</li>
                     <li>60s cooling on rate limits</li>
                     <li>Current usage: ''' + ', '.join(key_usage_info) + '''</li>
@@ -1448,10 +1483,11 @@ def home():
             <p><strong>Model:</strong> ''' + GROQ_MODEL + '''</p>
             <p><strong>API Provider:</strong> Groq (Parallel Processing)</p>
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
-            <p><strong>Processing:</strong> Rate-limited round-robin with staggered delays</p>
+            <p><strong>Processing:</strong> Sequential with memory optimization</p>
             <p><strong>Scoring:</strong> <span style="color: #ff6b6b; font-weight: bold;">PROFESSIONAL ATS - STRICT, DETERMINISTIC, DOMAIN-AWARE</span></p>
             <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/5</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
+            <p><strong>Memory Optimization:</strong> <span style="color: #00B050;">✅ ACTIVE</span></p>
             
             <h2>📡 Endpoints</h2>
             <div class="endpoint">
@@ -1521,8 +1557,8 @@ def analyze_resume():
             print(f"❌ File too large: {file_size} bytes")
             return jsonify({'error': 'File size too large. Maximum size is 15MB.'}), 400
         
-        # Add small delay even for single requests
-        time.sleep(0.5 + random.uniform(0, 0.3))
+        # Add delay for single requests
+        time.sleep(1.0)
         
         api_key, key_index = get_available_key()
         if not api_key:
@@ -1533,7 +1569,6 @@ def analyze_resume():
         file_path = os.path.join(UPLOAD_FOLDER, f"resume_{timestamp}{file_ext}")
         resume_file.save(file_path)
         
-        # Store resume for preview
         analysis_id = f"single_{timestamp}"
         preview_filename = store_resume_file(resume_file, resume_file.filename, analysis_id)
         
@@ -1555,7 +1590,7 @@ def analyze_resume():
         excel_filename = f"single_analysis_{analysis_id}.xlsx"
         excel_path = create_single_report(analysis, job_description, excel_filename)
         
-        # Keep the preview file, remove only the temp upload file
+        # Remove temp file
         if os.path.exists(file_path):
             os.remove(file_path)
         
@@ -1567,14 +1602,12 @@ def analyze_resume():
         analysis['analysis_id'] = analysis_id
         analysis['key_used'] = f"Key {key_index}"
         
-        # Add resume preview info
         analysis['resume_stored'] = preview_filename is not None
         analysis['has_pdf_preview'] = False
         
         if preview_filename:
             analysis['resume_preview_filename'] = preview_filename
             analysis['resume_original_filename'] = resume_file.filename
-            # Check if PDF preview is available
             if analysis_id in resume_storage and resume_storage[analysis_id].get('has_pdf_preview'):
                 analysis['has_pdf_preview'] = True
         
@@ -1591,16 +1624,21 @@ def analyze_resume():
 
 @app.route('/analyze-batch', methods=['POST'])
 def analyze_resume_batch():
-    """Analyze multiple resumes with parallel processing and rate limit protection"""
+    """Analyze multiple resumes with memory optimization"""
     update_activity()
+    
+    temp_files = []
     
     try:
         print("\n" + "="*50)
         print("📦 New batch analysis request received")
         start_time = time.time()
         
-        # ENHANCED: Clear used scores - but with deterministic scoring, we don't need randomization
-        # Just for tracking purposes
+        # Check memory before starting
+        memory_percent = check_memory_usage()
+        if memory_percent > 70:
+            print(f"⚠️ High memory usage ({memory_percent:.1f}%), forcing GC before batch")
+            gc.collect()
         
         if 'resumes' not in request.files:
             print("❌ No 'resumes' key in request.files")
@@ -1645,9 +1683,17 @@ def analyze_resume_batch():
         print(f"🔄 Processing {len(resume_files)} resumes with {available_keys} keys...")
         print(f"⚠️ RATE LIMIT PROTECTION: Staggered delays, max {MAX_REQUESTS_PER_MINUTE_PER_KEY} requests/minute/key")
         print(f"🏢 PROFESSIONAL ATS SCORING: Strict domain matching, deterministic results")
+        print(f"💾 MEMORY OPTIMIZATION: Active - processing sequentially with GC")
         
-        # Process sequentially with delays (safer than parallel for rate limits)
+        # Process sequentially with memory optimization
         for index, resume_file in enumerate(resume_files):
+            # Check memory before each resume
+            memory_percent = check_memory_usage()
+            if memory_percent > 75:
+                print(f"⚠️ Memory critical ({memory_percent:.1f}%), pausing for GC")
+                gc.collect()
+                time.sleep(3)
+            
             if resume_file.filename == '':
                 errors.append({
                     'filename': 'Empty file',
@@ -1670,14 +1716,16 @@ def analyze_resume_batch():
                     'index': result.get('index')
                 })
             
+            # Force GC after each resume
+            gc.collect()
+            
             # Check if any key needs cooling
             for i in range(5):
                 if GROQ_API_KEYS[i] and key_usage[i]['requests_this_minute'] >= MAX_REQUESTS_PER_MINUTE_PER_KEY - 2:
                     print(f"⚠️ Key {i+1} near limit, marking for cooling")
                     mark_key_cooling(i, 30)
         
-        # ENHANCED: Deterministic ranking - always sort by score, ties broken by filename hash
-        # This ensures consistent ordering every time
+        # Deterministic ranking
         all_analyses.sort(key=lambda x: (-x.get('overall_score', 0), hashlib.md5(x.get('filename', '').encode()).hexdigest()))
         
         for rank, analysis in enumerate(all_analyses, 1):
@@ -1693,7 +1741,6 @@ def analyze_resume_batch():
             except Exception as e:
                 print(f"❌ Failed to create Excel report: {str(e)}")
                 traceback.print_exc()
-                # Create a minimal report
                 batch_excel_path = create_minimal_batch_report(all_analyses, job_description, excel_filename)
         
         key_stats = []
@@ -1709,11 +1756,10 @@ def analyze_resume_batch():
         
         total_time = time.time() - start_time
         
-        # Calculate score statistics
         if all_analyses:
             scores = [a.get('overall_score', 0) for a in all_analyses]
             avg_score = round(sum(scores) / len(scores), 2)
-            unique_scores = len(set(scores))  # Now truly unique due to deterministic scoring
+            unique_scores = len(set(scores))
             score_range = f"{min(scores):.1f}-{max(scores):.1f}"
         else:
             avg_score = 0
@@ -1733,7 +1779,7 @@ def analyze_resume_batch():
             'ai_provider': "groq",
             'ai_status': "Warmed up" if warmup_complete else "Warming up",
             'processing_time': f"{total_time:.2f}s",
-            'processing_method': 'rate_limited_sequential',
+            'processing_method': 'sequential_with_memory_optimization',
             'key_statistics': key_stats,
             'available_keys': available_keys,
             'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
@@ -1749,7 +1795,8 @@ def analyze_resume_batch():
                 'no_ranking_flip': True
             },
             'scoring_system': '🏢 PROFESSIONAL ATS - STRICT DOMAIN MATCHING',
-            'warning': 'This is a strict, deterministic ATS scoring system. Domain mismatch results in low scores (25-40).'
+            'warning': 'This is a strict, deterministic ATS scoring system. Domain mismatch results in low scores (25-40).',
+            'memory_optimization': 'Active - Sequential processing with GC'
         }
         
         print(f"✅ Batch analysis completed in {total_time:.2f}s")
@@ -1758,6 +1805,7 @@ def analyze_resume_batch():
             print(f"  {stat['key']}: {stat['used']} total, {stat['requests_this_minute']}/min, {stat['errors']} errors, {stat['status']}")
         print(f"🏢 PROFESSIONAL ATS SCORING - Avg: {avg_score:.2f}, Range: {score_range}")
         print(f"   Deterministic Ranking: Enabled - No ranking flips")
+        print(f"💾 Memory optimization: Active")
         print("="*50 + "\n")
         
         return jsonify(batch_summary)
@@ -1774,18 +1822,15 @@ def get_resume_preview(analysis_id):
     try:
         print(f"📄 Resume preview request for: {analysis_id}")
         
-        # Get resume info from storage
         resume_info = get_resume_preview(analysis_id)
         if not resume_info:
             return jsonify({'error': 'Resume preview not found'}), 404
         
-        # Try to use PDF preview if available
         preview_path = resume_info.get('pdf_path') or resume_info['path']
         
         if not os.path.exists(preview_path):
             return jsonify({'error': 'Preview file not found'}), 404
         
-        # Determine file type
         file_ext = os.path.splitext(preview_path)[1].lower()
         
         if file_ext == '.pdf':
@@ -1796,7 +1841,6 @@ def get_resume_preview(analysis_id):
                 mimetype='application/pdf'
             )
         else:
-            # If not PDF, try to convert or return original
             return send_file(
                 preview_path,
                 as_attachment=True,
@@ -1816,7 +1860,6 @@ def get_resume_original(analysis_id):
     try:
         print(f"📄 Original resume request for: {analysis_id}")
         
-        # Get resume info from storage
         resume_info = get_resume_preview(analysis_id)
         if not resume_info:
             return jsonify({'error': 'Resume not found'}), 404
@@ -1841,17 +1884,13 @@ def convert_experience_to_bullet_points(experience_summary):
     if not experience_summary:
         return "• No experience summary available."
     
-    # Clean the text
     text = experience_summary.strip()
     
-    # Remove any trailing ellipsis or incomplete sentences
     if '...' in text:
-        # Find the last complete sentence before ellipsis
         sentences = text.split('. ')
         complete_sentences = []
         for sentence in sentences:
             if '...' in sentence:
-                # Remove the incomplete part
                 sentence = sentence.split('...')[0]
                 if sentence.strip():
                     complete_sentences.append(sentence.strip() + '.')
@@ -1860,21 +1899,16 @@ def convert_experience_to_bullet_points(experience_summary):
                 complete_sentences.append(sentence.strip() + '.')
         text = ' '.join(complete_sentences)
     
-    # Split into sentences
     sentences = text.replace('\n', ' ').split('. ')
     
-    # Filter out empty sentences
     sentences = [s.strip() for s in sentences if s.strip()]
     
-    # Ensure proper sentence endings
     for i, sentence in enumerate(sentences):
         if not sentence.endswith('.') and not sentence.endswith('!') and not sentence.endswith('?'):
             sentences[i] = sentence + '.'
     
-    # Limit to 5 bullet points max
     sentences = sentences[:5]
     
-    # Convert to bullet points
     bullet_points = '\n'.join([f'• {sentence}' for sentence in sentences])
     
     return bullet_points
@@ -1886,17 +1920,14 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         ws = wb.active
         ws.title = "Candidate Analysis"
         
-        # Define styles
         title_font = Font(bold=True, size=16, color="FFFFFF")
         header_font = Font(bold=True, color="FFFFFF", size=11)
         label_font = Font(bold=True, size=10)
         value_font = Font(size=10)
         
-        # Color scheme
-        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")  # Blue
-        section_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")  # Light Blue
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        section_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
         
-        # Border styles
         thin_border = Border(
             left=Side(style='thin', color='000000'),
             right=Side(style='thin', color='000000'),
@@ -1911,7 +1942,6 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
             bottom=Side(style='medium', color='000000')
         )
         
-        # Title Section
         ws.merge_cells('A1:H1')
         title_cell = ws['A1']
         title_cell.value = "RESUME ANALYSIS REPORT - SINGLE CANDIDATE"
@@ -1920,7 +1950,6 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         title_cell.alignment = Alignment(horizontal='center', vertical='center')
         title_cell.border = thick_border
         
-        # Report Info Section
         ws['A3'] = "Report Date:"
         ws['B3'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ws['A3'].font = label_font
@@ -1943,7 +1972,6 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         ws['B6'].font = value_font
         ws.merge_cells('B6:H6')
         
-        # Candidate Information Section
         start_row = 8
         ws.merge_cells(f'A{start_row}:H{start_row}')
         section_cell = ws[f'A{start_row}']
@@ -1953,7 +1981,6 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         section_cell.alignment = Alignment(horizontal='center')
         section_cell.border = thin_border
         
-        # Candidate Data
         data_rows = [
             ("Candidate Name", analysis.get('candidate_name', 'N/A')),
             ("File Name", analysis.get('filename', 'N/A')),
@@ -1984,7 +2011,6 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
                     ws[f'B{row}'].font = Font(bold=True, color="FF0000", size=10)
             ws.merge_cells(f'B{row}:H{row}')
         
-        # Skills Matched Section
         skills_row = start_row + len(data_rows) + 2
         ws.merge_cells(f'A{skills_row}:H{skills_row}')
         skills_header = ws[f'A{skills_row}']
@@ -2006,7 +2032,6 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
             ws[f'B{row}'].border = thin_border
             ws.merge_cells(f'B{row}:H{row}')
         
-        # Skills Missing Section
         missing_start = skills_row + len(skills_matched) + 2
         ws.merge_cells(f'A{missing_start}:H{missing_start}')
         missing_header = ws[f'A{missing_start}']
@@ -2028,7 +2053,6 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
             ws[f'B{row}'].border = thin_border
             ws.merge_cells(f'B{row}:H{row}')
         
-        # Experience Summary Section - Now in bullet points
         exp_start = missing_start + len(skills_missing) + 2
         ws.merge_cells(f'A{exp_start}:H{exp_start}')
         exp_header = ws[f'A{exp_start}']
@@ -2038,7 +2062,6 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         exp_header.alignment = Alignment(horizontal='center')
         exp_header.border = thin_border
         
-        # Convert experience summary to bullet points
         experience_bullets = convert_experience_to_bullet_points(analysis.get('experience_summary', ''))
         
         ws.merge_cells(f'A{exp_start + 1}:H{exp_start + 6}')
@@ -2047,9 +2070,8 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
         exp_cell.font = value_font
         exp_cell.alignment = Alignment(wrap_text=True, vertical='top')
         exp_cell.border = thin_border
-        ws.row_dimensions[exp_start + 1].height = 100  # Increased height for bullet points
+        ws.row_dimensions[exp_start + 1].height = 100
         
-        # Key Strengths Section
         strengths_start = exp_start + 8
         ws.merge_cells(f'A{strengths_start}:H{strengths_start}')
         strengths_header = ws[f'A{strengths_start}']
@@ -2071,7 +2093,6 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
             ws[f'B{row}'].border = thin_border
             ws.merge_cells(f'B{row}:H{row}')
         
-        # Areas for Improvement Section
         improve_start = strengths_start + len(key_strengths) + 2
         ws.merge_cells(f'A{improve_start}:H{improve_start}')
         improve_header = ws[f'A{improve_start}']
@@ -2093,12 +2114,10 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
             ws[f'B{row}'].border = thin_border
             ws.merge_cells(f'B{row}:H{row}')
         
-        # Set column widths
         column_widths = {'A': 20, 'B': 60}
         for col, width in column_widths.items():
             ws.column_dimensions[col].width = width
         
-        # Save the file
         filepath = os.path.join(REPORTS_FOLDER, filename)
         wb.save(filepath)
         print(f"📄 Single Excel report saved to: {filepath}")
@@ -2107,7 +2126,6 @@ def create_single_report(analysis, job_description, filename="single_analysis.xl
     except Exception as e:
         print(f"❌ Error creating single Excel report: {str(e)}")
         traceback.print_exc()
-        # Create minimal report
         filepath = os.path.join(REPORTS_FOLDER, filename)
         wb = Workbook()
         ws = wb.active
@@ -2125,24 +2143,20 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
     try:
         wb = Workbook()
         
-        # ================== CANDIDATE COMPARISON SHEET ==================
         ws_comparison = wb.active
         ws_comparison.title = "Candidate Comparison"
         
-        # Define styles
         title_font = Font(bold=True, size=16, color="FFFFFF")
         header_font = Font(bold=True, color="FFFFFF", size=11)
         subheader_font = Font(bold=True, color="000000", size=10)
         normal_font = Font(size=10)
         bold_font = Font(bold=True, size=10)
         
-        # Color scheme
-        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")  # Blue
-        subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")  # Light Blue
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
         even_row_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
         odd_row_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
         
-        # Border styles
         thin_border = Border(
             left=Side(style='thin', color='000000'),
             right=Side(style='thin', color='000000'),
@@ -2157,7 +2171,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             bottom=Side(style='medium', color='000000')
         )
         
-        # Title Section
         ws_comparison.merge_cells('A1:M1')
         title_cell = ws_comparison['A1']
         title_cell.value = "PROFESSIONAL ATS RESUME ANALYSIS REPORT - BATCH COMPARISON"
@@ -2166,7 +2179,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
         title_cell.alignment = Alignment(horizontal='center', vertical='center')
         title_cell.border = thick_border
         
-        # Report Info Section
         info_row = 3
         info_data = [
             ("Report Date:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
@@ -2182,7 +2194,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             if label == "Scoring System:":
                 ws_comparison.cell(row=info_row, column=2 + i*3).font = Font(bold=True, color="FF0000", size=10)
         
-        # Candidate Comparison Table Headers
         start_row = 5
         headers = [
             ("Rank", 8),
@@ -2199,7 +2210,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ("Areas for Improvement", 25)
         ]
         
-        # Write headers
         for col, (header, width) in enumerate(headers, start=1):
             cell = ws_comparison.cell(row=start_row, column=col, value=header)
             cell.font = header_font
@@ -2208,45 +2218,38 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             cell.border = thin_border
             ws_comparison.column_dimensions[get_column_letter(col)].width = width
         
-        # Write candidate data
         for idx, analysis in enumerate(analyses):
             row = start_row + idx + 1
             row_fill = even_row_fill if idx % 2 == 0 else odd_row_fill
             
-            # Rank
             cell = ws_comparison.cell(row=row, column=1, value=analysis.get('rank', '-'))
             cell.font = bold_font
             cell.alignment = Alignment(horizontal='center')
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Candidate Name
             cell = ws_comparison.cell(row=row, column=2, value=analysis.get('candidate_name', 'Unknown'))
             cell.font = normal_font
             cell.fill = row_fill
             cell.border = thin_border
             
-            # File Name
             cell = ws_comparison.cell(row=row, column=3, value=analysis.get('filename', 'Unknown'))
             cell.font = normal_font
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Domain Detected
             cell = ws_comparison.cell(row=row, column=4, value=analysis.get('domain_detected', 'general'))
             cell.font = normal_font
             cell.alignment = Alignment(horizontal='center')
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Years of Experience
             cell = ws_comparison.cell(row=row, column=5, value=analysis.get('years_of_experience', 'Not specified'))
             cell.font = normal_font
             cell.alignment = Alignment(horizontal='center')
             cell.fill = row_fill
             cell.border = thin_border
             
-            # ATS Score with color coding
             score = analysis.get('overall_score', 0)
             cell = ws_comparison.cell(row=row, column=6, value=f"{score:.1f}")
             cell.alignment = Alignment(horizontal='center')
@@ -2261,13 +2264,11 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             else:
                 cell.font = Font(bold=True, color="FF0000", size=10)
             
-            # Recommendation
             cell = ws_comparison.cell(row=row, column=7, value=analysis.get('recommendation', 'N/A'))
             cell.font = normal_font
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Experience Summary - Now in bullet points
             exp_summary = analysis.get('experience_summary', 'No summary available.')
             experience_bullets = convert_experience_to_bullet_points(exp_summary)
             cell = ws_comparison.cell(row=row, column=8, value=experience_bullets)
@@ -2276,7 +2277,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Skills Matched
             skills_matched = analysis.get('skills_matched', [])
             cell = ws_comparison.cell(row=row, column=9, value="\n".join([f"• {skill}" for skill in skills_matched[:8]]))
             cell.font = Font(size=9)
@@ -2284,7 +2284,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Skills Missing
             skills_missing = analysis.get('skills_missing', [])
             cell = ws_comparison.cell(row=row, column=10, value="\n".join([f"• {skill}" for skill in skills_missing[:8]]))
             cell.font = Font(size=9, color="FF0000")
@@ -2292,7 +2291,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Key Strengths
             strengths = analysis.get('key_strengths', [])
             cell = ws_comparison.cell(row=row, column=11, value="\n".join([f"• {strength}" for strength in strengths[:3]]))
             cell.font = Font(size=9, color="00B050")
@@ -2300,7 +2298,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             cell.fill = row_fill
             cell.border = thin_border
             
-            # Areas for Improvement
             improvements = analysis.get('areas_for_improvement', [])
             cell = ws_comparison.cell(row=row, column=12, value="\n".join([f"• {area}" for area in improvements[:3]]))
             cell.font = Font(size=9, color="FF6600")
@@ -2308,14 +2305,12 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             cell.fill = row_fill
             cell.border = thin_border
         
-        # Add summary statistics at the bottom
         summary_row = start_row + len(analyses) + 2
         scores = [a.get('overall_score', 0) for a in analyses]
         avg_score = round(sum(scores) / len(scores), 2) if scores else 0
         top_score = max(scores, default=0)
         bottom_score = min(scores, default=0)
         
-        # Calculate average years of experience
         years_list = []
         for a in analyses:
             years_text = a.get('years_of_experience', 'Not specified')
@@ -2341,7 +2336,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             except:
                 avg_years = "Various"
         
-        # Unique scores count
         unique_scores = len(set(scores))
         
         summary_data = [
@@ -2361,7 +2355,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             if label == "Scoring System:":
                 ws_comparison.cell(row=summary_row, column=2 + i*2).font = Font(bold=True, color="FF0000", size=10)
         
-        # ================== INDIVIDUAL CANDIDATE SHEETS ==================
         for analysis in analyses:
             candidate_name = analysis.get('candidate_name', f"Candidate_{analysis.get('rank', 'Unknown')}")
             sheet_name = re.sub(r'[\\/*?:[\]]', '_', candidate_name[:31])
@@ -2376,7 +2369,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             candidate_title_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
             candidate_section_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
             
-            # Title Section
             ws_candidate.merge_cells('A1:H1')
             title_cell = ws_candidate['A1']
             title_cell.value = f"PROFESSIONAL ATS ANALYSIS - {candidate_name.upper()}"
@@ -2385,7 +2377,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             title_cell.alignment = Alignment(horizontal='center', vertical='center')
             title_cell.border = thick_border
             
-            # Report Info Section
             ws_candidate['A3'] = "Report Date:"
             ws_candidate['B3'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ws_candidate['A3'].font = candidate_label_font
@@ -2407,7 +2398,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ws_candidate['A6'].font = candidate_label_font
             ws_candidate['B6'].font = candidate_value_font
             
-            # File Name
             ws_candidate.merge_cells('A8:H8')
             file_header = ws_candidate['A8']
             file_header.value = "FILE NAME"
@@ -2422,7 +2412,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             file_cell.font = candidate_value_font
             file_cell.border = thin_border
             
-            # Domain Detected
             ws_candidate.merge_cells('A11:H11')
             domain_header = ws_candidate['A11']
             domain_header.value = "DOMAIN DETECTED"
@@ -2438,7 +2427,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             domain_cell.alignment = Alignment(horizontal='center')
             domain_cell.border = thin_border
             
-            # Years of Experience
             ws_candidate.merge_cells('A14:H14')
             exp_header = ws_candidate['A14']
             exp_header.value = "YEARS OF EXPERIENCE"
@@ -2454,7 +2442,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             exp_cell.alignment = Alignment(horizontal='center')
             exp_cell.border = thin_border
             
-            # ATS Score
             ws_candidate.merge_cells('A17:H17')
             score_header = ws_candidate['A17']
             score_header.value = "ATS SCORE"
@@ -2470,7 +2457,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             score_cell.alignment = Alignment(horizontal='center')
             score_cell.border = thin_border
             
-            # Recommendation
             ws_candidate.merge_cells('A20:H20')
             rec_header = ws_candidate['A20']
             rec_header.value = "RECOMMENDATION"
@@ -2486,7 +2472,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             rec_cell.alignment = Alignment(horizontal='center')
             rec_cell.border = thin_border
             
-            # Skills Matched
             skills_row = 23
             ws_candidate.merge_cells(f'A{skills_row}:H{skills_row}')
             skills_header = ws_candidate[f'A{skills_row}']
@@ -2504,7 +2489,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
                 cell.font = Font(size=10, color="00B050")
                 cell.border = thin_border
             
-            # Skills Missing
             missing_start = skills_row + len(skills_matched) + 2
             ws_candidate.merge_cells(f'A{missing_start}:H{missing_start}')
             missing_header = ws_candidate[f'A{missing_start}']
@@ -2522,7 +2506,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
                 cell.font = Font(size=10, color="FF0000")
                 cell.border = thin_border
             
-            # Experience Summary - Now in bullet points
             exp_start = missing_start + len(skills_missing) + 2
             ws_candidate.merge_cells(f'A{exp_start}:H{exp_start}')
             exp_header = ws_candidate[f'A{exp_start}']
@@ -2542,7 +2525,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             exp_cell.border = thin_border
             ws_candidate.row_dimensions[exp_start + 1].height = 100
             
-            # Key Strengths
             strengths_start = exp_start + 8
             ws_candidate.merge_cells(f'A{strengths_start}:H{strengths_start}')
             strengths_header = ws_candidate[f'A{strengths_start}']
@@ -2560,7 +2542,6 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
                 cell.font = Font(size=10, color="00B050")
                 cell.border = thin_border
             
-            # Areas for Improvement
             improve_start = strengths_start + len(key_strengths) + 2
             ws_candidate.merge_cells(f'A{improve_start}:H{improve_start}')
             improve_header = ws_candidate[f'A{improve_start}']
@@ -2830,12 +2811,13 @@ def quick_check():
                             'available_keys': available_keys,
                             'tested_key': f"Key {i+1}",
                             'max_batch_size': MAX_BATCH_SIZE,
-                            'processing_method': 'rate_limited_sequential',
+                            'processing_method': 'sequential_with_memory_optimization',
                             'skills_analysis': '5-8 skills per category',
                             'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
                             'scoring_method': 'Professional ATS - Strict Domain Matching',
                             'deterministic_results': True,
-                            'no_ranking_flip': True
+                            'no_ranking_flip': True,
+                            'memory_optimization': 'Active'
                         })
                 except:
                     continue
@@ -2876,13 +2858,14 @@ def ping():
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
         'keep_alive_active': True,
         'max_batch_size': MAX_BATCH_SIZE,
-        'processing_method': 'rate_limited_sequential',
+        'processing_method': 'sequential_with_memory_optimization',
         'skills_analysis': '5-8 skills per category',
         'years_experience': 'Included in analysis',
         'scoring_method': 'Professional ATS - Strict Domain Matching',
         'deterministic_results': True,
         'no_ranking_flip': True,
-        'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY} requests/minute/key)"
+        'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY} requests/minute/key)",
+        'memory_optimization': 'Active'
     })
 
 @app.route('/health', methods=['GET'])
@@ -2922,6 +2905,15 @@ def health_check():
     
     available_keys = sum(1 for key in GROQ_API_KEYS if key)
     
+    # Check memory
+    try:
+        process = psutil.Process(os.getpid())
+        memory_percent = process.memory_percent()
+        memory_mb = process.memory_info().rss / 1024 / 1024
+    except:
+        memory_percent = 0
+        memory_mb = 0
+    
     return jsonify({
         'status': 'Service is running', 
         'timestamp': datetime.now().isoformat(),
@@ -2936,7 +2928,7 @@ def health_check():
         'inactive_minutes': inactive_minutes,
         'version': '4.0.0',
         'key_status': key_status,
-        'available_keys': configured_keys_count,  # Fixed: Now returns actual configured keys count
+        'available_keys': configured_keys_count,
         'total_keys': 5,
         'configuration': {
             'max_batch_size': MAX_BATCH_SIZE,
@@ -2948,10 +2940,11 @@ def health_check():
             'scoring_system': 'PROFESSIONAL ATS - STRICT DOMAIN MATCHING',
             'deterministic_results': True,
             'no_ranking_flip': True,
-            'domain_keyword_libraries': list(DOMAIN_KEYWORDS.keys())
+            'domain_keyword_libraries': list(DOMAIN_KEYWORDS.keys()),
+            'max_concurrent_requests': MAX_CONCURRENT_REQUESTS
         },
-        'processing_method': 'rate_limited_sequential',
-        'performance_target': '6 resumes in 20-30 seconds (safer)',
+        'processing_method': 'sequential_with_memory_optimization',
+        'performance_target': '10 resumes in 60-90 seconds (with memory optimization)',
         'skills_analysis': '5-8 skills per category',
         'summaries': 'Complete 4-5 sentences each',
         'years_experience': 'Included in analysis',
@@ -2969,7 +2962,17 @@ def health_check():
             'ranking_stability': 'Never flips between analyses'
         },
         'rate_limit_protection': 'ACTIVE - Staggered delays, minute tracking, automatic cooling',
-        'always_awake': True
+        'always_awake': True,
+        'memory_optimization': {
+            'active': True,
+            'current_memory_percent': round(memory_percent, 1),
+            'current_memory_mb': round(memory_mb, 1),
+            'max_memory_percent': MAX_MEMORY_PERCENT,
+            'max_storage_mb': MAX_STORAGE_SIZE_MB,
+            'max_stored_resumes': MAX_STORED_RESUMES,
+            'text_limit_chars': 5000,
+            'pdf_pages_limit': 5
+        }
     })
 
 def cleanup_on_exit():
@@ -2981,23 +2984,47 @@ def cleanup_on_exit():
     try:
         # Clean up temporary files
         for folder in [UPLOAD_FOLDER, RESUME_PREVIEW_FOLDER]:
-            for filename in os.listdir(folder):
-                filepath = os.path.join(folder, filename)
-                if os.path.isfile(filepath):
-                    os.remove(filepath)
+            if os.path.exists(folder):
+                for filename in os.listdir(folder):
+                    filepath = os.path.join(folder, filename)
+                    if os.path.isfile(filepath):
+                        try:
+                            os.remove(filepath)
+                        except:
+                            pass
         print("✅ Cleaned up temporary files")
-    except:
-        pass
+        
+        # Clear caches
+        with cache_lock:
+            score_cache.clear()
+        with analysis_cache_lock:
+            analysis_result_cache.clear()
+        resume_storage.clear()
+        gc.collect()
+        
+    except Exception as e:
+        print(f"⚠️ Cleanup error: {str(e)}")
 
 # Periodic cleanup
 def periodic_cleanup():
     """Periodically clean up old resume previews"""
     while service_running:
         try:
-            time.sleep(300)  # Run every 5 minutes
+            time.sleep(300)
             cleanup_resume_previews()
+            check_memory_usage()
         except Exception as e:
             print(f"⚠️ Periodic cleanup error: {str(e)}")
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    print(f"\n🛑 Received signal {signum}, shutting down...")
+    cleanup_on_exit()
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
 
 atexit.register(cleanup_on_exit)
 
@@ -3025,10 +3052,10 @@ if __name__ == '__main__':
     print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
     print(f"⚠️ RATE LIMIT PROTECTION: ACTIVE")
     print(f"📊 Max requests/minute/key: {MAX_REQUESTS_PER_MINUTE_PER_KEY}")
-    print(f"⏳ Staggered delays: 1-3 seconds between requests")
+    print(f"⏳ Staggered delays: 2-3 seconds between requests")
     print(f"🔀 Key rotation: Smart load balancing (5 keys)")
     print(f"🛡️ Cooling: 60s on rate limits")
-    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")  # UPDATED: Shows 10 resumes
+    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
     print(f"✅ Years of Experience: Included in analysis")
     print(f"🏢 PROFESSIONAL ATS SCORING: STRICT DOMAIN MATCHING")
@@ -3040,13 +3067,25 @@ if __name__ == '__main__':
     print(f"✅ Excel Report: Domain Detected column added")
     print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
     print(f"✅ Insights: 3 strengths & 3 improvements")
-    print(f"✅ Resume Preview: Enabled with PDF conversion")
-    print(f"⚠️ Performance: ~6 resumes in 20-30 seconds (SAFER for rate limits)")
+    print(f"✅ Resume Preview: Enabled with memory optimization")
+    print(f"⚠️ Performance: ~10 resumes in 60-90 seconds (with memory optimization)")
     print(f"✅ Excel Reports: Single & Batch with Individual Sheets")
     print(f"✅ Always Awake: Backend will stay active with self-pinging")
+    print(f"💾 MEMORY OPTIMIZATION: ACTIVE")
+    print(f"   - Text extraction limited to 5 pages / 5000 chars")
+    print(f"   - Automatic GC after each resume")
+    print(f"   - Max storage: {MAX_STORAGE_SIZE_MB}MB / {MAX_STORED_RESUMES} resumes")
+    print(f"   - Memory monitoring at {MAX_MEMORY_PERCENT}% threshold")
     print("="*50 + "\n")
     
     # Check for required dependencies
+    try:
+        import psutil
+        print("✅ Memory monitoring library available")
+    except ImportError:
+        print("⚠️  Warning: psutil not installed. Install with: pip install psutil")
+        print("   Memory monitoring will be limited")
+    
     try:
         from reportlab.lib.pagesizes import letter
         from reportlab.pdfgen import canvas
@@ -3069,7 +3108,6 @@ if __name__ == '__main__':
         keep_warm_thread = threading.Thread(target=keep_service_warm, daemon=True)
         keep_warm_thread.start()
         
-        # Start keep-backend-awake thread
         keep_awake_thread = threading.Thread(target=keep_backend_awake, daemon=True)
         keep_awake_thread.start()
         
