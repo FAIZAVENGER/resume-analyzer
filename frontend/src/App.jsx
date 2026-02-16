@@ -445,7 +445,7 @@ function App() {
     }
     
     if (validFiles.length > 0) {
-      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10)); // Updated from 6 to 10
+      setResumeFiles(prev => [...prev, ...validFiles].slice(0, 10)); // Updated to 10
       setError('');
     }
   };
@@ -1050,6 +1050,9 @@ function App() {
             <span className="status-badge scoring">
               <TargetIcon size={14} /> Granular Scoring
             </span>
+            <span className="status-badge optimized">
+              <Zap size={14} /> 10 Resume Support
+            </span>
           </div>
           
           {/* Batch Mode Toggle */}
@@ -1094,7 +1097,7 @@ function App() {
                 gap: '0.5rem'
               }}
             >
-              <Users size={16} /> Multiple Resumes (Up to 10) {/* Updated from 6 to 10 */}
+              <Users size={16} /> Multiple Resumes (Up to 10)
             </button>
           </div>
         </div>
@@ -1111,7 +1114,7 @@ function App() {
                 <h2>{batchMode ? 'Upload Resumes' : 'Upload Resume'}</h2>
                 <p className="card-subtitle">
                   {batchMode 
-                    ? 'Upload multiple resumes (Max 10, 15MB each)' // Updated from 6 to 10
+                    ? 'Upload multiple resumes (Max 10, 15MB each)'
                     : 'Supported: PDF, DOC, DOCX, TXT (Max 15MB)'}
                 </p>
               </div>
@@ -1226,7 +1229,7 @@ function App() {
                         <span className="upload-text">
                           Drag & drop multiple files or click to browse
                         </span>
-                        <span className="upload-hint">Max 10 files, 15MB each</span> {/* Updated from 6 to 10 */}
+                        <span className="upload-hint">Max 10 files, 15MB each</span>
                       </>
                     )}
                   </div>
@@ -1268,6 +1271,12 @@ function App() {
                   <TargetIcon size={14} />
                 </div>
                 <span>Granular Scoring</span>
+              </div>
+              <div className="stat">
+                <div className="stat-icon">
+                  <Zap size={14} />
+                </div>
+                <span>10 Resume Support</span>
               </div>
             </div>
           </div>
@@ -1363,7 +1372,7 @@ function App() {
                     <span>•</span>
                     <span>Rate Protection: Active</span>
                     <span>•</span>
-                    <span>Max: 10 resumes</span> {/* Updated from 6 to 10 */}
+                    <span>Max: 10 resumes</span>
                     <span>•</span>
                     <span>Scoring: Granular unique</span>
                   </>
@@ -1426,6 +1435,10 @@ function App() {
               <div className="tip">
                 <Download size={16} />
                 <span>Download comprehensive Excel report with candidate name & experience summary</span>
+              </div>
+              <div className="tip">
+                <Zap size={16} />
+                <span>Optimized for 10 resumes with reduced delays</span>
               </div>
             </>
           ) : (
@@ -2275,7 +2288,7 @@ function App() {
                     <span className="powered-by">Powered by</span>
                     <span className="groq-badge">⚡ Groq</span>
                     <span className="divider">•</span>
-                    <span className="tagline">Granular Scoring • Experience Summary • Years of Experience</span>
+                    <span className="tagline">Granular Scoring • Experience Summary • 10 Resume Batch</span>
                   </div>
                 </div>
               </div>
@@ -2378,6 +2391,12 @@ function App() {
                 <span>Granular Scoring</span>
               </div>
               
+              {/* 10 Resume Feature */}
+              <div className="feature batch-10-feature">
+                <Zap size={16} />
+                <span>10 Resume Batch</span>
+              </div>
+              
               {/* Navigation Indicator */}
               {currentView !== 'main' && (
                 <div className="feature nav-indicator">
@@ -2476,14 +2495,14 @@ function App() {
                 </div>
                 <div className="summary-item">
                   <div className="summary-label">Max Batch Size</div>
-                  <div className="summary-value warning">
-                    📁 10 resumes (Reduced from 20) {/* Updated from 6 to 10 */}
+                  <div className="summary-value success">
+                    📁 10 resumes (Optimized)
                   </div>
                 </div>
                 <div className="summary-item">
                   <div className="summary-label">Processing Method</div>
                   <div className="summary-value info">
-                    ⏳ Sequential with delays
+                    ⏳ Sequential with optimized delays (1.5-3s)
                   </div>
                 </div>
                 <div className="summary-item">
@@ -2571,6 +2590,10 @@ function App() {
                                 currentView === 'candidate-detail' ? 'Details' : 
                                 batchMode ? 'Batch' : 'Single'}</span>
                 </div>
+                <div className="status-indicator active">
+                  <div className="indicator-dot" style={{ background: '#ffd166' }}></div>
+                  <span>Max Batch: 10 Resumes</span>
+                </div>
               </div>
             </div>
           </div>
@@ -2588,7 +2611,7 @@ function App() {
                 <span>ResuGo</span>
               </div>
               <p className="footer-tagline">
-                Groq AI • 5-key with rate protection • Granular scoring • Experience summary • Years of experience
+                Groq AI • 5-key with rate protection • Granular scoring • 10 resume batch
               </p>
             </div>
             
@@ -2598,7 +2621,7 @@ function App() {
                 <a href="#">Groq AI</a>
                 <a href="#">Granular Scoring</a>
                 <a href="#">Experience Summary</a>
-                <a href="#">Years of Experience</a>
+                <a href="#">10 Resume Batch</a>
               </div>
               <div className="footer-section">
                 <h4>Service</h4>
@@ -2645,7 +2668,7 @@ function App() {
               {batchMode && (
                 <span className="stat">
                   <Activity size={12} />
-                  Batch: {resumeFiles.length} resumes (Max 10) {/* Updated from 6 to 10 */}
+                  Batch: {resumeFiles.length} resumes (Max 10)
                 </span>
               )}
               <span className="stat">
@@ -2663,6 +2686,10 @@ function App() {
               <span className="stat">
                 <Users size={12} />
                 Multiple Users: Supported
+              </span>
+              <span className="stat">
+                <Zap size={12} />
+                10 Resume Batch: Supported
               </span>
             </div>
           </div>
