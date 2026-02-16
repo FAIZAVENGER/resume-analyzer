@@ -308,7 +308,7 @@ function App() {
         setAiStatus('available');
         setGroqWarmup(true);
         if (response.data.model) {
-          setModelInfo(response.data.model_info || { name: response.data.model });
+          setModelInfo({ name: response.data.model });
         }
       } else if (response.data.warmup_complete) {
         setAiStatus('available');
@@ -324,6 +324,7 @@ function App() {
     }
   };
 
+  // FIXED: Updated checkBackendHealth to properly count configured keys
   const checkBackendHealth = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/health`, {
@@ -332,8 +333,10 @@ function App() {
       
       setBackendStatus('ready');
       setGroqWarmup(response.data.ai_warmup_complete || false);
-      if (response.data.model_info || response.data.model) {
-        setModelInfo(response.data.model_info || { name: response.data.model });
+      
+      // Extract model info properly
+      if (response.data.model) {
+        setModelInfo({ name: response.data.model });
       }
       
       if (response.data.ai_warmup_complete) {
@@ -342,12 +345,23 @@ function App() {
         setAiStatus('warming');
       }
       
-      // Update service status
+      // FIXED: Count configured keys properly from key_status array
+      let configuredKeys = 0;
+      if (response.data.key_status && Array.isArray(response.data.key_status)) {
+        configuredKeys = response.data.key_status.filter(k => k.configured === true).length;
+      } else {
+        // Fallback to available_keys if key_status is not available
+        configuredKeys = response.data.available_keys || 0;
+      }
+      
+      // Update service status with correct key count
       setServiceStatus({
         enhancedFallback: response.data.ai_provider_configured || false,
-        validKeys: response.data.available_keys || 0,
+        validKeys: configuredKeys,
         totalKeys: 5
       });
+      
+      console.log(`✅ Backend health check: ${configuredKeys}/5 keys configured`);
       
     } catch (error) {
       console.log('Backend health check failed:', error.message);
@@ -566,6 +580,7 @@ function App() {
     }
   };
 
+  // FIXED: Updated handleBatchAnalyze to handle large batches better
   const handleBatchAnalyze = async () => {
     if (resumeFiles.length === 0) {
       setError('Please upload at least one resume file');
@@ -595,8 +610,8 @@ function App() {
     try {
       progressInterval = setInterval(() => {
         setBatchProgress(prev => {
-          if (prev >= 85) return 85;
-          return prev + Math.random() * 2;
+          if (prev >= 90) return 90; // FIXED: Increased max to 90%
+          return prev + Math.random() * 1.5;
         });
       }, 500);
 
@@ -607,7 +622,7 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 300000,
+        timeout: 300000, // 5 minutes timeout for large batches
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -620,6 +635,14 @@ function App() {
       clearInterval(progressInterval);
       setBatchProgress(95);
       setLoadingMessage('Batch analysis complete!');
+
+      // Check for configured keys in response
+      if (response.data.available_keys !== undefined) {
+        setServiceStatus(prev => ({
+          ...prev,
+          validKeys: response.data.available_keys
+        }));
+      }
 
       await new Promise(resolve => setTimeout(resolve, 800));
       
@@ -636,7 +659,7 @@ function App() {
       if (progressInterval) clearInterval(progressInterval);
       
       if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Batch analysis timeout. Trying to reconnect...');
+        setError('Batch analysis timeout. This may take longer for 10 resumes. Please try again with fewer files.');
         setTimeout(() => checkBackendHealth(), 2000);
       } else if (err.response?.status === 429) {
         setError('Groq API rate limit reached. Please try again later or reduce batch size.');
@@ -673,6 +696,24 @@ function App() {
     } else {
       setError('No individual report available for download.');
     }
+  };
+
+  // FIXED: Updated getAvailableKeysCount to properly count configured keys
+  const getAvailableKeysCount = () => {
+    // First check from batch analysis if available
+    if (batchAnalysis?.available_keys !== undefined) {
+      return batchAnalysis.available_keys;
+    }
+    // Then check from service status
+    if (serviceStatus.validKeys !== undefined) {
+      return serviceStatus.validKeys;
+    }
+    // Then check from key_status in batch analysis if available
+    if (batchAnalysis?.key_statistics) {
+      const configured = batchAnalysis.key_statistics.filter(k => k.configured === true).length;
+      return configured;
+    }
+    return 0;
   };
 
   const getScoreColor = (score) => {
@@ -731,10 +772,6 @@ function App() {
         bgColor: 'rgba(148, 163, 184, 0.1)'
       };
     }
-  };
-
-  const getAvailableKeysCount = () => {
-    return serviceStatus.validKeys || 0;
   };
 
   const backendStatusInfo = getBackendStatusMessage();
@@ -2352,7 +2389,7 @@ function App() {
                 {aiStatus === 'warming' && <Loader size={12} className="pulse-spinner" />}
               </div>
               
-              {/* Key Status */}
+              {/* Key Status - FIXED: Now shows correct count */}
               <div className="feature key-status">
                 <Key size={16} />
                 <span>{getAvailableKeysCount()}/5 Keys</span>
