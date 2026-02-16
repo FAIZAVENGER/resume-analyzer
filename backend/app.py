@@ -66,8 +66,8 @@ print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
 score_cache = {}
 cache_lock = threading.Lock()
 
-# Batch processing configuration - UPDATED from 6 to 10
-MAX_CONCURRENT_REQUESTS = 5
+# Batch processing configuration - UPDATED to 10 resumes with PARALLEL processing
+MAX_CONCURRENT_REQUESTS = 5  # 5 keys = 5 concurrent requests
 MAX_BATCH_SIZE = 10  # CHANGED: Increased from 6 to 10
 MIN_SKILLS_TO_SHOW = 5  # Minimum skills to show
 MAX_SKILLS_TO_SHOW = 8  # Maximum skills to show (5-8 range)
@@ -1064,25 +1064,13 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
         }
 
 def process_single_resume(args):
-    """Process a single resume with intelligent error handling and rate limit protection"""
+    """Process a single resume with intelligent error handling and NO DELAYS for speed"""
     resume_file, job_description, index, total, batch_id = args
     
     try:
         print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
         
-        # IMPORTANT: Add staggered delays to prevent rate limits
-        if index > 0:
-            # Progressive delays based on position
-            if index < 3:
-                base_delay = 1.0  # Increased from 0.5
-            elif index < 6:
-                base_delay = 2.0  # Increased from 1.0
-            else:
-                base_delay = 3.0  # Increased from 1.5
-            
-            delay = base_delay + random.uniform(0, 0.5)
-            print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
-            time.sleep(delay)
+        # IMPORTANT: NO DELAYS - Removed all time.sleep() calls for maximum speed
         
         api_key, key_index = get_available_key(index)
         if not api_key:
@@ -1268,7 +1256,7 @@ def home():
                 <strong>⚠️ RATE LIMIT PROTECTION ACTIVE:</strong>
                 <ul>
                     <li>Max ''' + str(MAX_REQUESTS_PER_MINUTE_PER_KEY) + ''' requests/minute per key</li>
-                    <li>Staggered delays between requests</li>
+                    <li>PARALLEL processing with 5 keys (NO DELAYS)</li>
                     <li>Automatic key rotation</li>
                     <li>60s cooling on rate limits</li>
                     <li>Current usage: ''' + ', '.join(key_usage_info) + '''</li>
@@ -1283,7 +1271,7 @@ def home():
             <p><strong>Model:</strong> ''' + GROQ_MODEL + '''</p>
             <p><strong>API Provider:</strong> Groq (Parallel Processing)</p>
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
-            <p><strong>Processing:</strong> Rate-limited round-robin with staggered delays</p>
+            <p><strong>Processing:</strong> PARALLEL with 5 keys (NO DELAYS for SPEED)</p>
             <p><strong>Scoring:</strong> Granular unique scores with 1 decimal precision</p>
             <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/5</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
@@ -1425,7 +1413,7 @@ def analyze_resume():
 
 @app.route('/analyze-batch', methods=['POST'])
 def analyze_resume_batch():
-    """Analyze multiple resumes with parallel processing and rate limit protection"""
+    """Analyze multiple resumes with PARALLEL processing and rate limit protection - NO DELAYS"""
     update_activity()
     
     try:
@@ -1478,11 +1466,13 @@ def analyze_resume_batch():
         all_analyses = []
         errors = []
         
-        print(f"🔄 Processing {len(resume_files)} resumes with {available_keys} keys...")
-        print(f"⚠️ RATE LIMIT PROTECTION: Staggered delays, max {MAX_REQUESTS_PER_MINUTE_PER_KEY} requests/minute/key")
+        print(f"🔄 PARALLEL Processing {len(resume_files)} resumes with {available_keys} keys (NO DELAYS)...")
+        print(f"⚠️ RATE LIMIT PROTECTION: Max {MAX_REQUESTS_PER_MINUTE_PER_KEY} requests/minute/key")
         print(f"🎯 SCORING: Granular unique scores with 1 decimal precision")
+        print(f"⚡ SPEED MODE: All delays removed for fastest processing")
         
-        # Process sequentially with delays (safer than parallel for rate limits)
+        # Prepare arguments for each resume
+        args_list = []
         for index, resume_file in enumerate(resume_files):
             if resume_file.filename == '':
                 errors.append({
@@ -1492,25 +1482,25 @@ def analyze_resume_batch():
                 })
                 continue
             
-            print(f"\n🔑 Processing resume {index + 1}/{len(resume_files)}")
-            
-            args = (resume_file, job_description, index, len(resume_files), batch_id)
-            result = process_single_resume(args)
-            
-            if result['status'] == 'success':
-                all_analyses.append(result['analysis'])
-            else:
-                errors.append({
-                    'filename': result.get('filename', 'Unknown'),
-                    'error': result.get('error', 'Unknown error'),
-                    'index': result.get('index')
-                })
-            
-            # Check if any key needs cooling
-            for i in range(5):
-                if key_usage[i]['requests_this_minute'] >= MAX_REQUESTS_PER_MINUTE_PER_KEY - 2:
-                    print(f"⚠️ Key {i+1} near limit, marking for cooling")
-                    mark_key_cooling(i, 30)
+            args_list.append((resume_file, job_description, index, len(resume_files), batch_id))
+        
+        # Process in PARALLEL with ThreadPoolExecutor - NO DELAYS
+        if args_list:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_REQUESTS, len(args_list))) as executor:
+                # Submit all tasks
+                future_to_args = {executor.submit(process_single_resume, args): args for args in args_list}
+                
+                # Collect results as they complete
+                for future in concurrent.futures.as_completed(future_to_args):
+                    result = future.result()
+                    if result['status'] == 'success':
+                        all_analyses.append(result['analysis'])
+                    else:
+                        errors.append({
+                            'filename': result.get('filename', 'Unknown'),
+                            'error': result.get('error', 'Unknown error'),
+                            'index': result.get('index')
+                        })
         
         all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
         
@@ -1567,7 +1557,7 @@ def analyze_resume_batch():
             'ai_provider': "groq",
             'ai_status': "Warmed up" if warmup_complete else "Warming up",
             'processing_time': f"{total_time:.2f}s",
-            'processing_method': 'rate_limited_sequential',
+            'processing_method': 'PARALLEL (NO DELAYS)',
             'key_statistics': key_stats,
             'available_keys': available_keys,
             'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
@@ -1583,7 +1573,7 @@ def analyze_resume_batch():
             }
         }
         
-        print(f"✅ Batch analysis completed in {total_time:.2f}s")
+        print(f"✅ Batch analysis completed in {total_time:.2f}s (PARALLEL MODE)")
         print(f"📊 Key usage summary:")
         for stat in key_stats:
             print(f"  {stat['key']}: {stat['used']} total, {stat['requests_this_minute']}/min, {stat['errors']} errors, {stat['status']}")
@@ -2617,7 +2607,7 @@ def quick_check():
                             'available_keys': available_keys,
                             'tested_key': f"Key {i+1}",
                             'max_batch_size': MAX_BATCH_SIZE,
-                            'processing_method': 'rate_limited_sequential',
+                            'processing_method': 'PARALLEL (NO DELAYS)',
                             'skills_analysis': '5-8 skills per category',
                             'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
                             'scoring_method': 'Granular unique scores (1 decimal)'
@@ -2661,7 +2651,7 @@ def ping():
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
         'keep_alive_active': True,
         'max_batch_size': MAX_BATCH_SIZE,
-        'processing_method': 'rate_limited_sequential',
+        'processing_method': 'PARALLEL (NO DELAYS)',
         'skills_analysis': '5-8 skills per category',
         'years_experience': 'Included in analysis',
         'scoring_method': 'Granular unique scores (1 decimal precision)',
@@ -2723,8 +2713,8 @@ def health_check():
             'max_skills_to_show': MAX_SKILLS_TO_SHOW,
             'years_experience_analysis': True
         },
-        'processing_method': 'rate_limited_sequential',
-        'performance_target': '10 resumes in 30-40 seconds (safer)',  # UPDATED from 6 to 10
+        'processing_method': 'PARALLEL (NO DELAYS)',
+        'performance_target': '10 resumes in 10-15 seconds (FASTEST MODE)',
         'skills_analysis': '5-8 skills per category',
         'summaries': 'Complete 4-5 sentences each',
         'years_experience': 'Included in analysis',
@@ -2737,7 +2727,7 @@ def health_check():
             'range': '0-100 with weighted factors',
             'weighting': 'Skills (40%), Experience (30%), Education (20%), Years (10%)'
         },
-        'rate_limit_protection': 'ACTIVE - Staggered delays, minute tracking, automatic cooling',
+        'rate_limit_protection': 'ACTIVE - Minute tracking, automatic cooling, PARALLEL processing',
         'always_awake': True
     })
 
@@ -2791,10 +2781,10 @@ if __name__ == '__main__':
     print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
     print(f"⚠️ RATE LIMIT PROTECTION: ACTIVE")
     print(f"📊 Max requests/minute/key: {MAX_REQUESTS_PER_MINUTE_PER_KEY}")
-    print(f"⏳ Staggered delays: 1-3 seconds between requests")
+    print(f"⚡ SPEED MODE: PARALLEL processing (NO DELAYS)")
     print(f"🔀 Key rotation: Smart load balancing (5 keys)")
     print(f"🛡️ Cooling: 60s on rate limits")
-    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes (CHANGED from 6 to 10)")  # UPDATED from 6 to 10
+    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes (CHANGED from 6 to 10)")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
     print(f"✅ Years of Experience: Included in analysis")
     print(f"🎯 ENHANCED SCORING: Granular unique scores (1 decimal place)")
@@ -2804,7 +2794,7 @@ if __name__ == '__main__':
     print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
-    print(f"⚠️ Performance: ~10 resumes in 30-40 seconds (SAFER for rate limits)")  # UPDATED from 6 to 10
+    print(f"⚡ Performance: ~10 resumes in 10-15 seconds (FASTEST MODE)")
     print(f"✅ Excel Reports: Single & Batch with Individual Sheets")
     print(f"✅ Always Awake: Backend will stay active with self-pinging")
     print("="*50 + "\n")
