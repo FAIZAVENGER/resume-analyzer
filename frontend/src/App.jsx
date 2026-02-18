@@ -87,7 +87,7 @@ function App() {
   const [batchProgress, setBatchProgress] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [aiStatus, setAiStatus] = useState('idle');
-  const [backendStatus, setBackendStatus] = useState('ready');
+  const [backendStatus, setBackendStatus] = useState('checking');
   const [groqWarmup, setGroqWarmup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
@@ -101,6 +101,11 @@ function App() {
     validKeys: 0,
     totalKeys: 5
   });
+  
+  // NEW: Wake-up state
+  const [isWakingUp, setIsWakingUp] = useState(false);
+  const [wakeUpAttempts, setWakeUpAttempts] = useState(0);
+  const [backendReady, setBackendReady] = useState(false);
   
   // View management for navigation
   const [currentView, setCurrentView] = useState('main');
@@ -128,6 +133,13 @@ function App() {
       }
     }
   }, []);
+
+  // NEW: Wake up backend on component mount
+  useEffect(() => {
+    if (isLoggedIn) {
+      wakeUpBackend();
+    }
+  }, [isLoggedIn]);
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -215,18 +227,78 @@ function App() {
     window.scrollTo(0, 0);
   };
 
+  // NEW: Wake up backend with retry logic
+  const wakeUpBackend = async () => {
+    setIsWakingUp(true);
+    setBackendStatus('waking');
+    setLoadingMessage('Waking up backend service...');
+    
+    let attempts = 0;
+    const maxAttempts = 8; // Try up to 8 times (about 40-50 seconds)
+    
+    while (attempts < maxAttempts) {
+      try {
+        console.log(`Wake-up attempt ${attempts + 1}/${maxAttempts}`);
+        setWakeUpAttempts(attempts + 1);
+        
+        // Try multiple endpoints
+        const response = await axios.get(`${API_BASE_URL}/health`, { 
+          timeout: 10000 
+        });
+        
+        if (response.status === 200) {
+          console.log('Backend is awake!');
+          setBackendStatus('ready');
+          setBackendReady(true);
+          setLoadingMessage('');
+          setError('');
+          setIsWakingUp(false);
+          
+          // Update service status
+          setServiceStatus({
+            enhancedFallback: response.data.ai_provider_configured || false,
+            validKeys: response.data.available_keys || 0,
+            totalKeys: 5
+          });
+          
+          setGroqWarmup(response.data.ai_warmup_complete || false);
+          if (response.data.ai_warmup_complete) {
+            setAiStatus('available');
+          } else {
+            setAiStatus('warming');
+          }
+          
+          // Start periodic checks
+          setupPeriodicChecks();
+          return true;
+        }
+      } catch (err) {
+        console.log(`Wake-up attempt ${attempts + 1} failed:`, err.message);
+      }
+      
+      // Wait before next attempt (increasing delay)
+      const delay = 3000 + (attempts * 1000); // 3s, 4s, 5s, etc.
+      await new Promise(resolve => setTimeout(resolve, delay));
+      attempts++;
+    }
+    
+    // If we get here, wake-up failed
+    setBackendStatus('error');
+    setError('Backend service is taking too long to wake up. Please try again in a moment.');
+    setLoadingMessage('');
+    setIsWakingUp(false);
+    return false;
+  };
+
   // Initialize service on mount
   const initializeService = async () => {
     try {
       setIsWarmingUp(true);
-      setBackendStatus('ready');
+      setBackendStatus('checking');
       setAiStatus('checking');
       
       // Immediately start health check without waiting
       checkBackendHealth();
-      
-      // Start periodic checks
-      setupPeriodicChecks();
       
     } catch (err) {
       console.log('Service initialization error:', err.message);
@@ -236,35 +308,6 @@ function App() {
       setTimeout(() => checkBackendHealth(), 3000);
     } finally {
       setIsWarmingUp(false);
-    }
-  };
-
-  const wakeUpBackend = async () => {
-    try {
-      console.log('🔔 Ensuring backend is active...');
-      setLoadingMessage('Ensuring backend is active...');
-      
-      // Try multiple endpoints
-      const pingPromises = [
-        axios.get(`${API_BASE_URL}/ping`, { timeout: 5000 }),
-        axios.get(`${API_BASE_URL}/health`, { timeout: 8000 }),
-        axios.get(`${API_BASE_URL}/quick-check`, { timeout: 8000 })
-      ];
-      
-      await Promise.any(pingPromises);
-      
-      console.log('✅ Backend is responding');
-      setBackendStatus('ready');
-      setLoadingMessage('');
-      
-    } catch (error) {
-      console.log('⚠️ Backend check failed, but service will continue...');
-      setBackendStatus('ready');
-      
-      // Schedule another check
-      setTimeout(() => {
-        checkBackendHealth();
-      }, 5000);
     }
   };
 
@@ -331,6 +374,7 @@ function App() {
       });
       
       setBackendStatus('ready');
+      setBackendReady(true);
       setGroqWarmup(response.data.ai_warmup_complete || false);
       if (response.data.model_info || response.data.model) {
         setModelInfo(response.data.model_info || { name: response.data.model });
@@ -351,22 +395,22 @@ function App() {
       
     } catch (error) {
       console.log('Backend health check failed:', error.message);
-      setBackendStatus('ready');
+      setBackendStatus('checking');
       
-      // Try again in 10 seconds
-      setTimeout(() => checkBackendHealth(), 10000);
+      // Try again in 5 seconds
+      setTimeout(() => checkBackendHealth(), 5000);
     }
   };
 
   const setupPeriodicChecks = () => {
-    // Keep-alive ping every 2 minutes (increased frequency)
+    // Keep-alive ping every 2 minutes
     backendWakeInterval.current = setInterval(() => {
       axios.get(`${API_BASE_URL}/ping`, { timeout: 5000 })
         .then(() => console.log('Keep-alive ping successful'))
         .catch(() => console.log('Keep-alive ping failed, but service continues'));
     }, 2 * 60 * 1000);
     
-    // Health check every 30 seconds (increased frequency)
+    // Health check every 30 seconds
     warmupCheckInterval.current = setInterval(() => {
       checkBackendHealth();
     }, 30 * 1000);
@@ -471,6 +515,7 @@ function App() {
     setError('');
   };
 
+  // NEW: Enhanced analyze function with wake-up check
   const handleAnalyze = async () => {
     if (!resumeFile) {
       setError('Please upload a resume file');
@@ -478,6 +523,12 @@ function App() {
     }
     if (!jobDescription.trim()) {
       setError('Please enter a job description');
+      return;
+    }
+
+    // Check if backend is ready
+    if (!backendReady) {
+      setError('Backend is still waking up. Please wait a moment and try again.');
       return;
     }
 
@@ -493,79 +544,95 @@ function App() {
     formData.append('jobDescription', jobDescription);
 
     let progressInterval;
+    let retryAttempts = 0;
+    const maxRetries = 3;
 
-    try {
-      progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev >= 85) return 85;
-          return prev + Math.random() * 5;
-        });
-      }, 500);
+    const attemptAnalysis = async () => {
+      try {
+        progressInterval = setInterval(() => {
+          setProgress(prev => {
+            if (prev >= 85) return 85;
+            return prev + Math.random() * 5;
+          });
+        }, 500);
 
-      if (aiStatus === 'available' && groqWarmup) {
-        setLoadingMessage('Groq AI analysis with granular scoring...');
-      } else {
-        setLoadingMessage('Enhanced analysis (Warming up Groq)...');
-      }
-      setProgress(20);
-
-      setLoadingMessage('Uploading and processing resume...');
-      setProgress(30);
-
-      const response = await axios.post(`${API_BASE_URL}/analyze`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        timeout: 60000,
-        onUploadProgress: (progressEvent) => {
-          if (progressEvent.total) {
-            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            setProgress(30 + percentCompleted * 0.4);
-            setLoadingMessage(percentCompleted < 50 ? 'Uploading file...' : 'Extracting text from resume...');
-          }
+        if (aiStatus === 'available' && groqWarmup) {
+          setLoadingMessage('Groq AI analysis with granular scoring...');
+        } else {
+          setLoadingMessage('Enhanced analysis (Warming up Groq)...');
         }
-      });
+        setProgress(20);
 
-      clearInterval(progressInterval);
-      setProgress(95);
-      
-      setLoadingMessage('AI analysis complete!');
+        setLoadingMessage('Uploading and processing resume...');
+        setProgress(30);
 
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      setAnalysis(response.data);
-      setProgress(100);
-      navigateToSingleResults();
+        const response = await axios.post(`${API_BASE_URL}/analyze`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+          timeout: 60000,
+          onUploadProgress: (progressEvent) => {
+            if (progressEvent.total) {
+              const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+              setProgress(30 + percentCompleted * 0.4);
+              setLoadingMessage(percentCompleted < 50 ? 'Uploading file...' : 'Extracting text from resume...');
+            }
+          }
+        });
 
-      await checkBackendHealth();
+        clearInterval(progressInterval);
+        setProgress(95);
+        
+        setLoadingMessage('AI analysis complete!');
 
-      setTimeout(() => {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        setAnalysis(response.data);
+        setProgress(100);
+        navigateToSingleResults();
+
+        await checkBackendHealth();
+
+        setTimeout(() => {
+          setProgress(0);
+          setLoadingMessage('');
+        }, 800);
+
+        return true;
+
+      } catch (err) {
+        if (progressInterval) clearInterval(progressInterval);
+        
+        // Handle timeout errors with retry
+        if ((err.code === 'ECONNABORTED' || err.message?.includes('timeout')) && retryAttempts < maxRetries) {
+          retryAttempts++;
+          setLoadingMessage(`Retry attempt ${retryAttempts}/${maxRetries}...`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          return await attemptAnalysis();
+        }
+        
+        if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+          setError('Request timeout. The backend might be waking up. Please try again.');
+        } else if (err.response?.status === 429) {
+          setError('Rate limit reached. Groq API has limits. Please try again later.');
+        } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
+          setError('Groq API rate limit exceeded. Please wait a minute and try again.');
+          setAiStatus('unavailable');
+        } else {
+          setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
+        }
+        
         setProgress(0);
         setLoadingMessage('');
-      }, 800);
-
-    } catch (err) {
-      if (progressInterval) clearInterval(progressInterval);
-      
-      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Request timeout. Trying to reconnect...');
-        setTimeout(() => checkBackendHealth(), 2000);
-      } else if (err.response?.status === 429) {
-        setError('Rate limit reached. Groq API has limits. Please try again later.');
-      } else if (err.response?.data?.error?.includes('quota') || err.response?.data?.error?.includes('rate limit')) {
-        setError('Groq API rate limit exceeded. Please wait a minute and try again.');
-        setAiStatus('unavailable');
-      } else {
-        setError(err.response?.data?.error || 'An error occurred during analysis. Please try again.');
+        return false;
       }
-      
-      setProgress(0);
-      setLoadingMessage('');
-    } finally {
-      setLoading(false);
-    }
+    };
+
+    const success = await attemptAnalysis();
+    setLoading(false);
   };
 
+  // NEW: Enhanced batch analyze function with wake-up check
   const handleBatchAnalyze = async () => {
     if (resumeFiles.length === 0) {
       setError('Please upload at least one resume file');
@@ -573,6 +640,12 @@ function App() {
     }
     if (!jobDescription.trim()) {
       setError('Please enter a job description');
+      return;
+    }
+
+    // Check if backend is ready
+    if (!backendReady) {
+      setError('Backend is still waking up. Please wait a moment and try again.');
       return;
     }
 
@@ -591,64 +664,79 @@ function App() {
     });
 
     let progressInterval;
+    let retryAttempts = 0;
+    const maxRetries = 3;
 
-    try {
-      progressInterval = setInterval(() => {
-        setBatchProgress(prev => {
-          if (prev >= 85) return 85;
-          return prev + Math.random() * 2;
-        });
-      }, 500);
+    const attemptBatchAnalysis = async () => {
+      try {
+        progressInterval = setInterval(() => {
+          setBatchProgress(prev => {
+            if (prev >= 85) return 85;
+            return prev + Math.random() * 2;
+          });
+        }, 500);
 
-      setLoadingMessage('Uploading files for batch processing...');
-      setBatchProgress(10);
+        setLoadingMessage('Uploading files for batch processing...');
+        setBatchProgress(10);
 
-      const response = await axios.post(`${API_BASE_URL}/analyze-batch`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        timeout: 300000,
-        onUploadProgress: (progressEvent) => {
-          if (progressEvent.total) {
-            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            setBatchProgress(10 + percentCompleted * 0.3);
-            setLoadingMessage(`Uploading ${resumeFiles.length} files...`);
+        const response = await axios.post(`${API_BASE_URL}/analyze-batch`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+          timeout: 300000,
+          onUploadProgress: (progressEvent) => {
+            if (progressEvent.total) {
+              const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+              setBatchProgress(10 + percentCompleted * 0.3);
+              setLoadingMessage(`Uploading ${resumeFiles.length} files...`);
+            }
           }
+        });
+
+        clearInterval(progressInterval);
+        setBatchProgress(95);
+        setLoadingMessage('Batch analysis complete!');
+
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        setBatchAnalysis(response.data);
+        setBatchProgress(100);
+        navigateToBatchResults();
+
+        setTimeout(() => {
+          setBatchProgress(0);
+          setLoadingMessage('');
+        }, 800);
+
+        return true;
+
+      } catch (err) {
+        if (progressInterval) clearInterval(progressInterval);
+        
+        // Handle timeout errors with retry
+        if ((err.code === 'ECONNABORTED' || err.message?.includes('timeout')) && retryAttempts < maxRetries) {
+          retryAttempts++;
+          setLoadingMessage(`Retry attempt ${retryAttempts}/${maxRetries}...`);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          return await attemptBatchAnalysis();
         }
-      });
-
-      clearInterval(progressInterval);
-      setBatchProgress(95);
-      setLoadingMessage('Batch analysis complete!');
-
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
-      setBatchAnalysis(response.data);
-      setBatchProgress(100);
-      navigateToBatchResults();
-
-      setTimeout(() => {
+        
+        if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+          setError('Batch analysis timeout. The backend might be waking up. Please try again.');
+        } else if (err.response?.status === 429) {
+          setError('Groq API rate limit reached. Please try again later or reduce batch size.');
+        } else {
+          setError(err.response?.data?.error || 'An error occurred during batch analysis.');
+        }
+        
         setBatchProgress(0);
         setLoadingMessage('');
-      }, 800);
-
-    } catch (err) {
-      if (progressInterval) clearInterval(progressInterval);
-      
-      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Batch analysis timeout. Trying to reconnect...');
-        setTimeout(() => checkBackendHealth(), 2000);
-      } else if (err.response?.status === 429) {
-        setError('Groq API rate limit reached. Please try again later or reduce batch size.');
-      } else {
-        setError(err.response?.data?.error || 'An error occurred during batch analysis.');
+        return false;
       }
-      
-      setBatchProgress(0);
-      setLoadingMessage('');
-    } finally {
-      setBatchLoading(false);
-    }
+    };
+
+    const success = await attemptBatchAnalysis();
+    setBatchLoading(false);
   };
 
   const handleDownload = () => {
@@ -690,11 +778,27 @@ function App() {
   };
 
   const getBackendStatusMessage = () => {
+    if (isWakingUp) {
+      return { 
+        text: `Waking Backend (${wakeUpAttempts}/8)`, 
+        color: '#ff9800', 
+        icon: <Activity size={16} className="pulse" />,
+        bgColor: 'rgba(255, 152, 0, 0.1)'
+      };
+    }
+    if (backendReady) {
+      return { 
+        text: 'Backend Active', 
+        color: '#00ff9d', 
+        icon: <CloudLightning size={16} />,
+        bgColor: 'rgba(0, 255, 157, 0.1)'
+      };
+    }
     return { 
-      text: 'Backend Active', 
-      color: '#00ff9d', 
-      icon: <CloudLightning size={16} />,
-      bgColor: 'rgba(0, 255, 157, 0.1)'
+      text: 'Backend Checking', 
+      color: '#94a3b8', 
+      icon: <Cloud size={16} />,
+      bgColor: 'rgba(148, 163, 184, 0.1)'
     };
   };
 
@@ -1030,10 +1134,16 @@ function App() {
           <h2>Start Your Analysis</h2>
           <p>Upload resume(s) and job description to get detailed insights</p>
           <div className="service-status">
-            <span className="status-badge backend">
+            <span className="status-badge backend" style={{ 
+              backgroundColor: backendStatusInfo.bgColor,
+              color: backendStatusInfo.color
+            }}>
               {backendStatusInfo.icon} {backendStatusInfo.text}
             </span>
-            <span className="status-badge ai">
+            <span className="status-badge ai" style={{ 
+              backgroundColor: aiStatusInfo.bgColor,
+              color: aiStatusInfo.color
+            }}>
               {aiStatusInfo.icon} {aiStatusInfo.text}
             </span>
             <span className="status-badge always-active">
@@ -1309,43 +1419,52 @@ function App() {
           <div className="error-message glass">
             <AlertCircle size={20} />
             <span>{error}</span>
-            {error.includes('warming up') && (
+            {error.includes('waking up') && (
               <button 
                 className="error-action-button"
-                onClick={checkBackendHealth}
+                onClick={() => wakeUpBackend()}
               >
-                <Activity size={16} />
-                Refresh Status
+                <RefreshCw size={16} />
+                Retry Wake-up
               </button>
             )}
           </div>
         )}
 
-        {(loading || batchLoading) && (
+        {(loading || batchLoading || isWakingUp) && (
           <div className="loading-section glass">
             <div className="loading-container">
               <div className="loading-header">
                 <Loader className="spinner" />
-                <h3>{batchMode ? 'Batch Analysis' : 'Analysis in Progress'}</h3>
+                <h3>
+                  {isWakingUp ? 'Waking Up Backend...' : 
+                   batchMode ? 'Batch Analysis' : 'Analysis in Progress'}
+                </h3>
               </div>
               
               <div className="progress-container">
-                <div className="progress-bar" style={{ width: `${batchMode ? batchProgress : progress}%` }}></div>
+                <div className="progress-bar" style={{ width: `${isWakingUp ? (wakeUpAttempts * 12.5) : (batchMode ? batchProgress : progress)}%` }}></div>
               </div>
               
               <div className="loading-text">
-                <span className="loading-message">{loadingMessage}</span>
+                <span className="loading-message">
+                  {isWakingUp ? `Wake-up attempt ${wakeUpAttempts}/8...` : loadingMessage}
+                </span>
                 <span className="loading-subtext">
-                  {batchMode 
-                    ? `Processing ${resumeFiles.length} resume(s) with rate limit protection...` 
-                    : `Using ${getModelDisplayName(modelInfo)} with granular scoring...`}
+                  {isWakingUp ? (
+                    'Free backend on Render takes 30-60 seconds to wake up...'
+                  ) : batchMode ? (
+                    `Processing ${resumeFiles.length} resume(s) with rate limit protection...`
+                  ) : (
+                    `Using ${getModelDisplayName(modelInfo)} with granular scoring...`
+                  )}
                 </span>
               </div>
               
               <div className="progress-stats">
-                <span>{Math.round(batchMode ? batchProgress : progress)}%</span>
+                <span>{Math.round(isWakingUp ? (wakeUpAttempts * 12.5) : (batchMode ? batchProgress : progress))}%</span>
                 <span>•</span>
-                <span>Backend: Always Active</span>
+                <span>Backend: {isWakingUp ? 'Waking' : 'Active'}</span>
                 <span>•</span>
                 <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : 'Warming...'}</span>
                 <span>•</span>
@@ -1372,7 +1491,11 @@ function App() {
               
               <div className="loading-note info">
                 <Info size={14} />
-                <span>Rate limit protection ensures stable operation. Backend is always active.</span>
+                <span>
+                  {isWakingUp 
+                    ? 'Please wait while the backend wakes up. This may take up to 60 seconds.' 
+                    : 'Rate limit protection ensures stable operation. Backend is always active.'}
+                </span>
               </div>
             </div>
           </div>
@@ -1381,14 +1504,14 @@ function App() {
         <button
           className="analyze-button"
           onClick={batchMode ? handleBatchAnalyze : handleAnalyze}
-          disabled={loading || batchLoading || 
+          disabled={loading || batchLoading || isWakingUp || 
                    (batchMode ? resumeFiles.length === 0 : !resumeFile) || 
                    !jobDescription.trim()}
         >
-          {(loading || batchLoading) ? (
+          {(loading || batchLoading || isWakingUp) ? (
             <div className="button-loading-content">
               <Loader className="spinner" />
-              <span>{batchMode ? 'Analyzing Batch...' : 'Analyzing...'}</span>
+              <span>{isWakingUp ? 'Waking Backend...' : (batchMode ? 'Analyzing Batch...' : 'Analyzing...')}</span>
             </div>
           ) : (
             <>
@@ -2335,7 +2458,7 @@ function App() {
                 }}
               >
                 {backendStatusInfo.icon}
-                <span>Always Active</span>
+                <span>{backendStatusInfo.text}</span>
               </div>
               
               {/* AI Status */}
@@ -2438,8 +2561,8 @@ function App() {
               <div className="quota-summary">
                 <div className="summary-item">
                   <div className="summary-label">Backend Status</div>
-                  <div className="summary-value success">
-                    ✅ Always Active (No Sleeping)
+                  <div className={`summary-value ${backendReady ? 'success' : isWakingUp ? 'warning' : 'error'}`}>
+                    {backendReady ? '✅ Active' : isWakingUp ? '🔄 Waking Up' : '⏳ Checking'}
                   </div>
                 </div>
                 <div className="summary-item">
@@ -2534,12 +2657,16 @@ function App() {
           <div className="top-notice-bar glass">
             <div className="notice-content">
               <div className="status-indicators">
-                <div className="status-indicator active">
-                  <div className="indicator-dot" style={{ background: '#00ff9d' }}></div>
-                  <span>Backend: Always Active</span>
+                <div className={`status-indicator ${backendReady ? 'active' : isWakingUp ? 'warning' : 'inactive'}`}>
+                  <div className="indicator-dot" style={{ 
+                    background: backendReady ? '#00ff9d' : isWakingUp ? '#ff9800' : '#94a3b8' 
+                  }}></div>
+                  <span>Backend: {backendReady ? 'Active' : isWakingUp ? 'Waking' : 'Checking'}</span>
                 </div>
                 <div className={`status-indicator ${aiStatus === 'available' ? 'active' : 'inactive'}`}>
-                  <div className="indicator-dot"></div>
+                  <div className="indicator-dot" style={{ 
+                    background: aiStatus === 'available' ? '#00ff9d' : aiStatus === 'warming' ? '#ff9800' : '#ff6b6b' 
+                  }}></div>
                   <span>Groq: {aiStatus === 'available' ? 'Ready ⚡' : aiStatus === 'warming' ? 'Warming...' : 'Enhanced'}</span>
                 </div>
                 <div className="status-indicator active">
@@ -2624,7 +2751,7 @@ function App() {
             <div className="footer-stats">
               <span className="stat">
                 <CloudLightning size={12} />
-                Backend: Always Active
+                Backend: {backendReady ? 'Active' : isWakingUp ? 'Waking' : 'Checking'}
               </span>
               <span className="stat">
                 <Brain size={12} />
