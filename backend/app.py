@@ -1,9 +1,35 @@
+from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask_cors import CORS
+from PyPDF2 import PdfReader, PdfWriter
+from docx import Document
+import os
+import json
+import time
+import concurrent.futures
+from datetime import datetime, timedelta
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+from openpyxl.cell.cell import MergedCell
+from dotenv import load_dotenv
+import traceback
+import threading
+import atexit
+import requests
+import re
+import hashlib
+import random
+import gc
+import sys
 import base64
 import io
 import subprocess
 import tempfile
 import shutil
 from pathlib import Path
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -40,9 +66,9 @@ print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
 score_cache = {}
 cache_lock = threading.Lock()
 
-# Batch processing configuration - UPDATED to 10 resumes with PARALLEL processing
-MAX_CONCURRENT_REQUESTS = 5  # 5 keys = 5 concurrent requests
-MAX_BATCH_SIZE = 10  # CHANGED: Increased from 6 to 10
+# Batch processing configuration - CHANGED from 10 to 6
+MAX_CONCURRENT_REQUESTS = 5
+MAX_BATCH_SIZE = 6
 MIN_SKILLS_TO_SHOW = 5  # Minimum skills to show
 MAX_SKILLS_TO_SHOW = 8  # Maximum skills to show (5-8 range)
 
@@ -1038,13 +1064,25 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
         }
 
 def process_single_resume(args):
-    """Process a single resume with intelligent error handling and NO DELAYS for speed"""
+    """Process a single resume with intelligent error handling and rate limit protection"""
     resume_file, job_description, index, total, batch_id = args
     
     try:
         print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
         
-        # IMPORTANT: NO DELAYS - Removed all time.sleep() calls for maximum speed
+        # IMPORTANT: Add staggered delays to prevent rate limits
+        if index > 0:
+            # Progressive delays based on position
+            if index < 3:
+                base_delay = 1.0  # Increased from 0.5
+            elif index < 6:
+                base_delay = 2.0  # Increased from 1.0
+            else:
+                base_delay = 3.0  # Increased from 1.5
+            
+            delay = base_delay + random.uniform(0, 0.5)
+            print(f"⏳ Adding {delay:.1f}s delay before processing resume {index + 1}...")
+            time.sleep(delay)
         
         api_key, key_index = get_available_key(index)
         if not api_key:
@@ -1230,7 +1268,7 @@ def home():
                 <strong>⚠️ RATE LIMIT PROTECTION ACTIVE:</strong>
                 <ul>
                     <li>Max ''' + str(MAX_REQUESTS_PER_MINUTE_PER_KEY) + ''' requests/minute per key</li>
-                    <li>PARALLEL processing with 5 keys (NO DELAYS)</li>
+                    <li>Staggered delays between requests</li>
                     <li>Automatic key rotation</li>
                     <li>60s cooling on rate limits</li>
                     <li>Current usage: ''' + ', '.join(key_usage_info) + '''</li>
@@ -1245,7 +1283,7 @@ def home():
             <p><strong>Model:</strong> ''' + GROQ_MODEL + '''</p>
             <p><strong>API Provider:</strong> Groq (Parallel Processing)</p>
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
-            <p><strong>Processing:</strong> PARALLEL with 5 keys (NO DELAYS for SPEED)</p>
+            <p><strong>Processing:</strong> Rate-limited round-robin with staggered delays</p>
             <p><strong>Scoring:</strong> Granular unique scores with 1 decimal precision</p>
             <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/5</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
@@ -1387,7 +1425,7 @@ def analyze_resume():
 
 @app.route('/analyze-batch', methods=['POST'])
 def analyze_resume_batch():
-    """Analyze multiple resumes with PARALLEL processing and rate limit protection - NO DELAYS"""
+    """Analyze multiple resumes with parallel processing and rate limit protection"""
     update_activity()
     
     try:
@@ -1440,13 +1478,11 @@ def analyze_resume_batch():
         all_analyses = []
         errors = []
         
-        print(f"🔄 PARALLEL Processing {len(resume_files)} resumes with {available_keys} keys (NO DELAYS)...")
-        print(f"⚠️ RATE LIMIT PROTECTION: Max {MAX_REQUESTS_PER_MINUTE_PER_KEY} requests/minute/key")
+        print(f"🔄 Processing {len(resume_files)} resumes with {available_keys} keys...")
+        print(f"⚠️ RATE LIMIT PROTECTION: Staggered delays, max {MAX_REQUESTS_PER_MINUTE_PER_KEY} requests/minute/key")
         print(f"🎯 SCORING: Granular unique scores with 1 decimal precision")
-        print(f"⚡ SPEED MODE: All delays removed for fastest processing")
         
-        # Prepare arguments for each resume
-        args_list = []
+        # Process sequentially with delays (safer than parallel for rate limits)
         for index, resume_file in enumerate(resume_files):
             if resume_file.filename == '':
                 errors.append({
@@ -1456,25 +1492,25 @@ def analyze_resume_batch():
                 })
                 continue
             
-            args_list.append((resume_file, job_description, index, len(resume_files), batch_id))
-        
-        # Process in PARALLEL with ThreadPoolExecutor - NO DELAYS
-        if args_list:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_REQUESTS, len(args_list))) as executor:
-                # Submit all tasks
-                future_to_args = {executor.submit(process_single_resume, args): args for args in args_list}
-                
-                # Collect results as they complete
-                for future in concurrent.futures.as_completed(future_to_args):
-                    result = future.result()
-                    if result['status'] == 'success':
-                        all_analyses.append(result['analysis'])
-                    else:
-                        errors.append({
-                            'filename': result.get('filename', 'Unknown'),
-                            'error': result.get('error', 'Unknown error'),
-                            'index': result.get('index')
-                        })
+            print(f"\n🔑 Processing resume {index + 1}/{len(resume_files)}")
+            
+            args = (resume_file, job_description, index, len(resume_files), batch_id)
+            result = process_single_resume(args)
+            
+            if result['status'] == 'success':
+                all_analyses.append(result['analysis'])
+            else:
+                errors.append({
+                    'filename': result.get('filename', 'Unknown'),
+                    'error': result.get('error', 'Unknown error'),
+                    'index': result.get('index')
+                })
+            
+            # Check if any key needs cooling
+            for i in range(5):
+                if key_usage[i]['requests_this_minute'] >= MAX_REQUESTS_PER_MINUTE_PER_KEY - 2:
+                    print(f"⚠️ Key {i+1} near limit, marking for cooling")
+                    mark_key_cooling(i, 30)
         
         all_analyses.sort(key=lambda x: x.get('overall_score', 0), reverse=True)
         
@@ -1531,7 +1567,7 @@ def analyze_resume_batch():
             'ai_provider': "groq",
             'ai_status': "Warmed up" if warmup_complete else "Warming up",
             'processing_time': f"{total_time:.2f}s",
-            'processing_method': 'PARALLEL (NO DELAYS)',
+            'processing_method': 'rate_limited_sequential',
             'key_statistics': key_stats,
             'available_keys': available_keys,
             'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
@@ -1547,7 +1583,7 @@ def analyze_resume_batch():
             }
         }
         
-        print(f"✅ Batch analysis completed in {total_time:.2f}s (PARALLEL MODE)")
+        print(f"✅ Batch analysis completed in {total_time:.2f}s")
         print(f"📊 Key usage summary:")
         for stat in key_stats:
             print(f"  {stat['key']}: {stat['used']} total, {stat['requests_this_minute']}/min, {stat['errors']} errors, {stat['status']}")
@@ -2160,81 +2196,87 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             title_cell.alignment = Alignment(horizontal='center', vertical='center')
             title_cell.border = thick_border
             
-            # Report Info Section - First Row (2 columns format)
+            # Report Info Section
             ws_candidate['A3'] = "Report Date:"
             ws_candidate['B3'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ws_candidate['A3'].font = candidate_label_font
             ws_candidate['B3'].font = candidate_value_font
             
-            ws_candidate['C3'] = "AI Model:"
-            ws_candidate['D3'] = f"Groq {GROQ_MODEL}"
-            ws_candidate['C3'].font = candidate_label_font
-            ws_candidate['D3'].font = candidate_value_font
-            
-            ws_candidate['A4'] = "Rank:"
-            ws_candidate['B4'] = f"#{analysis.get('rank', 'N/A')}"
+            ws_candidate['A4'] = "AI Model:"
+            ws_candidate['B4'] = f"Groq {GROQ_MODEL}"
             ws_candidate['A4'].font = candidate_label_font
             ws_candidate['B4'].font = candidate_value_font
             
-            ws_candidate['C4'] = "File Name:"
-            ws_candidate['D4'] = analysis.get('filename', 'N/A')
-            ws_candidate['C4'].font = candidate_label_font
-            ws_candidate['D4'].font = candidate_value_font
+            ws_candidate['A5'] = "Rank:"
+            ws_candidate['B5'] = f"#{analysis.get('rank', 'N/A')}"
+            ws_candidate['A5'].font = candidate_label_font
+            ws_candidate['B5'].font = candidate_value_font
             
-            # Candidate Name Header (NEW SECTION - Column format like comparison sheet)
-            ws_candidate.merge_cells('A6:H6')
-            name_header = ws_candidate['A6']
-            name_header.value = "CANDIDATE DETAILS"
-            name_header.font = candidate_header_font
-            name_header.fill = candidate_section_fill
-            name_header.alignment = Alignment(horizontal='center')
-            name_header.border = thin_border
+            # File Name
+            ws_candidate.merge_cells('A7:H7')
+            file_header = ws_candidate['A7']
+            file_header.value = "FILE NAME"
+            file_header.font = candidate_header_font
+            file_header.fill = candidate_section_fill
+            file_header.alignment = Alignment(horizontal='center')
+            file_header.border = thin_border
             
-            # Candidate Name Row (Column format)
-            ws_candidate['A7'] = "Candidate Name:"
-            ws_candidate['A7'].font = candidate_label_font
-            ws_candidate['A7'].border = thin_border
+            ws_candidate.merge_cells('A8:H8')
+            file_cell = ws_candidate['A8']
+            file_cell.value = analysis.get('filename', 'N/A')
+            file_cell.font = candidate_value_font
+            file_cell.border = thin_border
             
-            ws_candidate.merge_cells('B7:H7')
-            ws_candidate['B7'] = analysis.get('candidate_name', 'N/A')
-            ws_candidate['B7'].font = candidate_value_font
-            ws_candidate['B7'].border = thin_border
+            # Years of Experience
+            ws_candidate.merge_cells('A10:H10')
+            exp_header = ws_candidate['A10']
+            exp_header.value = "YEARS OF EXPERIENCE"
+            exp_header.font = candidate_header_font
+            exp_header.fill = candidate_section_fill
+            exp_header.alignment = Alignment(horizontal='center')
+            exp_header.border = thin_border
             
-            # Years of Experience and ATS Score Row (Column format)
-            ws_candidate['A8'] = "Years of Experience:"
-            ws_candidate['A8'].font = candidate_label_font
-            ws_candidate['A8'].border = thin_border
+            ws_candidate.merge_cells('A11:H11')
+            exp_cell = ws_candidate['A11']
+            exp_cell.value = analysis.get('years_of_experience', 'Not specified')
+            exp_cell.font = Font(bold=True, size=12, color="4472C4")
+            exp_cell.alignment = Alignment(horizontal='center')
+            exp_cell.border = thin_border
             
-            ws_candidate['B8'] = analysis.get('years_of_experience', 'Not specified')
-            ws_candidate['B8'].font = candidate_value_font
-            ws_candidate['B8'].border = thin_border
+            # ATS Score - Now shows granular score
+            ws_candidate.merge_cells('A13:H13')
+            score_header = ws_candidate['A13']
+            score_header.value = "ATS SCORE"
+            score_header.font = candidate_header_font
+            score_header.fill = candidate_section_fill
+            score_header.alignment = Alignment(horizontal='center')
+            score_header.border = thin_border
             
-            ws_candidate['C8'] = "ATS Score:"
-            ws_candidate['C8'].font = candidate_label_font
-            ws_candidate['C8'].border = thin_border
+            ws_candidate.merge_cells('A14:H14')
+            score_cell = ws_candidate['A14']
+            score_cell.value = f"{analysis.get('overall_score', 0):.1f}/100"
+            score_cell.font = Font(bold=True, size=12, color=get_score_color(analysis.get('overall_score', 0)))
+            score_cell.alignment = Alignment(horizontal='center')
+            score_cell.border = thin_border
             
-            score = analysis.get('overall_score', 0)
-            ws_candidate['D8'] = f"{score:.1f}/100"
-            ws_candidate['D8'].font = candidate_value_font
-            ws_candidate['D8'].border = thin_border
-            if score >= 80:
-                ws_candidate['D8'].font = Font(bold=True, color="00B050", size=10)
-            elif score >= 60:
-                ws_candidate['D8'].font = Font(bold=True, color="FFC000", size=10)
-            else:
-                ws_candidate['D8'].font = Font(bold=True, color="FF0000", size=10)
+            # Recommendation
+            ws_candidate.merge_cells('A16:H16')
+            rec_header = ws_candidate['A16']
+            rec_header.value = "RECOMMENDATION"
+            rec_header.font = candidate_header_font
+            rec_header.fill = candidate_section_fill
+            rec_header.alignment = Alignment(horizontal='center')
+            rec_header.border = thin_border
             
-            ws_candidate['E8'] = "Recommendation:"
-            ws_candidate['E8'].font = candidate_label_font
-            ws_candidate['E8'].border = thin_border
+            ws_candidate.merge_cells('A17:H17')
+            rec_cell = ws_candidate['A17']
+            rec_cell.value = analysis.get('recommendation', 'N/A')
+            rec_cell.font = Font(bold=True, size=11, color=get_score_color(analysis.get('overall_score', 0)))
+            rec_cell.alignment = Alignment(horizontal='center')
+            rec_cell.border = thin_border
             
-            ws_candidate.merge_cells('F8:H8')
-            ws_candidate['F8'] = analysis.get('recommendation', 'N/A')
-            ws_candidate['F8'].font = candidate_value_font
-            ws_candidate['F8'].border = thin_border
-            
-            # Skills Matched Header
-            skills_row = 10
+            # Skills Matched (5-8 skills)
+            skills_row = 19
             ws_candidate.merge_cells(f'A{skills_row}:H{skills_row}')
             skills_header = ws_candidate[f'A{skills_row}']
             skills_header.value = "SKILLS MATCHED (5-8 skills)"
@@ -2246,16 +2288,12 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             skills_matched = analysis.get('skills_matched', [])
             for idx, skill in enumerate(skills_matched[:8]):
                 row = skills_row + idx + 1
-                ws_candidate[f'A{row}'] = f"{idx + 1}."
-                ws_candidate[f'A{row}'].font = candidate_label_font
-                ws_candidate[f'A{row}'].border = thin_border
-                
-                ws_candidate.merge_cells(f'B{row}:H{row}')
-                ws_candidate[f'B{row}'] = skill
-                ws_candidate[f'B{row}'].font = Font(size=10, color="00B050")
-                ws_candidate[f'B{row}'].border = thin_border
+                ws_candidate.merge_cells(f'A{row}:H{row}')
+                cell = ws_candidate.cell(row=row, column=1, value=f"{idx + 1}. {skill}")
+                cell.font = Font(size=10, color="00B050")
+                cell.border = thin_border
             
-            # Skills Missing Header
+            # Skills Missing (5-8 skills)
             missing_start = skills_row + len(skills_matched) + 2
             ws_candidate.merge_cells(f'A{missing_start}:H{missing_start}')
             missing_header = ws_candidate[f'A{missing_start}']
@@ -2268,20 +2306,16 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             skills_missing = analysis.get('skills_missing', [])
             for idx, skill in enumerate(skills_missing[:8]):
                 row = missing_start + idx + 1
-                ws_candidate[f'A{row}'] = f"{idx + 1}."
-                ws_candidate[f'A{row}'].font = candidate_label_font
-                ws_candidate[f'A{row}'].border = thin_border
-                
-                ws_candidate.merge_cells(f'B{row}:H{row}')
-                ws_candidate[f'B{row}'] = skill
-                ws_candidate[f'B{row}'].font = Font(size=10, color="FF0000")
-                ws_candidate[f'B{row}'].border = thin_border
+                ws_candidate.merge_cells(f'A{row}:H{row}')
+                cell = ws_candidate.cell(row=row, column=1, value=f"{idx + 1}. {skill}")
+                cell.font = Font(size=10, color="FF0000")
+                cell.border = thin_border
             
-            # Experience Summary Header
+            # Experience Summary - Now in bullet points
             exp_start = missing_start + len(skills_missing) + 2
             ws_candidate.merge_cells(f'A{exp_start}:H{exp_start}')
             exp_header = ws_candidate[f'A{exp_start}']
-            exp_header.value = "EXPERIENCE SUMMARY"
+            exp_header.value = "EXPERIENCE SUMMARY (Bullet Points)"
             exp_header.font = candidate_header_font
             exp_header.fill = candidate_section_fill
             exp_header.alignment = Alignment(horizontal='center')
@@ -2296,79 +2330,46 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             exp_cell.font = candidate_value_font
             exp_cell.alignment = Alignment(wrap_text=True, vertical='top')
             exp_cell.border = thin_border
-            ws_candidate.row_dimensions[exp_start + 1].height = 100
+            ws_candidate.row_dimensions[exp_start + 1].height = 100  # Increased height for bullet points
             
-            # Education Summary Header
-            edu_start = exp_start + 8
-            ws_candidate.merge_cells(f'A{edu_start}:H{edu_start}')
-            edu_header = ws_candidate[f'A{edu_start}']
-            edu_header.value = "EDUCATION SUMMARY"
-            edu_header.font = candidate_header_font
-            edu_header.fill = candidate_section_fill
-            edu_header.alignment = Alignment(horizontal='center')
-            edu_header.border = thin_border
+            # Key Strengths (3 items)
+            strengths_start = exp_start + 8
+            ws_candidate.merge_cells(f'A{strengths_start}:H{strengths_start}')
+            strengths_header = ws_candidate[f'A{strengths_start}']
+            strengths_header.value = "KEY STRENGTHS (3)"
+            strengths_header.font = candidate_header_font
+            strengths_header.fill = candidate_section_fill
+            strengths_header.alignment = Alignment(horizontal='center')
+            strengths_header.border = thin_border
             
-            # Convert education summary to bullet points
-            education_bullets = convert_experience_to_bullet_points(analysis.get('education_summary', ''))
-            
-            ws_candidate.merge_cells(f'A{edu_start + 1}:H{edu_start + 4}')
-            edu_cell = ws_candidate[f'A{edu_start + 1}']
-            edu_cell.value = education_bullets
-            edu_cell.font = candidate_value_font
-            edu_cell.alignment = Alignment(wrap_text=True, vertical='top')
-            edu_cell.border = thin_border
-            ws_candidate.row_dimensions[edu_start + 1].height = 80
-            
-            # Key Strengths and Areas for Improvement - Two Column Format
-            insights_start = edu_start + 6
-            
-            # Headers for two columns
-            ws_candidate[f'A{insights_start}'] = "KEY STRENGTHS (3)"
-            ws_candidate[f'A{insights_start}'].font = candidate_header_font
-            ws_candidate[f'A{insights_start}'].fill = candidate_section_fill
-            ws_candidate[f'A{insights_start}'].alignment = Alignment(horizontal='center')
-            ws_candidate[f'A{insights_start}'].border = thin_border
-            
-            ws_candidate[f'C{insights_start}'] = "AREAS FOR IMPROVEMENT (3)"
-            ws_candidate[f'C{insights_start}'].font = candidate_header_font
-            ws_candidate[f'C{insights_start}'].fill = candidate_section_fill
-            ws_candidate[f'C{insights_start}'].alignment = Alignment(horizontal='center')
-            ws_candidate[f'C{insights_start}'].border = thin_border
-            
-            # Key Strengths content (column format)
             key_strengths = analysis.get('key_strengths', [])
             for idx, strength in enumerate(key_strengths[:3]):
-                row = insights_start + idx + 1
-                ws_candidate[f'A{row}'] = f"{idx + 1}."
-                ws_candidate[f'A{row}'].font = candidate_label_font
-                ws_candidate[f'A{row}'].border = thin_border
-                
-                ws_candidate[f'B{row}'] = strength
-                ws_candidate[f'B{row}'].font = Font(size=10, color="00B050")
-                ws_candidate[f'B{row}'].border = thin_border
+                row = strengths_start + idx + 1
+                ws_candidate.merge_cells(f'A{row}:H{row}')
+                cell = ws_candidate.cell(row=row, column=1, value=f"{idx + 1}. {strength}")
+                cell.font = Font(size=10, color="00B050")
+                cell.border = thin_border
             
-            # Areas for Improvement content (column format)
+            # Areas for Improvement (3 items)
+            improve_start = strengths_start + len(key_strengths) + 2
+            ws_candidate.merge_cells(f'A{improve_start}:H{improve_start}')
+            improve_header = ws_candidate[f'A{improve_start}']
+            improve_header.value = "AREAS FOR IMPROVEMENT (3)"
+            improve_header.font = candidate_header_font
+            improve_header.fill = candidate_section_fill
+            improve_header.alignment = Alignment(horizontal='center')
+            improve_header.border = thin_border
+            
             areas_for_improvement = analysis.get('areas_for_improvement', [])
             for idx, area in enumerate(areas_for_improvement[:3]):
-                row = insights_start + idx + 1
-                ws_candidate[f'C{row}'] = f"{idx + 1}."
-                ws_candidate[f'C{row}'].font = candidate_label_font
-                ws_candidate[f'C{row}'].border = thin_border
-                
-                ws_candidate.merge_cells(f'D{row}:H{row}')
-                ws_candidate[f'D{row}'] = area
-                ws_candidate[f'D{row}'].font = Font(size=10, color="FF6600")
-                ws_candidate[f'D{row}'].border = thin_border
+                row = improve_start + idx + 1
+                ws_candidate.merge_cells(f'A{row}:H{row}')
+                cell = ws_candidate.cell(row=row, column=1, value=f"{idx + 1}. {area}")
+                cell.font = Font(size=10, color="FF6600")
+                cell.border = thin_border
             
             # Set column widths
-            ws_candidate.column_dimensions['A'].width = 25
-            ws_candidate.column_dimensions['B'].width = 30
-            ws_candidate.column_dimensions['C'].width = 25
-            ws_candidate.column_dimensions['D'].width = 30
-            ws_candidate.column_dimensions['E'].width = 20
-            ws_candidate.column_dimensions['F'].width = 20
-            ws_candidate.column_dimensions['G'].width = 20
-            ws_candidate.column_dimensions['H'].width = 20
+            ws_candidate.column_dimensions['A'].width = 60
         
         # Save the file
         filepath = os.path.join(REPORTS_FOLDER, filename)
@@ -2616,7 +2617,7 @@ def quick_check():
                             'available_keys': available_keys,
                             'tested_key': f"Key {i+1}",
                             'max_batch_size': MAX_BATCH_SIZE,
-                            'processing_method': 'PARALLEL (NO DELAYS)',
+                            'processing_method': 'rate_limited_sequential',
                             'skills_analysis': '5-8 skills per category',
                             'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
                             'scoring_method': 'Granular unique scores (1 decimal)'
@@ -2660,7 +2661,7 @@ def ping():
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
         'keep_alive_active': True,
         'max_batch_size': MAX_BATCH_SIZE,
-        'processing_method': 'PARALLEL (NO DELAYS)',
+        'processing_method': 'rate_limited_sequential',
         'skills_analysis': '5-8 skills per category',
         'years_experience': 'Included in analysis',
         'scoring_method': 'Granular unique scores (1 decimal precision)',
@@ -2722,8 +2723,8 @@ def health_check():
             'max_skills_to_show': MAX_SKILLS_TO_SHOW,
             'years_experience_analysis': True
         },
-        'processing_method': 'PARALLEL (NO DELAYS)',
-        'performance_target': '10 resumes in 10-15 seconds (FASTEST MODE)',
+        'processing_method': 'rate_limited_sequential',
+        'performance_target': '6 resumes in 20-30 seconds (safer)',
         'skills_analysis': '5-8 skills per category',
         'summaries': 'Complete 4-5 sentences each',
         'years_experience': 'Included in analysis',
@@ -2736,7 +2737,7 @@ def health_check():
             'range': '0-100 with weighted factors',
             'weighting': 'Skills (40%), Experience (30%), Education (20%), Years (10%)'
         },
-        'rate_limit_protection': 'ACTIVE - Minute tracking, automatic cooling, PARALLEL processing',
+        'rate_limit_protection': 'ACTIVE - Staggered delays, minute tracking, automatic cooling',
         'always_awake': True
     })
 
@@ -2790,10 +2791,10 @@ if __name__ == '__main__':
     print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
     print(f"⚠️ RATE LIMIT PROTECTION: ACTIVE")
     print(f"📊 Max requests/minute/key: {MAX_REQUESTS_PER_MINUTE_PER_KEY}")
-    print(f"⚡ SPEED MODE: PARALLEL processing (NO DELAYS)")
+    print(f"⏳ Staggered delays: 1-3 seconds between requests")
     print(f"🔀 Key rotation: Smart load balancing (5 keys)")
     print(f"🛡️ Cooling: 60s on rate limits")
-    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes (CHANGED from 6 to 10)")
+    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes (CHANGED from 10 to 6)")
     print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
     print(f"✅ Years of Experience: Included in analysis")
     print(f"🎯 ENHANCED SCORING: Granular unique scores (1 decimal place)")
@@ -2803,8 +2804,8 @@ if __name__ == '__main__':
     print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
     print(f"✅ Insights: 3 strengths & 3 improvements")
     print(f"✅ Resume Preview: Enabled with PDF conversion")
-    print(f"⚡ Performance: ~10 resumes in 10-15 seconds (FASTEST MODE)")
-    print(f"✅ Excel Reports: Single & Batch with Individual Sheets (Column format)")
+    print(f"⚠️ Performance: ~6 resumes in 20-30 seconds (SAFER for rate limits)")
+    print(f"✅ Excel Reports: Single & Batch with Individual Sheets")
     print(f"✅ Always Awake: Backend will stay active with self-pinging")
     print("="*50 + "\n")
     
