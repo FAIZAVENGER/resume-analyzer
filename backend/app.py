@@ -28,20 +28,29 @@ import tempfile
 import shutil
 from pathlib import Path
 
-# Load environment variables
-load_dotenv()
+# Load environment variables with explicit path
+dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path)
+    print(f"✅ Loaded .env file from: {dotenv_path}")
+else:
+    load_dotenv()  # Try default location
+    print("⚠️ No .env file found, using environment variables")
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Configure Groq API Keys (5 keys for parallel processing)
+# Configure Groq API Keys (5 keys for parallel processing) - FIXED: Better key loading
 GROQ_API_KEYS = [
-    os.getenv('GROQ_API_KEY_1'),
-    os.getenv('GROQ_API_KEY_2'),
-    os.getenv('GROQ_API_KEY_3'),
-    os.getenv('GROQ_API_KEY_4'),
-    os.getenv('GROQ_API_KEY_5')
+    os.getenv('GROQ_API_KEY_1', '').strip(),
+    os.getenv('GROQ_API_KEY_2', '').strip(),
+    os.getenv('GROQ_API_KEY_3', '').strip(),
+    os.getenv('GROQ_API_KEY_4', '').strip(),
+    os.getenv('GROQ_API_KEY_5', '').strip()
 ]
+
+# Filter out empty keys
+GROQ_API_KEYS = [key if key else None for key in GROQ_API_KEYS]
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
@@ -99,10 +108,20 @@ resume_storage = {}
 used_scores = set()
 score_lock = threading.Lock()
 
+# NEW: Keep-alive tracking
+last_ping_time = datetime.now()
+ping_lock = threading.Lock()
+
 def update_activity():
     """Update last activity timestamp"""
     global last_activity_time
     last_activity_time = datetime.now()
+
+def update_ping():
+    """Update last ping timestamp"""
+    global last_ping_time
+    with ping_lock:
+        last_ping_time = datetime.now()
 
 def get_available_key(resume_index=None):
     """Get the next available Groq API key using improved round-robin with rate limit checking"""
@@ -667,27 +686,120 @@ def keep_service_warm():
             print(f"⚠️ Keep-warm thread error: {str(e)}")
             time.sleep(180)
 
+# FIXED: Enhanced keep_backend_awake function with more frequent pings
 def keep_backend_awake():
-    """Keep backend always active"""
+    """Keep backend always active with more frequent pings"""
+    global service_running
+    
     while service_running:
         try:
-            time.sleep(60)  # Ping every 60 seconds
+            time.sleep(30)  # Ping every 30 seconds (more frequent)
             
+            # Try to self-ping to keep the service awake
             try:
-                # Self-ping to keep the service awake
-                requests.get(f"http://localhost:{PORT}/ping", timeout=10)
-                print(f"✅ Self-ping successful to keep backend awake")
-            except:
+                # Get the port from environment or use default
+                port = int(os.environ.get('PORT', 5002))
+                response = requests.get(f"http://localhost:{port}/ping", timeout=5)
+                if response.status_code == 200:
+                    update_ping()
+                    print(f"✅ Self-ping successful - {datetime.now().strftime('%H:%M:%S')}")
+                else:
+                    print(f"⚠️ Self-ping returned status {response.status_code}")
+            except Exception as e:
                 # If self-ping fails, try health check
                 try:
-                    response = requests.get(f"http://localhost:{PORT}/health", timeout=10)
-                    print(f"✅ Health check successful")
-                except Exception as e:
-                    print(f"⚠️ Keep-alive check failed: {e}")
+                    port = int(os.environ.get('PORT', 5002))
+                    response = requests.get(f"http://localhost:{port}/health", timeout=5)
+                    if response.status_code == 200:
+                        update_ping()
+                        print(f"✅ Health check successful - {datetime.now().strftime('%H:%M:%S')}")
+                except Exception as e2:
+                    print(f"⚠️ Keep-alive check failed: {e2}")
                     
         except Exception as e:
             print(f"⚠️ Keep-backend-awake thread error: {str(e)}")
-            time.sleep(60)
+            time.sleep(30)
+
+# NEW: Function to initialize service on startup
+def initialize_service():
+    """Initialize service on startup"""
+    global warmup_complete, service_running
+    
+    print("\n" + "="*50)
+    print("🚀 Resume Analyzer Backend Starting (Groq Parallel)...")
+    print("="*50)
+    
+    available_keys = sum(1 for key in GROQ_API_KEYS if key)
+    print(f"🔑 API Keys: {available_keys}/5 configured")
+    
+    for i, key in enumerate(GROQ_API_KEYS):
+        if key:
+            # Mask the key for display
+            masked_key = key[:8] + "..." + key[-4:] if len(key) > 12 else "Configured"
+            status = f"✅ {masked_key}"
+        else:
+            status = "❌ Not configured"
+        print(f"  Key {i+1}: {status}")
+    
+    print(f"📁 Upload folder: {UPLOAD_FOLDER}")
+    print(f"📁 Reports folder: {REPORTS_FOLDER}")
+    print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
+    print(f"⚠️ RATE LIMIT PROTECTION: ACTIVE")
+    print(f"📊 Max requests/minute/key: {MAX_REQUESTS_PER_MINUTE_PER_KEY}")
+    print(f"⚡ SPEED MODE: PARALLEL processing")
+    print(f"🔀 Key rotation: Smart load balancing (5 keys)")
+    print(f"🛡️ Cooling: 60s on rate limits")
+    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes")
+    print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
+    print(f"✅ Years of Experience: Included in analysis")
+    print(f"🎯 ENHANCED SCORING: Granular unique scores (1 decimal place)")
+    print(f"🎯 Scoring Method: Weighted (Skills 40%, Experience 30%, Education 20%, Years 10%)")
+    print(f"🎯 Unique Scores: Each candidate gets distinct score")
+    print(f"✅ Excel Report: Candidate name column added + Experience summary in bullet points")
+    print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
+    print(f"✅ Insights: 3 strengths & 3 improvements")
+    print(f"✅ Resume Preview: Enabled with PDF conversion")
+    print(f"⚡ Performance: ~10 resumes in 10-15 seconds")
+    print(f"✅ Excel Reports: Single & Batch with Individual Sheets in Columnar Format")
+    print(f"✅ Always Awake: Backend will stay active with self-pinging every 30 seconds")
+    print("="*50 + "\n")
+    
+    # Check for required dependencies
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+        print("✅ PDF generation library available")
+    except ImportError:
+        print("⚠️  Warning: reportlab not installed. Install with: pip install reportlab")
+        print("   PDF previews for non-PDF files will be limited")
+    
+    if available_keys == 0:
+        print("⚠️  WARNING: No Groq API keys found!")
+        print("Please set GROQ_API_KEY_1 through GROQ_API_KEY_5 in environment variables")
+        print("Get free API keys from: https://console.groq.com")
+    
+    gc.enable()
+    
+    if available_keys > 0:
+        # Start warmup in a separate thread
+        warmup_thread = threading.Thread(target=warmup_groq_service, daemon=True)
+        warmup_thread.start()
+        
+        # Start keep-warm thread
+        keep_warm_thread = threading.Thread(target=keep_service_warm, daemon=True)
+        keep_warm_thread.start()
+        
+        # Start keep-backend-awake thread with more frequent pings
+        keep_awake_thread = threading.Thread(target=keep_backend_awake, daemon=True)
+        keep_awake_thread.start()
+        
+        # Start cleanup thread
+        cleanup_thread = threading.Thread(target=periodic_cleanup, daemon=True)
+        cleanup_thread.start()
+        
+        print("✅ Background threads started")
+    else:
+        print("⚠️ No API keys found. Starting in limited mode.")
 
 # Text extraction functions
 def extract_text_from_pdf(file_path):
@@ -1064,13 +1176,11 @@ def generate_fallback_analysis(filename, reason, partial_success=False):
         }
 
 def process_single_resume(args):
-    """Process a single resume with intelligent error handling and NO DELAYS for speed"""
+    """Process a single resume with intelligent error handling"""
     resume_file, job_description, index, total, batch_id = args
     
     try:
         print(f"📄 Processing resume {index + 1}/{total}: {resume_file.filename}")
-        
-        # IMPORTANT: NO DELAYS - Removed all time.sleep() calls for maximum speed
         
         api_key, key_index = get_available_key(index)
         if not api_key:
@@ -1256,7 +1366,7 @@ def home():
                 <strong>⚠️ RATE LIMIT PROTECTION ACTIVE:</strong>
                 <ul>
                     <li>Max ''' + str(MAX_REQUESTS_PER_MINUTE_PER_KEY) + ''' requests/minute per key</li>
-                    <li>PARALLEL processing with 5 keys (NO DELAYS)</li>
+                    <li>PARALLEL processing with 5 keys</li>
                     <li>Automatic key rotation</li>
                     <li>60s cooling on rate limits</li>
                     <li>Current usage: ''' + ', '.join(key_usage_info) + '''</li>
@@ -1271,10 +1381,11 @@ def home():
             <p><strong>Model:</strong> ''' + GROQ_MODEL + '''</p>
             <p><strong>API Provider:</strong> Groq (Parallel Processing)</p>
             <p><strong>Max Batch Size:</strong> ''' + str(MAX_BATCH_SIZE) + ''' resumes</p>
-            <p><strong>Processing:</strong> PARALLEL with 5 keys (NO DELAYS for SPEED)</p>
+            <p><strong>Processing:</strong> PARALLEL with 5 keys</p>
             <p><strong>Scoring:</strong> Granular unique scores with 1 decimal precision</p>
             <p><strong>Available Keys:</strong> ''' + str(available_keys) + '''/5</p>
             <p><strong>Last Activity:</strong> ''' + str(inactive_minutes) + ''' minutes ago</p>
+            <p><strong>Keep-Alive:</strong> Active (ping every 30 seconds)</p>
             
             <h2>📡 Endpoints</h2>
             <div class="endpoint">
@@ -1344,9 +1455,6 @@ def analyze_resume():
             print(f"❌ File too large: {file_size} bytes")
             return jsonify({'error': 'File size too large. Maximum size is 15MB.'}), 400
         
-        # Add small delay even for single requests
-        time.sleep(0.5 + random.uniform(0, 0.3))
-        
         api_key, key_index = get_available_key()
         if not api_key:
             return jsonify({'error': 'No available Groq API key'}), 500
@@ -1413,7 +1521,7 @@ def analyze_resume():
 
 @app.route('/analyze-batch', methods=['POST'])
 def analyze_resume_batch():
-    """Analyze multiple resumes with PARALLEL processing and rate limit protection - NO DELAYS"""
+    """Analyze multiple resumes with PARALLEL processing and rate limit protection"""
     update_activity()
     
     try:
@@ -1466,10 +1574,9 @@ def analyze_resume_batch():
         all_analyses = []
         errors = []
         
-        print(f"🔄 PARALLEL Processing {len(resume_files)} resumes with {available_keys} keys (NO DELAYS)...")
+        print(f"🔄 PARALLEL Processing {len(resume_files)} resumes with {available_keys} keys...")
         print(f"⚠️ RATE LIMIT PROTECTION: Max {MAX_REQUESTS_PER_MINUTE_PER_KEY} requests/minute/key")
         print(f"🎯 SCORING: Granular unique scores with 1 decimal precision")
-        print(f"⚡ SPEED MODE: All delays removed for fastest processing")
         
         # Prepare arguments for each resume
         args_list = []
@@ -1484,7 +1591,7 @@ def analyze_resume_batch():
             
             args_list.append((resume_file, job_description, index, len(resume_files), batch_id))
         
-        # Process in PARALLEL with ThreadPoolExecutor - NO DELAYS
+        # Process in PARALLEL with ThreadPoolExecutor
         if args_list:
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_REQUESTS, len(args_list))) as executor:
                 # Submit all tasks
@@ -1557,7 +1664,7 @@ def analyze_resume_batch():
             'ai_provider': "groq",
             'ai_status': "Warmed up" if warmup_complete else "Warming up",
             'processing_time': f"{total_time:.2f}s",
-            'processing_method': 'PARALLEL (NO DELAYS)',
+            'processing_method': 'PARALLEL',
             'key_statistics': key_stats,
             'available_keys': available_keys,
             'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
@@ -2159,7 +2266,7 @@ def create_comprehensive_batch_report(analyses, job_description, filename="batch
             ws_comparison.cell(row=summary_row, column=2 + i*2, value=value).font = bold_font
             ws_comparison.cell(row=summary_row, column=2 + i*2).alignment = Alignment(horizontal='center')
         
-        # ================== INDIVIDUAL CANDIDATE SHEETS - FIXED TO COLUMNAR FORMAT ==================
+        # ================== INDIVIDUAL CANDIDATE SHEETS ==================
         for analysis in analyses:
             candidate_name = analysis.get('candidate_name', f"Candidate_{analysis.get('rank', 'Unknown')}")
             # Clean sheet name (remove invalid characters)
@@ -2567,7 +2674,7 @@ def quick_check():
                             'available_keys': available_keys,
                             'tested_key': f"Key {i+1}",
                             'max_batch_size': MAX_BATCH_SIZE,
-                            'processing_method': 'PARALLEL (NO DELAYS)',
+                            'processing_method': 'PARALLEL',
                             'skills_analysis': '5-8 skills per category',
                             'rate_limit_protection': f"Active (max {MAX_REQUESTS_PER_MINUTE_PER_KEY}/min/key)",
                             'scoring_method': 'Granular unique scores (1 decimal)'
@@ -2597,6 +2704,7 @@ def quick_check():
 def ping():
     """Simple ping to keep service awake"""
     update_activity()
+    update_ping()
     
     available_keys = sum(1 for key in GROQ_API_KEYS if key)
     
@@ -2610,8 +2718,9 @@ def ping():
         'available_keys': available_keys,
         'inactive_minutes': int((datetime.now() - last_activity_time).total_seconds() / 60),
         'keep_alive_active': True,
+        'last_ping': last_ping_time.isoformat() if last_ping_time else None,
         'max_batch_size': MAX_BATCH_SIZE,
-        'processing_method': 'PARALLEL (NO DELAYS)',
+        'processing_method': 'PARALLEL',
         'skills_analysis': '5-8 skills per category',
         'years_experience': 'Included in analysis',
         'scoring_method': 'Granular unique scores (1 decimal precision)',
@@ -2673,8 +2782,8 @@ def health_check():
             'max_skills_to_show': MAX_SKILLS_TO_SHOW,
             'years_experience_analysis': True
         },
-        'processing_method': 'PARALLEL (NO DELAYS)',
-        'performance_target': '10 resumes in 10-15 seconds (FASTEST MODE)',
+        'processing_method': 'PARALLEL',
+        'performance_target': f'{MAX_BATCH_SIZE} resumes in 10-15 seconds',
         'skills_analysis': '5-8 skills per category',
         'summaries': 'Complete 4-5 sentences each',
         'years_experience': 'Included in analysis',
@@ -2688,7 +2797,8 @@ def health_check():
             'weighting': 'Skills (40%), Experience (30%), Education (20%), Years (10%)'
         },
         'rate_limit_protection': 'ACTIVE - Minute tracking, automatic cooling, PARALLEL processing',
-        'always_awake': True
+        'always_awake': True,
+        'last_ping': last_ping_time.isoformat() if last_ping_time else None
     })
 
 def cleanup_on_exit():
@@ -2721,75 +2831,11 @@ def periodic_cleanup():
 atexit.register(cleanup_on_exit)
 
 if __name__ == '__main__':
-    print("\n" + "="*50)
-    print("🚀 Resume Analyzer Backend Starting (Groq Parallel)...")
-    print("="*50)
+    # Initialize service
+    initialize_service()
+    
     PORT = int(os.environ.get('PORT', 5002))
-    print(f"📍 Server: http://localhost:{PORT}")
-    print(f"⚡ AI Provider: Groq (Parallel Processing)")
-    print(f"🤖 Model: {GROQ_MODEL}")
-    
-    available_keys = sum(1 for key in GROQ_API_KEYS if key)
-    print(f"🔑 API Keys: {available_keys}/5 configured")
-    
-    for i, key in enumerate(GROQ_API_KEYS):
-        status = "✅ Configured" if key else "❌ Not configured"
-        print(f"  Key {i+1}: {status}")
-    
-    print(f"📁 Upload folder: {UPLOAD_FOLDER}")
-    print(f"📁 Reports folder: {REPORTS_FOLDER}")
-    print(f"📁 Resume Previews folder: {RESUME_PREVIEW_FOLDER}")
-    print(f"⚠️ RATE LIMIT PROTECTION: ACTIVE")
-    print(f"📊 Max requests/minute/key: {MAX_REQUESTS_PER_MINUTE_PER_KEY}")
-    print(f"⚡ SPEED MODE: PARALLEL processing (NO DELAYS)")
-    print(f"🔀 Key rotation: Smart load balancing (5 keys)")
-    print(f"🛡️ Cooling: 60s on rate limits")
-    print(f"✅ Max Batch Size: {MAX_BATCH_SIZE} resumes (CHANGED from 6 to 10)")
-    print(f"✅ Skills Analysis: {MIN_SKILLS_TO_SHOW}-{MAX_SKILLS_TO_SHOW} skills per category")
-    print(f"✅ Years of Experience: Included in analysis")
-    print(f"🎯 ENHANCED SCORING: Granular unique scores (1 decimal place)")
-    print(f"🎯 Scoring Method: Weighted (Skills 40%, Experience 30%, Education 20%, Years 10%)")
-    print(f"🎯 Unique Scores: Each candidate gets distinct score")
-    print(f"✅ Excel Report: Candidate name column added + Experience summary in bullet points")
-    print(f"✅ Complete Summaries: 4-5 sentences each (no truncation)")
-    print(f"✅ Insights: 3 strengths & 3 improvements")
-    print(f"✅ Resume Preview: Enabled with PDF conversion")
-    print(f"⚡ Performance: ~10 resumes in 10-15 seconds (FASTEST MODE)")
-    print(f"✅ Excel Reports: Single & Batch with Individual Sheets in Columnar Format")
-    print(f"✅ Always Awake: Backend will stay active with self-pinging")
-    print("="*50 + "\n")
-    
-    # Check for required dependencies
-    try:
-        from reportlab.lib.pagesizes import letter
-        from reportlab.pdfgen import canvas
-        print("✅ PDF generation library available")
-    except ImportError:
-        print("⚠️  Warning: reportlab not installed. Install with: pip install reportlab")
-        print("   PDF previews for non-PDF files will be limited")
-    
-    if available_keys == 0:
-        print("⚠️  WARNING: No Groq API keys found!")
-        print("Please set GROQ_API_KEY_1 through GROQ_API_KEY_5 in environment variables")
-        print("Get free API keys from: https://console.groq.com")
-    
-    gc.enable()
-    
-    if available_keys > 0:
-        warmup_thread = threading.Thread(target=warmup_groq_service, daemon=True)
-        warmup_thread.start()
-        
-        keep_warm_thread = threading.Thread(target=keep_service_warm, daemon=True)
-        keep_warm_thread.start()
-        
-        # Start keep-backend-awake thread
-        keep_awake_thread = threading.Thread(target=keep_backend_awake, daemon=True)
-        keep_awake_thread.start()
-        
-        cleanup_thread = threading.Thread(target=periodic_cleanup, daemon=True)
-        cleanup_thread.start()
-        
-        print("✅ Background threads started")
-    
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('1', 'true', 'yes')
+    
+    # Use threaded=True for better concurrency
     app.run(host='0.0.0.0', port=PORT, debug=debug_mode, threaded=True)
